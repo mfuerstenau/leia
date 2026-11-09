@@ -82,8 +82,7 @@ final class RuntimeStoredFields {
             assertThat(second.fields()).isEqualTo(first.fields());
             assertThat(second.cachedSegments()).isEqualTo(second.segments());
         }
-        try (RealBackend backend =
-                RealBackend.start(Optional.of(RealBackend.testFile("leia.test.runtimes")), List.of())) {
+        try (RealBackend backend = RealBackend.start(RealBackend.testFile("leia.test.runtimes"), List.of())) {
             backend.call(Methods.OPEN_INDEX, new OpenIndexParams(path.toString()));
             assertThat(backend.storedFields(false).cachedSegments()).isZero();
         }

@@ -13,11 +13,13 @@ import java.io.Reader;
 import java.io.StringReader;
 import java.io.UncheckedIOException;
 import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Function;
@@ -122,8 +124,8 @@ public final class Analyzers {
     /** The analyzer in Lucene's shingle wrapper, then in its token limit (ADR 0023). */
     private static Analyzer wrapped(AnalyzerSpec.Wrapped spec) throws InvalidAnalyzerException {
         // Checked first, so that nothing is built for nothing.
-        if (spec.shingles().isPresent()) {
-            Shingles shingles = spec.shingles().orElseThrow();
+        if (spec.shingles() != null) {
+            Shingles shingles = spec.shingles();
             if (shingles.minShingleSize() < 2) {
                 throw new InvalidAnalyzerException(
                         "shingles: the minimum size must be at least 2, not " + shingles.minShingleSize(), null);
@@ -135,18 +137,17 @@ public final class Analyzers {
                         null);
             }
         }
-        if (spec.limitTokenCount().isPresent()
-                && spec.limitTokenCount().orElseThrow().maxTokenCount() < 1) {
+        if (spec.limitTokenCount() != null && spec.limitTokenCount().maxTokenCount() < 1) {
             throw new InvalidAnalyzerException(
                     "token limit: the maximum token count must be at least 1, not "
-                            + spec.limitTokenCount().orElseThrow().maxTokenCount(),
+                            + spec.limitTokenCount().maxTokenCount(),
                     null);
         }
         Analyzer base = build(spec.analyzer());
         List<Analyzer> wrappers = new ArrayList<>(2);
         Analyzer wrapped = base;
-        if (spec.shingles().isPresent()) {
-            Shingles shingles = spec.shingles().orElseThrow();
+        if (spec.shingles() != null) {
+            Shingles shingles = spec.shingles();
             wrapped = new ShingleAnalyzerWrapper(
                     wrapped,
                     shingles.minShingleSize(),
@@ -157,8 +158,8 @@ public final class Analyzers {
                     shingles.fillerToken());
             wrappers.add(wrapped);
         }
-        if (spec.limitTokenCount().isPresent()) {
-            LimitTokenCount limit = spec.limitTokenCount().orElseThrow();
+        if (spec.limitTokenCount() != null) {
+            LimitTokenCount limit = spec.limitTokenCount();
             wrapped = new LimitTokenCountAnalyzer(wrapped, limit.maxTokenCount(), limit.consumeAllTokens());
             wrappers.add(wrapped);
         }
@@ -262,9 +263,8 @@ public final class Analyzers {
     private static CustomAnalyzer.Builder builder(AnalyzerSpec.Custom spec) throws InvalidAnalyzerException {
         ResourceLoader classpath = new ClasspathResourceLoader(ExtensionJars.classLoader());
         try {
-            return CustomAnalyzer.builder(spec.configDir()
-                    .<ResourceLoader>map(dir -> new FilesystemResourceLoader(dir, classpath))
-                    .orElse(classpath));
+            Path dir = spec.configDir();
+            return CustomAnalyzer.builder(dir != null ? new FilesystemResourceLoader(dir, classpath) : classpath);
         } catch (IllegalArgumentException e) {
             throw new InvalidAnalyzerException("config directory: " + e.getMessage(), e);
         }
@@ -295,7 +295,8 @@ public final class Analyzers {
     }
 
     private static String message(Exception e) {
-        Throwable cause = e instanceof UncheckedIOException unchecked ? unchecked.getCause() : e;
+        Throwable cause =
+                e instanceof UncheckedIOException unchecked ? Objects.requireNonNull(unchecked.getCause()) : e;
         if (cause.getMessage() == null) {
             return cause.getClass().getSimpleName();
         }

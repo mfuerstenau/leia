@@ -12,7 +12,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.function.Predicate;
@@ -49,6 +49,7 @@ import org.apache.lucene.search.TopScoreDocCollectorManager;
 import org.apache.lucene.search.similarities.Similarity;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.FixedBitSet;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Runs searches and explains them, cooperatively cancellable (ADR 0010). Each call searches with a
@@ -70,12 +71,12 @@ final class Searcher {
             List<DirectoryReader> directoryReaders,
             Query query,
             Similarity similarity,
-            Optional<Sort> sort,
+            @Nullable Sort sort,
             int offset,
             int limit,
             boolean exactTotalHits,
-            Optional<Set<String>> fields,
-            Optional<HighlightSpec> highlight,
+            @Nullable Set<String> fields,
+            @Nullable HighlightSpec highlight,
             ScanProgress progress)
             throws IOException, InvalidQueryException {
         Cancellation cancellation = new Cancellation(progress);
@@ -84,20 +85,19 @@ final class Searcher {
         try {
             cancellation.searched(0);
             Query built = built(searcher, query);
-            Optional<List<LikeTerm>> likeTerms = Optional.empty();
+            List<LikeTerm> likeTerms = null;
             if (query instanceof MoreLikeQuery like) {
                 // Explained before the rewrite merges a lone clause or drops a ^1.0.
-                likeTerms = Optional.of(
-                        LikeTerms.of(searcher.getIndexReader(), like, built, () -> cancellation.searched(0)));
+                likeTerms = LikeTerms.of(searcher.getIndexReader(), like, built, () -> cancellation.searched(0));
             }
             Query rewritten = searcher.rewrite(built);
             int numHits = offset + limit;
             int threshold = exactTotalHits ? Integer.MAX_VALUE : TOTAL_HITS_THRESHOLD;
-            TopDocs top = sort.isPresent()
+            TopDocs top = sort != null
                     ? searcher.search(
                             rewritten,
                             new ProgressCollectorManager<>(
-                                    new TopFieldCollectorManager(sort.get(), numHits, null, threshold), cancellation))
+                                    new TopFieldCollectorManager(sort, numHits, null, threshold), cancellation))
                     : searcher.search(
                             rewritten,
                             new ProgressCollectorManager<>(
@@ -105,22 +105,26 @@ final class Searcher {
             cancellation.check();
             ScoreDoc[] page =
                     Arrays.copyOfRange(top.scoreDocs, Math.min(offset, top.scoreDocs.length), top.scoreDocs.length);
-            if (sort.isPresent()) {
+            if (sort != null) {
                 // A field sort leaves the scores out; the page's hits get theirs in one more pass.
                 TopFieldCollector.populateScores(page, searcher, rewritten);
                 cancellation.check();
             }
             Duration took = Duration.ofNanos(System.nanoTime() - start);
             // The built query is highlighted: the highlighter handles multi-term queries itself.
-            List<Hit> hits =
-                    hits(reader, page, sort, fields, highlight.map(spec -> new Highlighting(searcher, built, spec)));
+            List<Hit> hits = hits(
+                    reader,
+                    page,
+                    sort,
+                    fields,
+                    highlight != null ? new Highlighting(searcher, built, highlight) : null);
             cancellation.check();
             cancellation.searched(reader.maxDoc());
             return new SearchResults(query.toString(), rewritten.toString(), top.totalHits, hits, took, likeTerms);
         } catch (ExitableDirectoryReader.ExitingReaderException e) {
             throw cancellation.stopped(e);
         } catch (IndexSearcher.TooManyClauses e) {
-            throw new InvalidQueryException(e.getMessage(), e);
+            throw new InvalidQueryException(Objects.requireNonNullElse(e.getMessage(), "too many clauses"), e);
         }
     }
 
@@ -159,7 +163,7 @@ final class Searcher {
         } catch (ExitableDirectoryReader.ExitingReaderException e) {
             throw cancellation.stopped(e);
         } catch (IndexSearcher.TooManyClauses e) {
-            throw new InvalidQueryException(e.getMessage(), e);
+            throw new InvalidQueryException(Objects.requireNonNullElse(e.getMessage(), "too many clauses"), e);
         }
     }
 
@@ -179,7 +183,7 @@ final class Searcher {
         } catch (ExitableDirectoryReader.ExitingReaderException e) {
             throw cancellation.stopped(e);
         } catch (IndexSearcher.TooManyClauses e) {
-            throw new InvalidQueryException(e.getMessage(), e);
+            throw new InvalidQueryException(Objects.requireNonNullElse(e.getMessage(), "too many clauses"), e);
         }
     }
 
@@ -195,7 +199,7 @@ final class Searcher {
             Query query,
             HighlightSpec spec,
             int docId,
-            Optional<String> field,
+            @Nullable String field,
             int maxSpans,
             ScanProgress progress)
             throws IOException, InvalidQueryException {
@@ -203,8 +207,8 @@ final class Searcher {
         IndexSearcher searcher = searcher(directoryReaders, IndexSearcher.getDefaultSimilarity(), cancellation);
         try {
             Query built = built(searcher, query);
-            DocumentReader.StoredValues stored = new DocumentReader.StoredValues(
-                    name -> field.map(name::equals).orElse(true));
+            DocumentReader.StoredValues stored =
+                    new DocumentReader.StoredValues(name -> field == null || field.equals(name));
             reader.storedFields().document(docId, stored);
             DocumentHighlight highlight =
                     Highlights.document(Highlights.lucene(searcher, built, spec), docId, stored.values, maxSpans);
@@ -213,7 +217,7 @@ final class Searcher {
         } catch (ExitableDirectoryReader.ExitingReaderException e) {
             throw cancellation.stopped(e);
         } catch (IndexSearcher.TooManyClauses e) {
-            throw new InvalidQueryException(e.getMessage(), e);
+            throw new InvalidQueryException(Objects.requireNonNullElse(e.getMessage(), "too many clauses"), e);
         }
     }
 
@@ -266,13 +270,13 @@ final class Searcher {
     private static List<Hit> hits(
             IndexReader reader,
             ScoreDoc[] page,
-            Optional<Sort> sort,
-            Optional<Set<String>> fields,
-            Optional<Highlighting> highlighting)
+            @Nullable Sort sort,
+            @Nullable Set<String> fields,
+            @Nullable Highlighting highlighting)
             throws IOException {
         StoredFields storedFields = reader.storedFields();
-        Predicate<String> wanted = fields.isPresent() ? fields.get()::contains : _ -> true;
-        SortField[] sortFields = sort.map(Sort::getSort).orElse(new SortField[0]);
+        Predicate<String> wanted = fields != null ? fields::contains : _ -> true;
+        SortField[] sortFields = sort != null ? sort.getSort() : new SortField[0];
         List<Map<String, List<IndexDocument.StoredValue>>> stored = new ArrayList<>(page.length);
         for (ScoreDoc scoreDoc : page) {
             DocumentReader.StoredValues values = new DocumentReader.StoredValues(wanted);
@@ -280,13 +284,12 @@ final class Searcher {
             stored.add(values.values);
         }
         List<List<FieldHighlight>> highlights = List.of();
-        if (highlighting.isPresent()) {
+        if (highlighting != null) {
             int[] docIds =
                     Arrays.stream(page).mapToInt(scoreDoc -> scoreDoc.doc).toArray();
-            Highlighting given = highlighting.get();
             highlights = Highlights.passages(
-                    Highlights.lucene(given.searcher(), given.query(), given.spec()),
-                    given.spec().maxPassages(),
+                    Highlights.lucene(highlighting.searcher(), highlighting.query(), highlighting.spec()),
+                    highlighting.spec().maxPassages(),
                     docIds,
                     stored);
         }
@@ -335,7 +338,7 @@ final class Searcher {
 
         private final ScanProgress progress;
         private long searched;
-        private CancellationException cancelled;
+        private @Nullable CancellationException cancelled;
 
         Cancellation(ScanProgress progress) {
             this.progress = progress;
@@ -475,7 +478,7 @@ final class Searcher {
         }
 
         @Override
-        public CacheHelper getReaderCacheHelper() {
+        public @Nullable CacheHelper getReaderCacheHelper() {
             return null;
         }
     }
@@ -487,7 +490,7 @@ final class Searcher {
         }
 
         @Override
-        public Bits getLiveDocs() {
+        public @Nullable Bits getLiveDocs() {
             return null;
         }
 
@@ -497,12 +500,12 @@ final class Searcher {
         }
 
         @Override
-        public CacheHelper getCoreCacheHelper() {
+        public @Nullable CacheHelper getCoreCacheHelper() {
             return null;
         }
 
         @Override
-        public CacheHelper getReaderCacheHelper() {
+        public @Nullable CacheHelper getReaderCacheHelper() {
             return null;
         }
     }

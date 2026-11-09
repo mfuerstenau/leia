@@ -5,6 +5,7 @@ import io.github.mfuerstenau.leia.runtime.Search.Dates;
 import io.github.mfuerstenau.leia.runtime.support.DateRanges;
 import java.text.DateFormat;
 import java.util.Date;
+import java.util.Optional;
 import java.util.TimeZone;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.document.DateTools;
@@ -21,10 +22,12 @@ final class Lucene7DateRangeQueryParser extends QueryParser {
 
     Lucene7DateRangeQueryParser(String defaultField, Analyzer analyzer, Dates dates) {
         super(defaultField, analyzer);
-        dates.resolution().map(Lucene7DateRangeQueryParser::resolution).ifPresent(this::setDateResolution);
+        Optional.ofNullable(dates.resolution())
+                .map(Lucene7DateRangeQueryParser::resolution)
+                .ifPresent(this::setDateResolution);
         dates.fields().forEach((field, resolution) -> setDateResolution(field, resolution(resolution)));
-        dates.locale().ifPresent(this::setLocale);
-        dates.timeZone().map(TimeZone::getTimeZone).ifPresent(this::setTimeZone);
+        Optional.ofNullable(dates.locale()).ifPresent(this::setLocale);
+        Optional.ofNullable(dates.timeZone()).map(TimeZone::getTimeZone).ifPresent(this::setTimeZone);
     }
 
     /** As Lucene's: a bound that isn't a date, or without a resolution, stays text. */

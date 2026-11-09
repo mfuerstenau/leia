@@ -89,20 +89,20 @@ public record Themes(List<Theme> themes, List<LeftOut> leftOut) {
      * file that can't be read, or whose name is no id, is logged and left out, and named in {@link #leftOut}: a broken theme
      * mustn't stop leia.
      */
-    public Themes withUserDir(Optional<Path> dir) {
-        if (dir.isEmpty() || !Files.isDirectory(dir.get())) {
+    public Themes withUserDir(Path dir) {
+        if (!Files.isDirectory(dir)) {
             return this;
         }
         List<Path> files;
-        try (Stream<Path> listed = Files.list(dir.get())) {
+        try (Stream<Path> listed = Files.list(dir)) {
             files = listed.filter(file -> file.getFileName().toString().endsWith(SUFFIX))
                     .sorted()
                     .toList();
         } catch (IOException e) {
-            LOG.log(Level.WARNING, "Cannot list the themes in " + dir.get(), e);
+            LOG.log(Level.WARNING, "Cannot list the themes in " + dir, e);
             return this;
         }
-        Icons icons = Icons.bundled().withUserDir(dir.get());
+        Icons icons = Icons.bundled().withUserDir(dir);
         List<Theme> merged = new ArrayList<>(themes);
         List<LeftOut> refused = new ArrayList<>(leftOut);
         for (Path file : files) {
@@ -147,7 +147,7 @@ public record Themes(List<Theme> themes, List<LeftOut> leftOut) {
     public Themes withDirs(List<Path> dirs) {
         Themes merged = this;
         for (Path dir : dirs.reversed()) {
-            merged = merged.withUserDir(Optional.of(dir));
+            merged = merged.withUserDir(dir);
         }
         return merged;
     }

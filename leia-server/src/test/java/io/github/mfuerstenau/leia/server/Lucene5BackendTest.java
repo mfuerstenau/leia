@@ -316,17 +316,14 @@ class Lucene5BackendTest {
         GetTermsResult ids = backend.call(Methods.GET_TERMS, new GetTermsParams("id", Optional.of(text("6")), 10));
         assertThat(ids.terms()).extracting(term -> term.term()).containsExactly("6", "7");
 
-        GetPostingsResult alpha = backend.call(
-                Methods.GET_POSTINGS, new GetPostingsParams("body", text("alpha"), 0, 2, Optional.empty()));
+        GetPostingsResult alpha =
+                backend.call(Methods.GET_POSTINGS, new GetPostingsParams("body", text("alpha"), 0, 2, null));
         assertThat(alpha.docFreq()).isEqualTo(7);
-        assertThat(alpha.postings())
-                .containsExactly(
-                        new Posting(0, false, OptionalInt.of(1), Optional.empty()),
-                        new Posting(1, true, OptionalInt.of(1), Optional.empty()));
+        assertThat(alpha.postings()).containsExactly(new Posting(0, false, 1, null), new Posting(1, true, 1, null));
         assertThat(alpha.nextDoc()).hasValue(2);
         backend.fails(
                 Methods.GET_POSTINGS,
-                new GetPostingsParams("body", text("nothing"), 0, 2, Optional.empty()),
+                new GetPostingsParams("body", text("nothing"), 0, 2, null),
                 ErrorCode.TERM_NOT_FOUND);
 
         assertThat(backend.call(Methods.GET_POSITIONS, new GetPositionsParams(0, "body", text("gamma")))
@@ -497,13 +494,13 @@ class Lucene5BackendTest {
     @Test
     void checksAtTheLevels() throws Exception {
         open(testIndex("lucene4"));
-        Check fast = check(new StartCheckIndexParams(OptionalInt.of(1)));
+        Check fast = check(new StartCheckIndexParams(1));
         assertThat(fast.lines()).contains("Checking with Lucene 5.5.5").noneMatch(line -> line.contains("test: terms"));
         IndexCheck index = fast.result().indexes().getFirst();
         assertThat(index.clean()).isTrue();
         assertThat(index.segments())
                 .allSatisfy(segment -> assertThat(segment.codec()).contains("Lucene410"));
-        Check slow = check(new StartCheckIndexParams(OptionalInt.of(3)));
+        Check slow = check(new StartCheckIndexParams(3));
         assertThat(slow.lines()).anyMatch(line -> line.contains("test: terms"));
         assertThat(slow.result().indexes().getFirst().clean()).isTrue();
     }
@@ -524,7 +521,7 @@ class Lucene5BackendTest {
         assertThat(backend.call(Methods.GET_COMMIT, new GetCommitParams(2, OptionalInt.empty()))
                         .segments())
                 .allSatisfy(segment -> assertThat(segment.codec()).contains("Lucene410"));
-        Check check = check(new StartCheckIndexParams(OptionalInt.of(2)));
+        Check check = check(new StartCheckIndexParams(2));
         assertThat(check.lines()).contains("Checking with Lucene 5.5.5");
         assertThat(check.result().indexes().getFirst().clean()).isTrue();
         backend.fails(Methods.GET_DOCUMENT, new GetDocumentParams(0), ErrorCode.NO_READER);

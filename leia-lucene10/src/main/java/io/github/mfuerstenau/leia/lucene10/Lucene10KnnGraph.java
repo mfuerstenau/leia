@@ -5,6 +5,7 @@ import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.runtime.KnnGraph;
 import java.io.IOException;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /** The HNSW graphs of KNN vector fields, read by leia-core's {@code KnnGraphs} (ADR 0085). */
 final class Lucene10KnnGraph implements KnnGraph {
@@ -27,9 +28,7 @@ final class Lucene10KnnGraph implements KnnGraph {
                                 segment.docBase(),
                                 segment.maxDoc(),
                                 segment.vectors(),
-                                segment.shape()
-                                        .map(shape ->
-                                                new Shape(shape.levelSizes(), node(shape.entry()), shape.maxConn()))))
+                                shape(segment.shape())))
                         .toList());
     }
 
@@ -61,5 +60,9 @@ final class Lucene10KnnGraph implements KnnGraph {
 
     private static Node node(KnnGraphs.Node node) {
         return new Node(node.ord(), node.docId(), node.deleted(), node.topLevel());
+    }
+
+    private static @Nullable Shape shape(KnnGraphs.@Nullable Shape shape) {
+        return shape == null ? null : new Shape(shape.levelSizes(), node(shape.entry()), shape.maxConn());
     }
 }

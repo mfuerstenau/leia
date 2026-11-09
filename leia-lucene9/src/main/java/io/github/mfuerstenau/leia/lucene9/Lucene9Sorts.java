@@ -20,6 +20,7 @@ import org.apache.lucene.search.SortedSetSortField;
 import org.apache.lucene.search.similarities.BM25Similarity;
 import org.apache.lucene.search.similarities.BooleanSimilarity;
 import org.apache.lucene.search.similarities.ClassicSimilarity;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The similarities and sorts of {@link io.github.mfuerstenau.leia.runtime.Scoring} in Lucene 9.12: a
@@ -64,7 +65,7 @@ final class Lucene9Sorts {
                         });
     }
 
-    private static SortField withMissing(SortField sortField, Object missingValue) {
+    private static SortField withMissing(SortField sortField, @Nullable Object missingValue) {
         if (missingValue != null) {
             sortField.setMissingValue(missingValue);
         }
@@ -87,6 +88,7 @@ final class Lucene9Sorts {
         boolean reverse = key.reverse();
         // Lucene orders the missing value before it reverses: the lowest value goes first in the
         // order shown unless the order is reversed.
+        @Nullable
         Object missingValue = key.missing() == SortMissing.DEFAULT
                 ? null
                 : missingValue(key.type(), (key.missing() == SortMissing.FIRST) != reverse);

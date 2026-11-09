@@ -15,7 +15,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 import java.util.stream.Stream;
@@ -79,7 +78,7 @@ class ExtensionJarsTest {
                         List.of(),
                         new Component("whitespace", Map.of()),
                         List.of(new Component("doubleMetaphone", Map.of("inject", "false"))),
-                        Optional.empty()),
+                        null),
                 "Smith");
         assertThat(analysis.stages().get(1).tokens()).extracting(Token::term).containsExactly("SM0", "XMT");
     }
@@ -112,7 +111,7 @@ class ExtensionJarsTest {
                         List.of(),
                         new Component("whitespace", Map.of()),
                         List.of(new Component("stop", Map.of("words", "org/apache/lucene/analysis/pl/stopwords.txt"))),
-                        Optional.of(tmp)),
+                        tmp),
                 "kot i pies");
 
         assertThat(analysis.stages().get(1).tokens()).extracting(Token::term).containsExactly("kot", "pies");

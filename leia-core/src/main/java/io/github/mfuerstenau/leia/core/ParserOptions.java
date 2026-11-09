@@ -4,8 +4,8 @@ import io.github.mfuerstenau.leia.core.Queries.Operator;
 import java.time.ZoneId;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
 import org.apache.lucene.document.DateTools;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The options that the classic and the standard query parser share (ADR 0011, ADR 0026, ADR 0035).
@@ -16,11 +16,11 @@ import org.apache.lucene.document.DateTools;
  * @param fuzzyPrefixLength how many leading characters of a fuzzy term must match exactly
  * @param enablePositionIncrements whether phrases keep the gaps that the analyzer leaves
  * @param dateResolution the resolution that range bounds which are dates are turned into terms
- *     with, for the fields without one of their own; empty, the bounds on those fields stay text
+ *     with, for the fields without one of their own; null, the bounds on those fields stay text
  * @param fieldDateResolutions the resolutions of single fields, by field name, which win over
  *     {@code dateResolution}
- * @param locale the locale that range bounds are read as dates in; empty, the JVM's default
- * @param timeZone the time zone that range bounds are read as dates in; empty, the JVM's default
+ * @param locale the locale that range bounds are read as dates in; null, the JVM's default
+ * @param timeZone the time zone that range bounds are read as dates in; null, the JVM's default
  */
 public record ParserOptions(
         Operator defaultOperator,
@@ -28,10 +28,10 @@ public record ParserOptions(
         int phraseSlop,
         int fuzzyPrefixLength,
         boolean enablePositionIncrements,
-        Optional<DateTools.Resolution> dateResolution,
+        DateTools.@Nullable Resolution dateResolution,
         Map<String, DateTools.Resolution> fieldDateResolutions,
-        Optional<Locale> locale,
-        Optional<ZoneId> timeZone) {
+        @Nullable Locale locale,
+        @Nullable ZoneId timeZone) {
 
     /** @throws IllegalArgumentException if a number is out of range */
     public ParserOptions {
@@ -57,10 +57,10 @@ public record ParserOptions(
                 phraseSlop,
                 fuzzyPrefixLength,
                 enablePositionIncrements,
-                Optional.empty(),
+                null,
                 Map.of(),
-                Optional.empty(),
-                Optional.empty());
+                null,
+                null);
     }
 
     /** Lucene's defaults, with {@code defaultOperator}. */
@@ -70,7 +70,7 @@ public record ParserOptions(
 
     /** These options with the date settings of range bounds. */
     public ParserOptions withDates(
-            Optional<DateTools.Resolution> dateResolution, Optional<Locale> locale, Optional<ZoneId> timeZone) {
+            DateTools.@Nullable Resolution dateResolution, @Nullable Locale locale, @Nullable ZoneId timeZone) {
         return new ParserOptions(
                 defaultOperator,
                 allowLeadingWildcard,

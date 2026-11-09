@@ -31,6 +31,7 @@ import org.apache.lucene.search.uhighlight.SplittingBreakIterator;
 import org.apache.lucene.search.uhighlight.UHComponents;
 import org.apache.lucene.search.uhighlight.UnifiedHighlighter;
 import org.apache.lucene.search.uhighlight.WholeBreakIterator;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Lucene 9.12's {@link UnifiedHighlighter}, set up as leia-core's {@code Highlights} sets up Lucene
@@ -189,7 +190,7 @@ final class Lucene9Highlight implements Highlight {
 
         @Override
         @SuppressWarnings("unchecked")
-        public Object highlightFieldForDoc(LeafReader reader, int docId, String content) throws IOException {
+        public @Nullable Object highlightFieldForDoc(LeafReader reader, int docId, String content) throws IOException {
             started.run();
             UnifiedHighlighter.OffsetSource source = getOffsetSource();
             Object found;

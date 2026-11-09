@@ -18,6 +18,7 @@ import java.util.IllformedLocaleException;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.TreeSet;
 import java.util.function.Function;
@@ -69,6 +70,7 @@ import org.apache.lucene.analysis.util.CharArraySet;
 import org.apache.lucene.analysis.util.StopwordAnalyzerBase;
 import org.apache.lucene.collation.CollationKeyAnalyzer;
 import org.apache.lucene.util.Version;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The preset analyzers of Lucene 5.5 (ADR 0046, ADR 0075): the analyzers of lucene-core and
@@ -144,40 +146,40 @@ final class Lucene5Presets {
      */
     private record Preset(
             Class<? extends Analyzer> type,
-            Optional<Constructor<? extends Analyzer>> noArguments,
-            Optional<Constructor<? extends Analyzer>> stopwords,
-            Optional<Constructor<? extends Analyzer>> stopwordsAndStemExclusion,
-            Optional<Constructor<? extends Analyzer>> stemOverride,
-            Optional<Constructor<? extends Analyzer>> collation,
-            Optional<Method> maxTokenLengthSetter,
-            Optional<Method> defaultStopSet) {
+            @Nullable Constructor<? extends Analyzer> noArguments,
+            @Nullable Constructor<? extends Analyzer> stopwords,
+            @Nullable Constructor<? extends Analyzer> stopwordsAndStemExclusion,
+            @Nullable Constructor<? extends Analyzer> stemOverride,
+            @Nullable Constructor<? extends Analyzer> collation,
+            @Nullable Method maxTokenLengthSetter,
+            @Nullable Method defaultStopSet) {
 
         String name() {
             return type.getSimpleName();
         }
 
         WordSetSupport stopwordSupport() {
-            if (stopwords.isEmpty()) {
+            if (stopwords == null) {
                 return WordSetSupport.NONE;
             }
-            return noArguments.isPresent() ? WordSetSupport.OPTIONAL : WordSetSupport.REQUIRED;
+            return noArguments != null ? WordSetSupport.OPTIONAL : WordSetSupport.REQUIRED;
         }
 
         WordSetSupport stemExclusionSupport() {
-            return stopwordsAndStemExclusion.isPresent() && hasDefaultStopwords()
+            return stopwordsAndStemExclusion != null && hasDefaultStopwords()
                     ? WordSetSupport.OPTIONAL
                     : WordSetSupport.NONE;
         }
 
         List<PresetOption> options() {
             List<PresetOption> options = new ArrayList<>();
-            if (maxTokenLengthSetter.isPresent()) {
+            if (maxTokenLengthSetter != null) {
                 options.add(PresetOption.MAX_TOKEN_LENGTH);
             }
-            if (stemOverride.isPresent() && hasDefaultStopwords()) {
+            if (stemOverride != null && hasDefaultStopwords()) {
                 options.add(PresetOption.STEM_OVERRIDE);
             }
-            if (collation.isPresent()) {
+            if (collation != null) {
                 options.add(PresetOption.COLLATION);
             }
             return options;
@@ -185,8 +187,7 @@ final class Lucene5Presets {
 
         /** Whether the default stop words can be found, for stem exclusions without stop words. */
         boolean hasDefaultStopwords() {
-            return (StopwordAnalyzerBase.class.isAssignableFrom(type) && noArguments.isPresent())
-                    || defaultStopSet.isPresent();
+            return (StopwordAnalyzerBase.class.isAssignableFrom(type) && noArguments != null) || defaultStopSet != null;
         }
     }
 
@@ -214,33 +215,33 @@ final class Lucene5Presets {
         }
         checkSupported(spec);
         check(preset, spec);
-        Optional<CharArraySet> stopwords = given("stop words", spec.stopwords());
-        Optional<CharArraySet> stemExclusion = given("stem exclusions", spec.stemExclusion());
+        @Nullable CharArraySet stopwords = given("stop words", spec.stopwords());
+        @Nullable CharArraySet stemExclusion = given("stem exclusions", spec.stemExclusion());
         Analyzer analyzer;
-        if (preset.collation().isPresent()) {
-            Collation collation = spec.collation().orElse(new Collation("", Optional.empty(), Optional.empty()));
-            return construct(preset, preset.collation().orElseThrow(), collator(collation));
-        } else if (spec.stemOverride().isPresent()) {
-            CharArrayMap<String> dictionary = dictionary(spec.stemOverride().orElseThrow());
+        if (preset.collation() != null) {
+            Collation collation = spec.collation() != null ? spec.collation() : new Collation("", null, null);
+            return construct(preset, preset.collation(), collator(collation));
+        } else if (spec.stemOverride() != null) {
+            CharArrayMap<String> dictionary = dictionary(spec.stemOverride());
             analyzer = construct(
                     preset,
-                    preset.stemOverride().orElseThrow(),
+                    Objects.requireNonNull(preset.stemOverride()),
                     stopwordsOrDefault(stopwords, preset),
-                    stemExclusion.orElse(CharArraySet.EMPTY_SET),
+                    stemExclusion != null ? stemExclusion : CharArraySet.EMPTY_SET,
                     dictionary);
-        } else if (stemExclusion.isPresent()) {
+        } else if (stemExclusion != null) {
             analyzer = construct(
                     preset,
-                    preset.stopwordsAndStemExclusion().orElseThrow(),
+                    Objects.requireNonNull(preset.stopwordsAndStemExclusion()),
                     stopwordsOrDefault(stopwords, preset),
-                    stemExclusion.orElseThrow());
-        } else if (stopwords.isPresent()) {
-            analyzer = construct(preset, preset.stopwords().orElseThrow(), stopwords.orElseThrow());
+                    stemExclusion);
+        } else if (stopwords != null) {
+            analyzer = construct(preset, Objects.requireNonNull(preset.stopwords()), stopwords);
         } else {
-            analyzer = construct(preset, preset.noArguments().orElseThrow());
+            analyzer = construct(preset, Objects.requireNonNull(preset.noArguments()));
         }
-        if (spec.maxTokenLength().isPresent()) {
-            setMaxTokenLength(preset, analyzer, spec.maxTokenLength().getAsInt());
+        if (spec.maxTokenLength() != null) {
+            setMaxTokenLength(preset, analyzer, spec.maxTokenLength());
         }
         return analyzer;
     }
@@ -248,30 +249,30 @@ final class Lucene5Presets {
     /** Whether the preset takes what {@code spec} gives it, and the values are in range. */
     private static void check(Preset preset, AnalyzerSpec.Preset spec) throws InvalidAnalyzerException {
         List<PresetOption> options = preset.options();
-        if (spec.stopwords().isPresent() && preset.stopwordSupport() == WordSetSupport.NONE) {
+        if (spec.stopwords() != null && preset.stopwordSupport() == WordSetSupport.NONE) {
             throw new InvalidAnalyzerException(preset.name() + " takes no stop words", null);
         }
-        if (spec.stemExclusion().isPresent() && preset.stemExclusionSupport() == WordSetSupport.NONE) {
+        if (spec.stemExclusion() != null && preset.stemExclusionSupport() == WordSetSupport.NONE) {
             throw new InvalidAnalyzerException(preset.name() + " takes no stem exclusions", null);
         }
-        if (spec.stopwords().isEmpty() && preset.stopwordSupport() == WordSetSupport.REQUIRED) {
+        if (spec.stopwords() == null && preset.stopwordSupport() == WordSetSupport.REQUIRED) {
             throw new InvalidAnalyzerException(preset.name() + " needs stop words", null);
         }
-        if (spec.maxTokenLength().isPresent() && !options.contains(PresetOption.MAX_TOKEN_LENGTH)) {
+        if (spec.maxTokenLength() != null && !options.contains(PresetOption.MAX_TOKEN_LENGTH)) {
             throw new InvalidAnalyzerException(preset.name() + " takes no max token length", null);
         }
-        if (spec.stemOverride().isPresent() && !options.contains(PresetOption.STEM_OVERRIDE)) {
+        if (spec.stemOverride() != null && !options.contains(PresetOption.STEM_OVERRIDE)) {
             throw new InvalidAnalyzerException(preset.name() + " takes no stem overrides", null);
         }
-        if (spec.collation().isPresent() && !options.contains(PresetOption.COLLATION)) {
+        if (spec.collation() != null && !options.contains(PresetOption.COLLATION)) {
             throw new InvalidAnalyzerException(preset.name() + " takes no collation", null);
         }
         checkMaxTokenLength(spec);
     }
 
     private static void checkMaxTokenLength(AnalyzerSpec.Preset spec) throws InvalidAnalyzerException {
-        if (spec.maxTokenLength().isPresent()) {
-            int length = spec.maxTokenLength().getAsInt();
+        if (spec.maxTokenLength() != null) {
+            int length = spec.maxTokenLength();
             if (length < 1 || length > MAX_TOKEN_LENGTH) {
                 throw new InvalidAnalyzerException(
                         "max token length: must be from 1 to " + MAX_TOKEN_LENGTH + ", not " + length, null);
@@ -281,13 +282,13 @@ final class Lucene5Presets {
 
     /** Fails for the Japanese and Korean options, which only Lucene 10's runtime has. */
     private static void checkSupported(AnalyzerSpec.Preset spec) throws UnsupportedAnalyzerException {
-        if (spec.japanese().isPresent()) {
+        if (spec.japanese() != null) {
             throw new UnsupportedAnalyzerException("Japanese options");
         }
-        if (spec.korean().isPresent()) {
+        if (spec.korean() != null) {
             throw new UnsupportedAnalyzerException("Korean options");
         }
-        if (spec.japaneseCompletion().isPresent()) {
+        if (spec.japaneseCompletion() != null) {
             throw new UnsupportedAnalyzerException("Japanese completion options");
         }
     }
@@ -317,9 +318,9 @@ final class Lucene5Presets {
             }
         }
         Collator collator = Collator.getInstance(locale);
-        if (collation.strength().isPresent()) {
+        if (collation.strength() != null) {
             collator.setStrength(
-                    switch (collation.strength().orElseThrow()) {
+                    switch (collation.strength()) {
                         case PRIMARY -> Collator.PRIMARY;
                         case SECONDARY -> Collator.SECONDARY;
                         case TERTIARY -> Collator.TERTIARY;
@@ -329,9 +330,9 @@ final class Lucene5Presets {
                                     "collation: the JDK's collator has no strength QUATERNARY", null);
                     });
         }
-        if (collation.decomposition().isPresent()) {
+        if (collation.decomposition() != null) {
             collator.setDecomposition(
-                    switch (collation.decomposition().orElseThrow()) {
+                    switch (collation.decomposition()) {
                         case NO -> Collator.NO_DECOMPOSITION;
                         case CANONICAL -> Collator.CANONICAL_DECOMPOSITION;
                         case FULL -> Collator.FULL_DECOMPOSITION;
@@ -343,10 +344,10 @@ final class Lucene5Presets {
     private static void setMaxTokenLength(Preset preset, Analyzer analyzer, int length)
             throws InvalidAnalyzerException {
         try {
-            preset.maxTokenLengthSetter().orElseThrow().invoke(analyzer, length);
+            Objects.requireNonNull(preset.maxTokenLengthSetter()).invoke(analyzer, length);
         } catch (InvocationTargetException e) {
             analyzer.close();
-            throw failed(preset, e.getCause());
+            throw failed(preset, e.getTargetException());
         } catch (ReflectiveOperationException e) {
             analyzer.close();
             throw new InvalidAnalyzerException(preset.name() + ": " + e, e);
@@ -354,28 +355,28 @@ final class Lucene5Presets {
     }
 
     /** The set of {@code words}, if given. */
-    private static Optional<CharArraySet> given(String what, Optional<AnalyzerSpec.WordSet> words)
+    private static @Nullable CharArraySet given(String what, AnalyzerSpec.@Nullable WordSet words)
             throws InvalidAnalyzerException {
-        return words.isPresent() ? Optional.of(set(what, words.orElseThrow())) : Optional.empty();
+        return words != null ? set(what, words) : null;
     }
 
-    private static CharArraySet stopwordsOrDefault(Optional<CharArraySet> stopwords, Preset preset)
+    private static CharArraySet stopwordsOrDefault(@Nullable CharArraySet stopwords, Preset preset)
             throws InvalidAnalyzerException {
-        return stopwords.isPresent() ? stopwords.orElseThrow() : defaultStopwords(preset);
+        return stopwords != null ? stopwords : defaultStopwords(preset);
     }
 
     /** What the preset uses without stop words of its own. */
     private static CharArraySet defaultStopwords(Preset preset) throws InvalidAnalyzerException {
-        if (StopwordAnalyzerBase.class.isAssignableFrom(preset.type())
-                && preset.noArguments().isPresent()) {
-            try (Analyzer analyzer = construct(preset, preset.noArguments().orElseThrow())) {
+        if (StopwordAnalyzerBase.class.isAssignableFrom(preset.type()) && preset.noArguments() != null) {
+            try (Analyzer analyzer = construct(preset, Objects.requireNonNull(preset.noArguments()))) {
                 return ((StopwordAnalyzerBase) analyzer).getStopwordSet();
             }
         }
         try {
-            return (CharArraySet) preset.defaultStopSet().orElseThrow().invoke(null);
+            return (CharArraySet)
+                    Objects.requireNonNull(preset.defaultStopSet()).invoke(null);
         } catch (InvocationTargetException e) {
-            throw failed(preset, e.getCause());
+            throw failed(preset, e.getTargetException());
         } catch (ReflectiveOperationException e) {
             throw new InvalidAnalyzerException(preset.name() + ": " + e, e);
         }
@@ -386,7 +387,7 @@ final class Lucene5Presets {
         try {
             return constructor.newInstance(arguments);
         } catch (InvocationTargetException e) {
-            throw failed(preset, e.getCause());
+            throw failed(preset, e.getTargetException());
         } catch (ReflectiveOperationException e) {
             throw new InvalidAnalyzerException(preset.name() + ": " + e, e);
         }
@@ -399,13 +400,14 @@ final class Lucene5Presets {
     private static Preset preset(Class<? extends Analyzer> type) {
         return new Preset(
                 type,
-                constructor(type),
-                constructor(type, CharArraySet.class),
-                constructor(type, CharArraySet.class, CharArraySet.class),
-                constructor(type, CharArraySet.class, CharArraySet.class, CharArrayMap.class),
-                constructor(type, Collator.class),
-                maxTokenLengthSetter(type),
-                defaultStopSet(type));
+                constructor(type).orElse(null),
+                constructor(type, CharArraySet.class).orElse(null),
+                constructor(type, CharArraySet.class, CharArraySet.class).orElse(null),
+                constructor(type, CharArraySet.class, CharArraySet.class, CharArrayMap.class)
+                        .orElse(null),
+                constructor(type, Collator.class).orElse(null),
+                maxTokenLengthSetter(type).orElse(null),
+                defaultStopSet(type).orElse(null));
     }
 
     /** The public {@code setMaxTokenLength(int)}, if there is one. */

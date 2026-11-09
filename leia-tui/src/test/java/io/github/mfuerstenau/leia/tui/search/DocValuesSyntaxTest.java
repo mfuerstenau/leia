@@ -40,18 +40,14 @@ class DocValuesSyntaxTest {
                 .hasMessage("A prefix (ending in *) stands alone on the line.");
         assertThatThrownBy(() -> DocValuesSyntax.parse("garden *")).isInstanceOf(IllegalArgumentException.class);
         // In a range, a bound ending in * is a value.
-        assertThat(DocValuesSyntax.parse("[a* TO b]"))
-                .isEqualTo(new Parsed.Range(Optional.of("a*"), Optional.of("b"), true, true));
+        assertThat(DocValuesSyntax.parse("[a* TO b]")).isEqualTo(new Parsed.Range("a*", "b", true, true));
     }
 
     @Test
     void readsRanges() {
-        assertThat(DocValuesSyntax.parse("[10 TO 20]"))
-                .isEqualTo(new Parsed.Range(Optional.of("10"), Optional.of("20"), true, true));
-        assertThat(DocValuesSyntax.parse("{* TO \"*\"}"))
-                .isEqualTo(new Parsed.Range(Optional.empty(), Optional.of("*"), false, false));
-        assertThat(DocValuesSyntax.parse("[ \"a b\"  TO * }"))
-                .isEqualTo(new Parsed.Range(Optional.of("a b"), Optional.empty(), true, false));
+        assertThat(DocValuesSyntax.parse("[10 TO 20]")).isEqualTo(new Parsed.Range("10", "20", true, true));
+        assertThat(DocValuesSyntax.parse("{* TO \"*\"}")).isEqualTo(new Parsed.Range(null, "*", false, false));
+        assertThat(DocValuesSyntax.parse("[ \"a b\"  TO * }")).isEqualTo(new Parsed.Range("a b", null, true, false));
     }
 
     @Test
@@ -74,32 +70,29 @@ class DocValuesSyntaxTest {
 
     @Test
     void typesTheValuesForTheField() {
-        DocValuesQuery query = DocValuesSyntax.query("price", Optional.of(DocValuesNumber.DOUBLE), true, "1.5 -2");
+        DocValuesQuery query = DocValuesSyntax.query("price", DocValuesNumber.DOUBLE, true, "1.5 -2");
         assertThat(query.number()).hasValue(DocValuesNumber.DOUBLE);
         assertThat(query.values()).hasValue(List.of(new BytesValue("1.5", false), new BytesValue("-2", false)));
         assertThat(query.range()).isEmpty();
 
-        query = DocValuesSyntax.query("checksum", Optional.empty(), true, "[80FF TO *]");
+        query = DocValuesSyntax.query("checksum", null, true, "[80FF TO *]");
         assertThat(query.range())
                 .hasValue(new DocValuesRange(Optional.of(new BytesValue("80ff", true)), Optional.empty(), true, true));
-        assertThatThrownBy(() -> DocValuesSyntax.query("checksum", Optional.empty(), true, "8"))
+        assertThatThrownBy(() -> DocValuesSyntax.query("checksum", null, true, "8"))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> DocValuesSyntax.query("checksum", Optional.empty(), true, "zz"))
+        assertThatThrownBy(() -> DocValuesSyntax.query("checksum", null, true, "zz"))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThat(DocValuesSyntax.query("category", Optional.empty(), false, "zz")
-                        .values())
+        assertThat(DocValuesSyntax.query("category", null, false, "zz").values())
                 .isPresent();
 
-        query = DocValuesSyntax.query("checksum", Optional.empty(), true, "80FF*");
+        query = DocValuesSyntax.query("checksum", null, true, "80FF*");
         assertThat(query.prefix()).hasValue(new BytesValue("80ff", true));
         assertThat(query.values()).isEmpty();
         assertThat(query.range()).isEmpty();
-        assertThat(DocValuesSyntax.query("category", Optional.empty(), false, "*")
-                        .prefix())
-                .hasValue(new BytesValue("", false));
-        assertThatThrownBy(() -> DocValuesSyntax.query("checksum", Optional.empty(), true, "8*"))
+        assertThat(DocValuesSyntax.query("category", null, false, "*").prefix()).hasValue(new BytesValue("", false));
+        assertThatThrownBy(() -> DocValuesSyntax.query("checksum", null, true, "8*"))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> DocValuesSyntax.query("price", Optional.of(DocValuesNumber.LONG), false, "1*"))
+        assertThatThrownBy(() -> DocValuesSyntax.query("price", DocValuesNumber.LONG, false, "1*"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("A prefix is for doc values of bytes; numbers take a range.");
     }

@@ -15,9 +15,8 @@ import io.github.mfuerstenau.leia.core.TextAnalysis.Token;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Optional;
-import java.util.OptionalInt;
 import org.apache.lucene.analysis.Analyzer;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -74,55 +73,48 @@ class KuromojiNoriTest {
     void japaneseCompletionTakesTheModeAndAUserDictionary() throws Exception {
         String text = "東京t";
         // INDEX: each token and its romanization.
-        assertThat(terms(japaneseCompletion(Optional.empty()), text)).containsExactly("東京", "toukyou", "t");
-        assertThat(terms(
-                        japaneseCompletion(Optional.of(
-                                new JapaneseCompletion(Optional.empty(), Optional.of(JapaneseCompletionMode.QUERY)))),
-                        text))
+        assertThat(terms(japaneseCompletion(null), text)).containsExactly("東京", "toukyou", "t");
+        assertThat(terms(japaneseCompletion(new JapaneseCompletion(null, JapaneseCompletionMode.QUERY)), text))
                 .containsExactly("東京t", "toukyout");
 
         Path dictionary = Files.writeString(tmp.resolve("userdict_ja.txt"), "関西国際空港,関西 国際 空港,カンサイ コクサイ クウコウ,カスタム名詞\n");
-        var withDictionary = new JapaneseCompletion(Optional.of(dictionary), Optional.empty());
+        var withDictionary = new JapaneseCompletion(dictionary, null);
         // The dictionary splits the compound, each part with its readings.
-        assertThat(terms(japaneseCompletion(Optional.of(withDictionary)), "関西国際空港"))
+        assertThat(terms(japaneseCompletion(withDictionary), "関西国際空港"))
                 .containsExactly("関西", "kansai", "kannsai", "国際", "kokusai", "空港", "kuukou");
-        assertThat(terms(japaneseCompletion(Optional.empty()), "関西国際空港")).doesNotContain("関西");
+        assertThat(terms(japaneseCompletion(null), "関西国際空港")).doesNotContain("関西");
     }
 
     @Test
     void japaneseTakesTheModeAndStopTags() throws Exception {
         String text = "関西国際空港に行った";
         // SEARCH splits the compound (and drops it); the particle and the auxiliary are stop tags.
-        assertThat(terms(japanese(Optional.empty(), Optional.empty()), text)).containsExactly("関西", "国際", "空港", "行く");
-        assertThat(terms(japanese(Optional.empty(), Optional.of(japaneseOptions(JapaneseMode.NORMAL, null))), text))
+        assertThat(terms(japanese(null, null), text)).containsExactly("関西", "国際", "空港", "行く");
+        assertThat(terms(japanese(null, japaneseOptions(JapaneseMode.NORMAL, null)), text))
                 .containsExactly("関西国際空港", "行く");
         // No stop words and no stop tags.
-        assertThat(terms(
-                        japanese(Optional.of(words()), Optional.of(japaneseOptions(JapaneseMode.NORMAL, words()))),
-                        text))
+        assertThat(terms(japanese(words(), japaneseOptions(JapaneseMode.NORMAL, words())), text))
                 .containsExactly("関西国際空港", "に", "行く", "た");
         // Stop words alone call the constructor with the options too.
-        assertThat(terms(japanese(Optional.of(words("行く")), Optional.empty()), text))
-                .containsExactly("関西", "国際", "空港");
+        assertThat(terms(japanese(words("行く"), null), text)).containsExactly("関西", "国際", "空港");
     }
 
     @Test
     void japaneseReadsAUserDictionary() throws Exception {
         Path dictionary = Files.writeString(
                 tmp.resolve("userdict_ja.txt"), "# Kuromoji's format\n関西国際空港,関西 国際 空港,カンサイ コクサイ クウコウ,カスタム名詞\n");
-        var options = new Japanese(Optional.of(dictionary), Optional.of(JapaneseMode.NORMAL), Optional.empty());
+        var options = new Japanese(dictionary, JapaneseMode.NORMAL, null);
 
-        assertThat(terms(japanese(Optional.empty(), Optional.of(options)), "関西国際空港"))
-                .containsExactly("関西", "国際", "空港");
+        assertThat(terms(japanese(null, options), "関西国際空港")).containsExactly("関西", "国際", "空港");
 
         Path broken = Files.writeString(tmp.resolve("broken.txt"), "関西国際空港,関西 国際,カンサイ コクサイ クウコウ,カスタム名詞\n");
-        var brokenOptions = new Japanese(Optional.of(broken), Optional.empty(), Optional.empty());
-        assertThatThrownBy(() -> Analyzers.build(japanese(Optional.empty(), Optional.of(brokenOptions))))
+        var brokenOptions = new Japanese(broken, null, null);
+        assertThatThrownBy(() -> Analyzers.build(japanese(null, brokenOptions)))
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessageStartingWith("user dictionary: " + broken + ": ");
         Path missing = tmp.resolve("missing.txt");
-        var missingOptions = new Japanese(Optional.of(missing), Optional.empty(), Optional.empty());
-        assertThatThrownBy(() -> Analyzers.build(japanese(Optional.empty(), Optional.of(missingOptions))))
+        var missingOptions = new Japanese(missing, null, null);
+        assertThatThrownBy(() -> Analyzers.build(japanese(null, missingOptions)))
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessage("user dictionary: no file " + missing);
     }
@@ -148,11 +140,11 @@ class KuromojiNoriTest {
     @Test
     void koreanReadsAUserDictionaryAndSplitsUnknownWords() throws Exception {
         Path dictionary = Files.writeString(tmp.resolve("userdict_ko.txt"), "# Nori's format\n세종시 세종 시\n");
-        var withDictionary = new Korean(Optional.of(dictionary), Optional.empty(), Optional.empty(), Optional.empty());
+        var withDictionary = new Korean(dictionary, null, null, null);
 
         assertThat(terms(korean(withDictionary), "세종시")).containsExactly("세종", "시");
 
-        var unigrams = new Korean(Optional.empty(), Optional.empty(), Optional.empty(), Optional.of(true));
+        var unigrams = new Korean(null, null, null, true);
         assertThat(terms(korean(unigrams), "𐌰𐌱")).containsExactly("𐌰", "𐌱");
     }
 
@@ -160,94 +152,50 @@ class KuromojiNoriTest {
     void theirOptionsAreOnlyForThem() {
         var english = new AnalyzerSpec.Preset(
                 "org.apache.lucene.analysis.en.EnglishAnalyzer",
-                Optional.empty(),
-                Optional.empty(),
-                OptionalInt.empty(),
-                Optional.empty(),
-                Optional.of(japaneseOptions(null, null)),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty());
+                null,
+                null,
+                null,
+                null,
+                japaneseOptions(null, null),
+                null,
+                null,
+                null);
         assertThatThrownBy(() -> Analyzers.build(english))
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessage("EnglishAnalyzer takes no Japanese options");
-        var japaneseWithKorean = new AnalyzerSpec.Preset(
-                JAPANESE,
-                Optional.empty(),
-                Optional.empty(),
-                OptionalInt.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.of(koreanOptions(null, null)),
-                Optional.empty(),
-                Optional.empty());
+        var japaneseWithKorean =
+                new AnalyzerSpec.Preset(JAPANESE, null, null, null, null, null, koreanOptions(null, null), null, null);
         assertThatThrownBy(() -> Analyzers.build(japaneseWithKorean))
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessage("JapaneseAnalyzer takes no Korean options");
         var japaneseWithCompletion = new AnalyzerSpec.Preset(
-                JAPANESE,
-                Optional.empty(),
-                Optional.empty(),
-                OptionalInt.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.of(new JapaneseCompletion(Optional.empty(), Optional.empty())));
+                JAPANESE, null, null, null, null, null, null, null, new JapaneseCompletion(null, null));
         assertThatThrownBy(() -> Analyzers.build(japaneseWithCompletion))
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessage("JapaneseAnalyzer takes no Japanese completion options");
-        assertThatThrownBy(
-                        () -> Analyzers.build(new AnalyzerSpec.Preset(KOREAN, Optional.of(words()), Optional.empty())))
+        assertThatThrownBy(() -> Analyzers.build(new AnalyzerSpec.Preset(KOREAN, words(), null)))
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessage("KoreanAnalyzer takes no stop words");
     }
 
-    private static AnalyzerSpec.Preset japanese(Optional<WordSet> stopwords, Optional<Japanese> options) {
-        return new AnalyzerSpec.Preset(
-                JAPANESE,
-                stopwords,
-                Optional.empty(),
-                OptionalInt.empty(),
-                Optional.empty(),
-                options,
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty());
+    private static AnalyzerSpec.Preset japanese(@Nullable WordSet stopwords, @Nullable Japanese options) {
+        return new AnalyzerSpec.Preset(JAPANESE, stopwords, null, null, null, options, null, null, null);
     }
 
-    private static AnalyzerSpec.Preset japaneseCompletion(Optional<JapaneseCompletion> options) {
-        return new AnalyzerSpec.Preset(
-                JAPANESE_COMPLETION,
-                Optional.empty(),
-                Optional.empty(),
-                OptionalInt.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                options);
+    private static AnalyzerSpec.Preset japaneseCompletion(@Nullable JapaneseCompletion options) {
+        return new AnalyzerSpec.Preset(JAPANESE_COMPLETION, null, null, null, null, null, null, null, options);
     }
 
-    private static Japanese japaneseOptions(JapaneseMode mode, WordSet stopTags) {
-        return new Japanese(Optional.empty(), Optional.ofNullable(mode), Optional.ofNullable(stopTags));
+    private static Japanese japaneseOptions(@Nullable JapaneseMode mode, @Nullable WordSet stopTags) {
+        return new Japanese(null, mode, stopTags);
     }
 
     private static AnalyzerSpec.Preset korean(Korean options) {
-        return new AnalyzerSpec.Preset(
-                KOREAN,
-                Optional.empty(),
-                Optional.empty(),
-                OptionalInt.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.of(options),
-                Optional.empty(),
-                Optional.empty());
+        return new AnalyzerSpec.Preset(KOREAN, null, null, null, null, null, options, null, null);
     }
 
-    private static Korean koreanOptions(KoreanDecompoundMode mode, WordSet stopTags) {
-        return new Korean(Optional.empty(), Optional.ofNullable(mode), Optional.ofNullable(stopTags), Optional.empty());
+    private static Korean koreanOptions(@Nullable KoreanDecompoundMode mode, @Nullable WordSet stopTags) {
+        return new Korean(null, mode, stopTags, null);
     }
 
     private static WordSet words(String... words) {

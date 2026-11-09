@@ -43,7 +43,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
-import java.util.OptionalLong;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
@@ -90,7 +89,7 @@ class TermsTest {
     }
 
     private static Posting posting(int docId) {
-        return new Posting(docId, false, OptionalInt.of(2), Optional.empty());
+        return new Posting(docId, false, 2, null);
     }
 
     private static GetPostingsResult postings(List<Integer> docIds, Integer nextDoc) {
@@ -102,15 +101,15 @@ class TermsTest {
     }
 
     private static Request.LoadTerms termsRequest(String field, String from, boolean more) {
-        return new Request.LoadTerms(field, Optional.ofNullable(from).map(TermsTest::text), more);
+        return new Request.LoadTerms(field, from == null ? null : text(from), more);
     }
 
     private static Request.LoadPostings postingsRequest(String field, String term, int fromDoc, boolean more) {
-        return new Request.LoadPostings(field, text(term), fromDoc, more, Optional.empty());
+        return new Request.LoadPostings(field, text(term), fromDoc, more, null);
     }
 
     private static Optional<Request> hit(String term, int docId, int index) {
-        return Optional.of(new Request.Document(new TermHit("id", text(term), docId, index, 5, OptionalInt.of(2))));
+        return Optional.of(new Request.Document(new TermHit("id", text(term), docId, index, 5, 2)));
     }
 
     /** The terms of {@code id} and the postings of its first term, {@code a}, are in. */
@@ -271,14 +270,13 @@ class TermsTest {
 
         assertThat(terms.browse("body", text("quick"))).hasValue(termsRequest("body", "quick", false));
         assertThat(terms.termsLoaded(termsRequest("body", "quick", false), page(List.of("quick", "red"), null)))
-                .hasValue(new Request.LoadPostings("body", text("quick"), 0, false, Optional.empty()));
+                .hasValue(new Request.LoadPostings("body", text("quick"), 0, false, null));
         terms.postingsLoaded(
-                new Request.LoadPostings("body", text("quick"), 0, false, Optional.empty()),
-                postings(List.of(9), null));
+                new Request.LoadPostings("body", text("quick"), 0, false, null), postings(List.of(9), null));
         assertThat(render(terms)).contains("body from quick (/ seeks)");
         // The postings have the focus.
         assertThat(terms.handleKey(key(KeyCode.ENTER)))
-                .hasValue(new Request.Document(new TermHit("body", text("quick"), 9, 0, 5, OptionalInt.of(2))));
+                .hasValue(new Request.Document(new TermHit("body", text("quick"), 9, 0, 5, 2)));
         assertThat(terms.browse("rank", text("1"))).isEmpty();
     }
 
@@ -288,20 +286,19 @@ class TermsTest {
         assertThat(terms.filtered()).isFalse();
         assertThat(terms.handleKey(key('b'))).isEmpty();
 
-        terms.setFilter(OptionalLong.of(9));
+        terms.setFilter(9L);
         PostingsFilter marked = new PostingsFilter(9, false);
-        Request.LoadPostings markedRequest = new Request.LoadPostings("id", text("a"), 0, false, Optional.of(marked));
+        Request.LoadPostings markedRequest = new Request.LoadPostings("id", text("a"), 0, false, marked);
         assertThat(terms.initialRequest()).hasValue(markedRequest);
-        List<Posting> inFilter = new ArrayList<>(Arrays.asList(
-                new Posting(1, false, OptionalInt.of(2), Optional.of(false)),
-                new Posting(4, false, OptionalInt.of(2), Optional.of(true))));
+        List<Posting> inFilter =
+                new ArrayList<>(Arrays.asList(new Posting(1, false, 2, false), new Posting(4, false, 2, true)));
         assertThat(terms.postingsLoaded(markedRequest, new GetPostingsResult(5, 10, inFilter, OptionalInt.empty())))
                 .isEmpty();
         String screen = render(terms);
         assertThat(screen).contains("Postings (5) · • filter", "• 4");
 
         PostingsFilter only = new PostingsFilter(9, true);
-        Request.LoadPostings onlyRequest = new Request.LoadPostings("id", text("a"), 0, false, Optional.of(only));
+        Request.LoadPostings onlyRequest = new Request.LoadPostings("id", text("a"), 0, false, only);
         assertThat(terms.handleKey(key('b'))).hasValue(onlyRequest);
         assertThat(terms.onlyFiltered()).isTrue();
         terms.postingsLoaded(onlyRequest, postings(List.of(), null));
@@ -309,7 +306,7 @@ class TermsTest {
         assertThat(screen).contains("Postings (5) · filter only", "No postings in the filter.");
 
         // Without the filter, all postings are shown again, unmarked.
-        terms.setFilter(OptionalLong.empty());
+        terms.setFilter(null);
         assertThat(terms.onlyFiltered()).isFalse();
         assertThat(terms.initialRequest()).hasValue(postingsRequest("id", "a", 0, false));
     }
@@ -393,7 +390,7 @@ class TermsTest {
         terms.handleKey(key(KeyCode.LEFT));
         assertThat(terms.handleKey(key(KeyCode.DOWN))).isEmpty();
         assertThat(terms.termsLoaded(termsRequest("body", "quick", false), page(List.of("quick"), null)))
-                .hasValue(new Request.LoadPostings("body", text("quick"), 0, false, Optional.empty()));
+                .hasValue(new Request.LoadPostings("body", text("quick"), 0, false, null));
     }
 
     private static IndexField pointField(String name, int number, IndexOptions indexOptions, int bytes) {
@@ -587,7 +584,7 @@ class TermsTest {
         terms.postingsLoaded(postingsRequest("id", "b", 0, false), postings(List.of(2, 9), null));
         Terms.Mark mark = terms.mark();
 
-        assertThat(terms.show("body", Optional.empty(), false)).hasValue(termsRequest("body", null, false));
+        assertThat(terms.show("body", null, false)).hasValue(termsRequest("body", null, false));
         terms.termsLoaded(termsRequest("body", null, false), page(List.of("x", "y"), null));
         terms.postingsLoaded(postingsRequest("body", "x", 0, false), postings(List.of(3), null));
         assertThat(render(terms)).contains("body (/ seeks)");
@@ -605,14 +602,14 @@ class TermsTest {
         terms.initialRequest();
 
         // Points: the field's points row, which fetches its tree.
-        assertThat(terms.show("code", Optional.empty(), true)).hasValue(new Request.LoadPointTree("code", 1));
+        assertThat(terms.show("code", null, true)).hasValue(new Request.LoadPointTree("code", 1));
         // Terms without a term: the field's terms from the first one, with the focus on them.
-        assertThat(terms.show("code", Optional.empty(), false)).hasValue(termsRequest("code", null, false));
+        assertThat(terms.show("code", null, false)).hasValue(termsRequest("code", null, false));
         terms.termsLoaded(termsRequest("code", null, false), page(List.of("x", "y"), null));
         terms.handleKey(key(KeyCode.DOWN));
         assertThat(terms.jump(Jump.SEARCH)).hasValue(new Request.Search("code", text("y")));
         // A row the screen doesn't have.
-        assertThat(terms.show("price", Optional.empty(), false)).isEmpty();
+        assertThat(terms.show("price", null, false)).isEmpty();
     }
 
     @Test

@@ -1,10 +1,10 @@
 package io.github.mfuerstenau.leia.core;
 
-import java.util.Optional;
 import org.apache.lucene.index.DocValuesType;
 import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.index.VectorSimilarityFunction;
+import org.jspecify.annotations.Nullable;
 
 /**
  * One field of an index: how it is indexed, from the merged {@link
@@ -22,7 +22,7 @@ import org.apache.lucene.index.VectorSimilarityFunction;
  * @param vectorDimension dimensions of the KNN vectors; 0 if there are none
  * @param vectorEncoding how the KNN vectors are encoded; Lucene's default if there are none
  * @param vectorSimilarity how the KNN vectors are compared; Lucene's default if there are none
- * @param terms postings statistics; empty if no segment has postings for the field
+ * @param terms postings statistics; null if no segment has postings for the field
  */
 public record FieldStats(
         String name,
@@ -37,7 +37,7 @@ public record FieldStats(
         int vectorDimension,
         VectorEncoding vectorEncoding,
         VectorSimilarityFunction vectorSimilarity,
-        Optional<TermStats> terms) {
+        @Nullable TermStats terms) {
 
     /**
      * Postings statistics of a field, summed over all segments. They are stored per segment, so they

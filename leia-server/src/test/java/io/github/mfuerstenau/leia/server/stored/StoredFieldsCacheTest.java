@@ -41,7 +41,7 @@ class StoredFieldsCacheTest {
 
     @Test
     void aSegmentWithAnIdIsKnownByIt() {
-        RuntimeIndex.Segment segment = new RuntimeIndex.Segment("_0", 0, 7, 6, Optional.of("00ff"), List.of("_0.cfs"));
+        RuntimeIndex.Segment segment = new RuntimeIndex.Segment("_0", 0, 7, 6, "00ff", List.of("_0.cfs"));
         assertThat(SegmentKey.of(tmp.resolve("nowhere"), segment)).contains(new SegmentKey("id 00ff 7"));
     }
 
@@ -49,8 +49,7 @@ class StoredFieldsCacheTest {
     void aSegmentWithoutAnIdIsKnownByItsFiles() throws IOException {
         Files.writeString(tmp.resolve("_0.fdt"), "stored");
         Files.writeString(tmp.resolve("_0.fdx"), "index");
-        RuntimeIndex.Segment segment =
-                new RuntimeIndex.Segment("_0", 0, 7, 6, Optional.empty(), List.of("_0.fdt", "_0.fdx"));
+        RuntimeIndex.Segment segment = new RuntimeIndex.Segment("_0", 0, 7, 6, null, List.of("_0.fdt", "_0.fdx"));
 
         Optional<SegmentKey> key = SegmentKey.of(tmp, segment);
         assertThat(key).isPresent();
@@ -66,30 +65,25 @@ class StoredFieldsCacheTest {
 
     @Test
     void namesTheDocumentsThatStoreOneOfTheFields() {
-        StoredFieldsCache cache = new StoredFieldsCache(Optional.empty());
-        RuntimeIndex.Segment segment = new RuntimeIndex.Segment("_0", 0, 10, 10, Optional.of("00ff"), List.of());
+        StoredFieldsCache cache = new StoredFieldsCache(null);
+        RuntimeIndex.Segment segment = new RuntimeIndex.Segment("_0", 0, 10, 10, "00ff", List.of());
         Path dir = tmp.resolve("nowhere");
-        assertThat(cache.storing(dir, segment, Optional.empty())).isEmpty();
+        assertThat(cache.storing(dir, segment, null)).isEmpty();
 
         // _source in all ten, _id in 2 and 7.
         cache.put(SegmentKey.of(dir, segment).orElseThrow(), fields(10, 2, 7));
 
-        IntUnaryOperator id =
-                cache.storing(dir, segment, Optional.of(Set.of("_id"))).orElseThrow();
+        IntUnaryOperator id = cache.storing(dir, segment, Set.of("_id")).orElseThrow();
         assertThat(IntStream.of(0, 2, 3, 7, 8, 10).map(id)).containsExactly(2, 2, 7, 7, 10, 10);
-        IntUnaryOperator none =
-                cache.storing(dir, segment, Optional.of(Set.of("other"))).orElseThrow();
+        IntUnaryOperator none = cache.storing(dir, segment, Set.of("other")).orElseThrow();
         assertThat(none.applyAsInt(0)).isEqualTo(10);
-        IntUnaryOperator any = cache.storing(dir, segment, Optional.empty()).orElseThrow();
+        IntUnaryOperator any = cache.storing(dir, segment, null).orElseThrow();
         assertThat(IntStream.of(0, 5, 9, 10).map(any)).containsExactly(0, 5, 9, 10);
-        IntUnaryOperator either = cache.storing(dir, segment, Optional.of(Set.of("_id", "_source")))
-                .orElseThrow();
+        IntUnaryOperator either =
+                cache.storing(dir, segment, Set.of("_id", "_source")).orElseThrow();
         assertThat(either.applyAsInt(3)).isEqualTo(3);
         // A segment with another number of documents isn't the one cached.
-        assertThat(cache.storing(
-                        dir,
-                        new RuntimeIndex.Segment("_0", 0, 11, 11, Optional.of("00ff"), List.of()),
-                        Optional.empty()))
+        assertThat(cache.storing(dir, new RuntimeIndex.Segment("_0", 0, 11, 11, "00ff", List.of()), null))
                 .isEmpty();
     }
 
@@ -97,7 +91,7 @@ class StoredFieldsCacheTest {
     void keepsTheMostRecentlyUsedInMemory() {
         SegmentFields one = fields(10, 1);
         long size = one.sizeInBytes();
-        StoredFieldsCache cache = new StoredFieldsCache(Optional.empty(), 2 * size + size / 2);
+        StoredFieldsCache cache = new StoredFieldsCache(null, 2 * size + size / 2);
         SegmentKey a = new SegmentKey("a");
         SegmentKey b = new SegmentKey("b");
         SegmentKey c = new SegmentKey("c");
@@ -116,9 +110,9 @@ class StoredFieldsCacheTest {
     void readsWhatItWroteToDisk() {
         SegmentKey key = new SegmentKey("id 00ff 100");
         SegmentFields written = fields(100, 3, 50, 99);
-        new StoredFieldsCache(Optional.of(disk(Long.MAX_VALUE)), Long.MAX_VALUE).put(key, written);
+        new StoredFieldsCache(disk(Long.MAX_VALUE), Long.MAX_VALUE).put(key, written);
 
-        StoredFieldsCache fresh = new StoredFieldsCache(Optional.of(disk(Long.MAX_VALUE)), Long.MAX_VALUE);
+        StoredFieldsCache fresh = new StoredFieldsCache(disk(Long.MAX_VALUE), Long.MAX_VALUE);
         assertThat(fresh.get(key)).contains(written);
         assertThat(fresh.memorySegments()).isEqualTo(1);
         assertThat(fresh.get(new SegmentKey("id 0100 100"))).isEmpty();

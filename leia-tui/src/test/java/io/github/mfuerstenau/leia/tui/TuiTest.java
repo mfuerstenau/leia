@@ -24,7 +24,6 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -35,6 +34,7 @@ import org.apache.lucene.document.StringField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.store.FSDirectory;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -56,7 +56,7 @@ class TuiTest {
     @BeforeEach
     void start() throws Exception {
         // The old runtimes' folders that the build puts together (ADR 0073); Lucene 10 is on the classpath.
-        backend = LeiaBackend.start(Optional.of(Path.of(System.getProperty("leia.test.runtimes"))), List.of());
+        backend = LeiaBackend.start(Path.of(System.getProperty("leia.test.runtimes")), List.of());
         platform = new Platform(
                 Map.of(
                         "XDG_STATE_HOME", tmp.resolve("state").toString(),
@@ -65,9 +65,9 @@ class TuiTest {
                         "XDG_DATA_HOME", tmp.resolve("data").toString(),
                         "XDG_DATA_DIRS", tmp.resolve("share").toString(),
                         "XDG_CACHE_HOME", tmp.resolve("cache").toString())::get,
-                Optional.empty(),
+                null,
                 false,
-                Optional.empty());
+                null);
     }
 
     @AfterEach
@@ -78,7 +78,7 @@ class TuiTest {
 
     @Test
     void exitsAfterTheFirstFrameWithTheStartupTimes() throws Exception {
-        int status = Tui.run(start(Optional.of(index().toString())), print(out), print(err), true, terminal());
+        int status = Tui.run(start(index().toString()), print(out), print(err), true, terminal());
 
         assertThat(status).isZero();
         assertThat(out.toString(StandardCharsets.UTF_8)).matches("terminal ready \\d+ ms, first frame \\d+ ms\\R");
@@ -91,7 +91,7 @@ class TuiTest {
         QuittingBackend terminal = new QuittingBackend();
 
         int status = Tui.run(
-                start(Optional.of(index().toString())),
+                start(index().toString()),
                 print(out),
                 print(err),
                 false,
@@ -109,11 +109,7 @@ class TuiTest {
         QuittingBackend terminal = new QuittingBackend();
 
         int status = Tui.run(
-                start(Optional.empty()),
-                print(out),
-                print(err),
-                false,
-                TuiConfig.builder().backend(terminal));
+                start(null), print(out), print(err), false, TuiConfig.builder().backend(terminal));
 
         assertThat(status).isZero();
         assertThat(terminal.quitTyped).isTrue();
@@ -145,7 +141,7 @@ class TuiTest {
         }
     }
 
-    private Tui.Start start(Optional<String> indexPath) {
+    private Tui.Start start(@Nullable String indexPath) {
         return new Tui.Start(
                 platform,
                 indexPath,
@@ -154,10 +150,10 @@ class TuiTest {
                 RuntimesDirs.none(),
                 DefaultJars.none(),
                 Tui.themes(platform),
-                Optional.empty(),
+                null,
                 backend,
                 new LeiaLog.Opened(print(OutputStream.nullOutputStream()), LogBuffer.detached()),
-                Optional.empty(),
+                null,
                 Instant.now());
     }
 

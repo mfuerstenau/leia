@@ -38,7 +38,7 @@ class PostingsToolTest {
 
         @Override
         public Session session() {
-            return new Session(DirectoryImpl.FS, Optional.empty(), List.of());
+            return new Session(DirectoryImpl.FS, null, List.of());
         }
 
         @Override
@@ -89,8 +89,7 @@ class PostingsToolTest {
     }
 
     private static PostingsTool.Arguments arguments(boolean positions) {
-        return new PostingsTool.Arguments(
-                "body", "quick", Optional.empty(), OptionalInt.empty(), OptionalInt.empty(), Optional.of(positions));
+        return new PostingsTool.Arguments("body", "quick", null, null, null, positions);
     }
 
     @Test
@@ -102,8 +101,8 @@ class PostingsToolTest {
         assertThat(call.methods).containsExactly(Methods.GET_INDEX_STATS.name(), Methods.GET_POSTINGS.name());
         assertThat(call.postings.getFirst().maxPositions()).hasValue(PostingsTool.MAX_POSITIONS + 1);
         assertThat(result.postings()).hasSize(2).allSatisfy(entry -> {
-            assertThat(entry.positions().orElseThrow()).hasSize(PostingsTool.MAX_POSITIONS);
-            assertThat(entry.positionsCut()).hasValue(true);
+            assertThat(entry.positions()).hasSize(PostingsTool.MAX_POSITIONS);
+            assertThat(entry.positionsCut()).isTrue();
         });
     }
 
@@ -114,8 +113,8 @@ class PostingsToolTest {
         PostingsTool.Result result = new PostingsTool().call(arguments(true), call);
 
         assertThat(result.postings()).allSatisfy(entry -> {
-            assertThat(entry.positions().orElseThrow()).hasSize(PostingsTool.MAX_POSITIONS);
-            assertThat(entry.positionsCut()).isEmpty();
+            assertThat(entry.positions()).hasSize(PostingsTool.MAX_POSITIONS);
+            assertThat(entry.positionsCut()).isNull();
         });
     }
 
@@ -128,6 +127,6 @@ class PostingsToolTest {
         assertThat(call.methods).containsExactly(Methods.GET_POSTINGS.name());
         assertThat(call.postings.getFirst().maxPositions()).isEmpty();
         assertThat(result.postings())
-                .allSatisfy(entry -> assertThat(entry.positions()).isEmpty());
+                .allSatisfy(entry -> assertThat(entry.positions()).isNull());
     }
 }

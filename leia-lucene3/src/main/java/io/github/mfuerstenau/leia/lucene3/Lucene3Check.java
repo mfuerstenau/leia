@@ -57,7 +57,7 @@ final class Lucene3Check implements Check {
                 PrintStream infoStream = new PrintStream(report, true, StandardCharsets.UTF_8)) {
             CheckIndex checker = new CheckIndex(directory);
             checker.setInfoStream(infoStream);
-            status = checker.checkIndex(options.segments().orElse(null));
+            status = checker.checkIndex(options.segments());
             infoStream.flush();
             report.end();
         } catch (IOException | RuntimeException e) {
@@ -76,18 +76,18 @@ final class Lucene3Check implements Check {
             segments.add(new SegmentCheck(
                     segment.name,
                     segment.docCount,
-                    Optional.empty(),
+                    null,
                     segment.compound,
                     segment.numFiles,
                     Math.round(segment.sizeMB * 1024 * 1024),
                     segment.hasDeletions,
                     segment.openReaderPassed,
-                    error(segment)));
+                    error(segment).orElse(null)));
         }
         return new CheckResult(
                 status.clean,
-                Optional.empty(),
-                Optional.ofNullable(status.segmentsFileName),
+                null,
+                status.segmentsFileName,
                 status.missingSegments || status.cantOpenSegments,
                 status.toolOutOfDate,
                 status.numSegments,

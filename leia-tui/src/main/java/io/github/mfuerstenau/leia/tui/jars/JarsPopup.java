@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The jars popup (ADR 0024): lists the loaded jars, the default folder and the folder of runtimes
@@ -57,24 +58,24 @@ public final class JarsPopup {
     private final RuntimesDirs runtimeFolders;
 
     /** The directory that {@code ~} stands for. */
-    private final Optional<Path> home;
+    private final @Nullable Path home;
 
     /** The loaded jars; null until they are fetched, or if they couldn't be. */
-    private List<String> jars;
+    private @Nullable List<String> jars;
 
     /** Why the jars couldn't be listed; null otherwise. */
-    private String jarsError;
+    private @Nullable String jarsError;
 
     private final LineInput input = new LineInput("");
 
     /** The drop-down of the names that the last Tab found, if it found more than one; else null. */
-    private CompletionList list;
+    private @Nullable CompletionList list;
 
     /** What the last addition did; null before one, or if it failed. */
-    private AddJarsResult added;
+    private @Nullable AddJarsResult added;
 
     /** Why the last addition failed; null otherwise. */
-    private String addError;
+    private @Nullable String addError;
 
     /** Set while the jars are being added: then the popup takes no key. */
     private boolean busy;
@@ -88,7 +89,7 @@ public final class JarsPopup {
     /** How many jars the list showed when it was last drawn. */
     private int page = 1;
 
-    public JarsPopup(DefaultJars defaultJars, RuntimesDirs runtimeFolders, Optional<Path> home) {
+    public JarsPopup(DefaultJars defaultJars, RuntimesDirs runtimeFolders, @Nullable Path home) {
         this.defaultJars = defaultJars;
         this.runtimeFolders = runtimeFolders;
         this.home = home;
@@ -188,10 +189,14 @@ public final class JarsPopup {
 
     /** What a key does while the list is open; returns false if the popup handles it. */
     private boolean handleListKey(KeyEvent key) {
+        CompletionList open = list;
+        if (open == null) {
+            return false;
+        }
         switch (key.code()) {
-            case UP, DOWN, PAGE_UP, PAGE_DOWN -> list.move(key);
+            case UP, DOWN, PAGE_UP, PAGE_DOWN -> open.move(key);
             case ENTER, TAB -> {
-                input.set(list.chosen());
+                input.set(open.chosen());
                 list = null;
                 clearOutcome();
             }
@@ -290,8 +295,8 @@ public final class JarsPopup {
     }
 
     private Line defaultLine() {
-        Optional<Path> dir = defaultJars.dir();
-        if (dir.isEmpty()) {
+        Path dir = defaultJars.dir();
+        if (dir == null) {
             return Line.from(
                     Span.raw("Default folder: "),
                     Span.styled("none (no home directory)", Palette.current().muted()));
@@ -303,7 +308,7 @@ public final class JarsPopup {
         };
         return Line.from(
                 Span.raw("Default folder: "),
-                Span.raw(shorten(dir.get())),
+                Span.raw(shorten(dir)),
                 Span.styled(note, Palette.current().muted()));
     }
 
@@ -373,8 +378,8 @@ public final class JarsPopup {
 
     /** {@code path} with the home directory as {@code ~}. */
     private String shorten(Path path) {
-        if (home.isPresent() && path.startsWith(home.get())) {
-            Path rest = home.get().relativize(path);
+        if (home != null && path.startsWith(home)) {
+            Path rest = home.relativize(path);
             return rest.toString().isEmpty() ? "~" : "~" + File.separator + rest;
         }
         return path.toString();

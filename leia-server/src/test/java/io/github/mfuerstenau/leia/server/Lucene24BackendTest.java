@@ -45,7 +45,6 @@ import io.github.mfuerstenau.leia.protocol.terms.Posting;
 import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalInt;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -159,15 +158,11 @@ class Lucene24BackendTest {
         assertThat(terms.next()).contains(new BytesValue("3", false));
 
         GetPostingsResult postings = backend.call(
-                Methods.GET_POSTINGS,
-                new GetPostingsParams("body", new BytesValue("number", false), 0, 10, Optional.empty()));
-        assertThat(postings.postings())
-                .containsExactly(
-                        new Posting(0, false, OptionalInt.of(1), Optional.empty()),
-                        new Posting(2, false, OptionalInt.of(1), Optional.empty()));
+                Methods.GET_POSTINGS, new GetPostingsParams("body", new BytesValue("number", false), 0, 10, null));
+        assertThat(postings.postings()).containsExactly(new Posting(0, false, 1, null), new Posting(2, false, 1, null));
         backend.fails(
                 Methods.GET_POSTINGS,
-                new GetPostingsParams("body", new BytesValue("nothing", false), 0, 10, Optional.empty()),
+                new GetPostingsParams("body", new BytesValue("nothing", false), 0, 10, null),
                 ErrorCode.TERM_NOT_FOUND);
     }
 

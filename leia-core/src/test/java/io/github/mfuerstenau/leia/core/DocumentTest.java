@@ -9,9 +9,6 @@ import io.github.mfuerstenau.leia.core.IndexDocument.StoredValue;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Optional;
-import java.util.OptionalInt;
-import java.util.OptionalLong;
 import org.apache.lucene.document.BinaryDocValuesField;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
@@ -31,6 +28,7 @@ import org.apache.lucene.index.NoMergePolicy;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -68,16 +66,11 @@ class DocumentTest {
                     .containsExactly(
                             "id", "body", "stored", "rank", "prices", "category", "tags", "blob", "plain", "extra");
             assertThat(field(doc, "id"))
-                    .isEqualTo(new IndexDocument.Field(
-                            "id",
-                            OptionalLong.empty(),
-                            List.of(new StoredValue.Text("1")),
-                            Optional.empty(),
-                            false,
-                            Optional.empty()));
+                    .isEqualTo(
+                            new IndexDocument.Field("id", null, List.of(new StoredValue.Text("1")), null, false, null));
             IndexDocument.Field body = field(doc, "body");
             // Norms are the encoded field length: 3 terms.
-            assertThat(body.norm()).hasValue(3);
+            assertThat(body.norm()).isEqualTo(3);
             assertThat(body.stored()).containsExactly(new StoredValue.Text("red blue red"));
             assertThat(body.hasTermVector()).isTrue();
             assertThat(field(doc, "stored").stored())
@@ -88,17 +81,18 @@ class DocumentTest {
                             new StoredValue.DoubleValue(Double.NaN),
                             new StoredValue.Binary(new BytesRef(new byte[] {(byte) 0xff, 0})));
             assertThat(field(doc, "rank").docValues())
-                    .hasValue(new DocValues(DocValuesType.NUMERIC, List.of(42L), List.of()));
+                    .isEqualTo(new DocValues(DocValuesType.NUMERIC, List.of(42L), List.of()));
             // Sorted numeric and sorted set values come in ascending order.
             assertThat(field(doc, "prices").docValues())
-                    .hasValue(new DocValues(DocValuesType.SORTED_NUMERIC, List.of(-1L, 5L), List.of()));
+                    .isEqualTo(new DocValues(DocValuesType.SORTED_NUMERIC, List.of(-1L, 5L), List.of()));
             assertThat(field(doc, "category").docValues())
-                    .hasValue(new DocValues(DocValuesType.SORTED, List.of(), List.of(new BytesRef("books"))));
+                    .isEqualTo(new DocValues(DocValuesType.SORTED, List.of(), List.of(new BytesRef("books"))));
             assertThat(field(doc, "tags").docValues())
-                    .hasValue(new DocValues(
+                    .isEqualTo(new DocValues(
                             DocValuesType.SORTED_SET, List.of(), List.of(new BytesRef("a"), new BytesRef("b"))));
             assertThat(field(doc, "blob").docValues())
-                    .hasValue(new DocValues(DocValuesType.BINARY, List.of(), List.of(new BytesRef(new byte[] {1, 2}))));
+                    .isEqualTo(
+                            new DocValues(DocValuesType.BINARY, List.of(), List.of(new BytesRef(new byte[] {1, 2}))));
             assertThat(field(doc, "plain").hasTermVector()).isFalse();
         }
     }
@@ -114,12 +108,11 @@ class DocumentTest {
             assertThat(field(doc, "id").stored()).containsExactly(new StoredValue.Text("3"));
             assertThat(field(doc, "extra").stored()).containsExactly(new StoredValue.Text("only here"));
             assertThat(field(doc, "rank").docValues())
-                    .hasValue(new DocValues(DocValuesType.NUMERIC, List.of(44L), List.of()));
-            assertThat(field(doc, "body").norm()).hasValue(1);
+                    .isEqualTo(new DocValues(DocValuesType.NUMERIC, List.of(44L), List.of()));
+            assertThat(field(doc, "body").norm()).isEqualTo(1);
             // The first segment has no "extra" field.
             assertThat(field(index.document(0), "extra"))
-                    .isEqualTo(new IndexDocument.Field(
-                            "extra", OptionalLong.empty(), List.of(), Optional.empty(), false, Optional.empty()));
+                    .isEqualTo(new IndexDocument.Field("extra", null, List.of(), null, false, null));
         }
     }
 
@@ -133,7 +126,7 @@ class DocumentTest {
             assertThat(doc.deleted()).isTrue();
             assertThat(field(doc, "id").stored()).containsExactly(new StoredValue.Text("2"));
             assertThat(field(doc, "rank").docValues())
-                    .hasValue(new DocValues(DocValuesType.NUMERIC, List.of(43L), List.of()));
+                    .isEqualTo(new DocValues(DocValuesType.NUMERIC, List.of(43L), List.of()));
         }
     }
 
@@ -145,8 +138,8 @@ class DocumentTest {
             // Document 1 has neither prices nor tags, though its segment has both fields.
             IndexDocument doc = index.document(1);
 
-            assertThat(field(doc, "prices").docValues()).isEmpty();
-            assertThat(field(doc, "tags").docValues()).isEmpty();
+            assertThat(field(doc, "prices").docValues()).isNull();
+            assertThat(field(doc, "tags").docValues()).isNull();
             assertThat(field(doc, "stored").stored()).isEmpty();
             assertThat(field(doc, "body").stored()).isEmpty();
             assertThat(field(doc, "body").hasTermVector()).isTrue();
@@ -180,16 +173,11 @@ class DocumentTest {
 
             assertThat(terms)
                     .containsExactly(
-                            new TermVectorTerm(
-                                    new BytesRef("blue"),
-                                    1,
-                                    List.of(position(1, 4, 8, Optional.of(new BytesRef("p1"))))),
+                            new TermVectorTerm(new BytesRef("blue"), 1, List.of(position(1, 4, 8, new BytesRef("p1")))),
                             new TermVectorTerm(
                                     new BytesRef("red"),
                                     2,
-                                    List.of(
-                                            position(0, 0, 3, Optional.of(new BytesRef("p0"))),
-                                            position(2, 9, 12, Optional.empty()))));
+                                    List.of(position(0, 0, 3, new BytesRef("p0")), position(2, 9, 12, null))));
         }
     }
 
@@ -215,22 +203,8 @@ class DocumentTest {
                             new TermVectorTerm(new BytesRef("b"), 1, List.of()));
             assertThat(index.termVector(0, "offsets"))
                     .containsExactly(
-                            new TermVectorTerm(
-                                    new BytesRef("a"),
-                                    1,
-                                    List.of(new TermPosition(
-                                            OptionalInt.empty(),
-                                            OptionalInt.of(0),
-                                            OptionalInt.of(1),
-                                            Optional.empty()))),
-                            new TermVectorTerm(
-                                    new BytesRef("b"),
-                                    1,
-                                    List.of(new TermPosition(
-                                            OptionalInt.empty(),
-                                            OptionalInt.of(2),
-                                            OptionalInt.of(3),
-                                            Optional.empty()))));
+                            new TermVectorTerm(new BytesRef("a"), 1, List.of(new TermPosition(null, 0, 1, null))),
+                            new TermVectorTerm(new BytesRef("b"), 1, List.of(new TermPosition(null, 2, 3, null))));
         }
     }
 
@@ -242,8 +216,7 @@ class DocumentTest {
             assertThat(index.termVector(0, "plain")).isEmpty();
             assertThat(index.termVector(1, "plain")).isEmpty();
             assertThat(index.termVector(1, "body"))
-                    .containsExactly(
-                            new TermVectorTerm(new BytesRef("green"), 1, List.of(position(0, 0, 5, Optional.empty()))));
+                    .containsExactly(new TermVectorTerm(new BytesRef("green"), 1, List.of(position(0, 0, 5, null))));
         }
     }
 
@@ -277,9 +250,9 @@ class DocumentTest {
                     .containsExactly("id", "body", "vector", "number");
             assertThat(field(doc, "id").stored()).containsExactly(new StoredValue.Text("2"));
             assertThat(field(doc, "body").stored()).containsExactly(new StoredValue.Text("document number 2"));
-            assertThat(field(doc, "body").norm()).hasValue(3);
+            assertThat(field(doc, "body").norm()).isEqualTo(3);
             // Through the backward codecs: [N, 0, 1].
-            assertThat(field(doc, "vector").vector()).hasValue(new KnnVector.Floats(new float[] {2, 0, 1}));
+            assertThat(field(doc, "vector").vector()).isEqualTo(new KnnVector.Floats(new float[] {2, 0, 1}));
             assertThat(index.document(2).deleted()).isFalse();
         }
     }
@@ -291,8 +264,8 @@ class DocumentTest {
                 .orElseThrow();
     }
 
-    private static TermPosition position(int position, int start, int end, Optional<BytesRef> payload) {
-        return new TermPosition(OptionalInt.of(position), OptionalInt.of(start), OptionalInt.of(end), payload);
+    private static TermPosition position(int position, int start, int end, @Nullable BytesRef payload) {
+        return new TermPosition(position, start, end, payload);
     }
 
     /**

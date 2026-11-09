@@ -1,12 +1,12 @@
 package io.github.mfuerstenau.leia.core;
 
-import java.util.Optional;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.search.KnnByteVectorQuery;
 import org.apache.lucene.search.KnnFloatVectorQuery;
 import org.apache.lucene.search.Query;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Builds queries for the documents whose KNN vectors in one field are nearest to a target (ADR
@@ -25,15 +25,14 @@ public final class KnnQueries {
      * @throws IllegalArgumentException if {@code target} doesn't fit the field (see {@link #check}),
      *     or {@code k} is below 1
      */
-    public static Query approximate(FieldInfo field, KnnVector target, int k, Optional<Query> filter) {
+    public static Query approximate(FieldInfo field, KnnVector target, int k, @Nullable Query filter) {
         check(field, target);
         if (k < 1) {
             throw new IllegalArgumentException("k must be at least 1: " + k);
         }
         return switch (target) {
-            case KnnVector.Floats floats ->
-                new KnnFloatVectorQuery(field.name, floats.values(), k, filter.orElse(null));
-            case KnnVector.Bytes bytes -> new KnnByteVectorQuery(field.name, bytes.values(), k, filter.orElse(null));
+            case KnnVector.Floats floats -> new KnnFloatVectorQuery(field.name, floats.values(), k, filter);
+            case KnnVector.Bytes bytes -> new KnnByteVectorQuery(field.name, bytes.values(), k, filter);
         };
     }
 
@@ -43,7 +42,7 @@ public final class KnnQueries {
      *
      * @throws IllegalArgumentException if {@code target} doesn't fit the field (see {@link #check})
      */
-    public static Query exact(FieldInfo field, KnnVector target, Optional<Query> filter) {
+    public static Query exact(FieldInfo field, KnnVector target, @Nullable Query filter) {
         check(field, target);
         return new ExactKnnQuery(field.name, target, filter);
     }

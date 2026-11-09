@@ -50,19 +50,19 @@ class IndexCheckTest {
 
         IndexCheck.Result result = check(dir, directoryImpl, 2, lines::add, ScanProgress.NONE);
 
-        assertThat(result.error()).isEmpty();
+        assertThat(result.error()).isNull();
         assertThat(result.clean()).isTrue();
-        assertThat(result.segmentsFile()).contains("segments_3");
+        assertThat(result.segmentsFile()).isEqualTo("segments_3");
         assertThat(result.segmentCount()).isEqualTo(3);
         assertThat(result.badSegments()).isZero();
         assertThat(result.validCounter()).isTrue();
         assertThat(result.segments()).extracting(IndexCheck.SegmentResult::name).containsExactly("_0", "_1", "_2");
         IndexCheck.SegmentResult first = result.segments().getFirst();
         assertThat(first.maxDoc()).isEqualTo(2);
-        assertThat(first.codec()).isPresent();
+        assertThat(first.codec()).isNotNull();
         assertThat(first.openReaderPassed()).isTrue();
         assertThat(first.sizeBytes()).isPositive();
-        assertThat(first.error()).isEmpty();
+        assertThat(first.error()).isNull();
         assertThat(lines)
                 .anyMatch(line -> line.startsWith("Segments file=segments_3 numSegments=3"))
                 .anyMatch(line -> line.contains("test: terms, freq, prox...OK"))
@@ -95,7 +95,7 @@ class IndexCheckTest {
         IndexCheck.Result result =
                 IndexCheck.check(dir, DirectoryImpl.FS, 2, 4, List.of("_1", "_9"), lines::add, ScanProgress.NONE);
 
-        assertThat(result.error()).isEmpty();
+        assertThat(result.error()).isNull();
         assertThat(result.clean()).isTrue();
         // The commit has three segments, and one of them was checked.
         assertThat(result.segmentCount()).isEqualTo(3);
@@ -201,13 +201,13 @@ class IndexCheckTest {
 
         IndexCheck.Result result = check(dir, DirectoryImpl.FS, 1, _ -> {}, ScanProgress.NONE);
 
-        assertThat(result.error()).isEmpty();
+        assertThat(result.error()).isNull();
         assertThat(result.clean()).isFalse();
         assertThat(result.badSegments()).isEqualTo(1);
         assertThat(result.lostDocs()).isEqualTo(2);
-        assertThat(result.segments().get(0).error()).isEmpty();
+        assertThat(result.segments().get(0).error()).isNull();
         assertThat(result.segments().get(1).error())
-                .hasValueSatisfying(error -> assertThat(error).containsIgnoringCase("checksum"));
+                .satisfies(error -> assertThat(error).containsIgnoringCase("checksum"));
     }
 
     @Test
@@ -222,7 +222,7 @@ class IndexCheckTest {
 
         IndexCheck.Result result = check(dir, DirectoryImpl.FS, 1, lines::add, ScanProgress.NONE);
 
-        assertThat(result.error()).isEmpty();
+        assertThat(result.error()).isNull();
         assertThat(result.clean()).isFalse();
         assertThat(result.missingSegments()).isTrue();
         assertThat(lines).anyMatch(line -> line.startsWith("ERROR: could not read latest commit point"));
@@ -234,7 +234,7 @@ class IndexCheckTest {
 
         IndexCheck.Result result = check(testIndex("lucene8"), DirectoryImpl.FS, 1, _ -> {}, ScanProgress.NONE);
 
-        assertThat(result.error()).isEmpty();
+        assertThat(result.error()).isNull();
         assertThat(result.clean()).isTrue();
         assertThat(result.segments()).isNotEmpty();
     }
@@ -254,7 +254,7 @@ class IndexCheckTest {
         IndexCheck.Result result = check(dir, DirectoryImpl.FS, 1, _ -> {}, ScanProgress.NONE);
 
         assertThat(result.clean()).isFalse();
-        assertThat(result.error()).hasValueSatisfying(error -> assertThat(error).contains("no segments* file"));
+        assertThat(result.error()).satisfies(error -> assertThat(error).contains("no segments* file"));
         assertThat(result.segments()).isEmpty();
     }
 

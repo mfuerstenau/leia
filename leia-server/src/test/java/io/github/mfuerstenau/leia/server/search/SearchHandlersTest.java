@@ -63,6 +63,7 @@ import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.TermQuery;
 import io.github.mfuerstenau.leia.protocol.search.TotalHitsRelation;
 import io.github.mfuerstenau.leia.protocol.search.ValueHighlight;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.TestIndexes;
 import io.github.mfuerstenau.leia.server.filter.Filters;
@@ -90,6 +91,7 @@ import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -111,7 +113,7 @@ class SearchHandlersTest {
             List.of());
     private static final Similarity BM25 =
             new Similarity(Optional.of(new Bm25Similarity(1.2f, 0.75f)), Optional.empty(), Optional.empty());
-    private static final Optional<List<String>> NONE = Optional.of(List.of());
+    private static final List<String> NONE = List.of();
     private static final Similarity BOOLEAN =
             new Similarity(Optional.empty(), Optional.empty(), Optional.of(new BooleanSimilarity()));
 
@@ -131,7 +133,7 @@ class SearchHandlersTest {
     void searchesAndPages() throws Exception {
         openIndex();
 
-        SearchResults first = search(params(classic("red"), 0, 1, Optional.of(List.of("id"))));
+        SearchResults first = search(params(classic("red"), 0, 1, List.of("id")));
 
         assertThat(first.query()).isEqualTo("body:red");
         assertThat(first.rewrittenQuery()).isEqualTo("body:red");
@@ -142,7 +144,7 @@ class SearchHandlersTest {
                 .containsExactly(new HitField("id", List.of(new StoredValue(StoredType.STRING, "1", false))));
         assertThat(first.hits().getFirst().score()).isPositive();
 
-        SearchResults second = search(params(classic("red"), 1, 1, Optional.of(List.of("id"))));
+        SearchResults second = search(params(classic("red"), 1, 1, List.of("id")));
         assertThat(second.hits()).extracting(Hit::docId).containsExactly(2);
     }
 
@@ -175,7 +177,7 @@ class SearchHandlersTest {
         openIndex();
 
         SearchResults results = search(new StartSearchParams(
-                knn("vec", OptionalInt.empty(), floats(1, 0), OptionalInt.of(2), false),
+                knn("vec", null, floats(1, 0), 2, false),
                 BM25,
                 List.of(),
                 0,
@@ -209,10 +211,7 @@ class SearchHandlersTest {
                         .values())
                 .isEmpty();
         assertThat(highlight(new StartHighlightParams(
-                        knn("vec", OptionalInt.empty(), floats(1, 0), OptionalInt.of(2), false),
-                        0,
-                        Optional.of("body"),
-                        options(1))))
+                        knn("vec", null, floats(1, 0), 2, false), 0, Optional.of("body"), options(1))))
                 .isEqualTo(new DocumentHighlight(List.of()));
     }
 
@@ -255,7 +254,7 @@ class SearchHandlersTest {
     void cutsLongValues() throws Exception {
         openIndex();
 
-        Hit hit = search(params(classic("red"), 1, 1, Optional.empty())).hits().getFirst();
+        Hit hit = search(params(classic("red"), 1, 1, null)).hits().getFirst();
 
         StoredValue body = hit.fields().stream()
                 .filter(field -> field.name().equals("body"))
@@ -271,8 +270,7 @@ class SearchHandlersTest {
     void searchesForABinaryTerm() throws Exception {
         openIndex();
 
-        SearchResults results =
-                search(params(term("key", new BytesValue("ff00", true)), 0, 10, Optional.of(List.of("id"))));
+        SearchResults results = search(params(term("key", new BytesValue("ff00", true)), 0, 10, List.of("id")));
 
         assertThat(results.hits()).extracting(Hit::docId).containsExactly(1);
         assertThat(results.query()).isEqualTo("key:[ff 0]");
@@ -283,7 +281,7 @@ class SearchHandlersTest {
         openIndex();
         SearchQuery broken = classic("body:(red");
 
-        assertThatThrownBy(() -> startSearch.handle(params(broken, 0, 10, Optional.empty())))
+        assertThatThrownBy(() -> startSearch.handle(params(broken, 0, 10, null)))
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_QUERY))
                 .hasMessageStartingWith("Invalid query: Cannot parse 'body:(red'")
@@ -302,13 +300,12 @@ class SearchHandlersTest {
                 Optional.empty(),
                 Optional.empty());
 
+        assertFails(() -> startSearch.handle(params(unknownDefault, 0, 10, null)), ErrorCode.FIELD_NOT_FOUND);
         assertFails(
-                () -> startSearch.handle(params(unknownDefault, 0, 10, Optional.empty())), ErrorCode.FIELD_NOT_FOUND);
-        assertFails(
-                () -> startSearch.handle(params(term("bdy", new BytesValue("red", false)), 0, 10, Optional.empty())),
+                () -> startSearch.handle(params(term("bdy", new BytesValue("red", false)), 0, 10, null)),
                 ErrorCode.FIELD_NOT_FOUND);
         assertFails(
-                () -> startSearch.handle(params(classic("red"), 0, 10, Optional.of(List.of("id", "nope")))),
+                () -> startSearch.handle(params(classic("red"), 0, 10, List.of("id", "nope"))),
                 ErrorCode.FIELD_NOT_FOUND);
     }
 
@@ -330,10 +327,10 @@ class SearchHandlersTest {
                 Optional.empty(),
                 Optional.empty());
 
-        assertFails(() -> startSearch.handle(params(both, 0, 10, Optional.empty())), ErrorCode.INVALID_PARAMS);
-        assertFails(() -> startSearch.handle(params(neither, 0, 10, Optional.empty())), ErrorCode.INVALID_PARAMS);
+        assertFails(() -> startSearch.handle(params(both, 0, 10, null)), ErrorCode.INVALID_PARAMS);
+        assertFails(() -> startSearch.handle(params(neither, 0, 10, null)), ErrorCode.INVALID_PARAMS);
         assertFails(
-                () -> startSearch.handle(params(term("key", new BytesValue("zz", true)), 0, 10, Optional.empty())),
+                () -> startSearch.handle(params(term("key", new BytesValue("zz", true)), 0, 10, null)),
                 ErrorCode.INVALID_PARAMS);
     }
 
@@ -341,16 +338,10 @@ class SearchHandlersTest {
     void searchesByDocValues() throws Exception {
         openIndex();
 
-        SearchResults ranks = search(params(
-                docValues("rank", DocValuesNumber.LONG, Optional.empty(), Optional.of(range("75", null))),
-                0,
-                10,
-                Optional.of(List.of())));
-        SearchResults colors = search(params(
-                docValues("color", null, Optional.of(List.of(text("crimson"), text("blue"))), Optional.empty()),
-                0,
-                10,
-                Optional.of(List.of())));
+        SearchResults ranks =
+                search(params(docValues("rank", DocValuesNumber.LONG, null, range("75", null)), 0, 10, List.of()));
+        SearchResults colors = search(
+                params(docValues("color", null, List.of(text("crimson"), text("blue")), null), 0, 10, List.of()));
 
         // rank: 90, 80, 70
         assertThat(ranks.hits()).extracting(Hit::docId).containsExactly(0, 1);
@@ -362,10 +353,10 @@ class SearchHandlersTest {
     void searchesByAPrefixOfDocValues() throws Exception {
         openIndex();
 
-        SearchResults cr = search(params(docValuesPrefix("color", null, text("cr")), 0, 10, Optional.of(List.of())));
-        SearchResults any = search(params(docValuesPrefix("color", null, text("")), 0, 10, Optional.of(List.of())));
-        SearchResults hex = search(
-                params(docValuesPrefix("color", null, new BytesValue("72", true)), 0, 10, Optional.of(List.of())));
+        SearchResults cr = search(params(docValuesPrefix("color", null, text("cr")), 0, 10, List.of()));
+        SearchResults any = search(params(docValuesPrefix("color", null, text("")), 0, 10, List.of()));
+        SearchResults hex =
+                search(params(docValuesPrefix("color", null, new BytesValue("72", true)), 0, 10, List.of()));
 
         // color: "red" (doc 0), "crimson" (doc 2)
         assertThat(cr.hits()).extracting(Hit::docId).containsExactly(2);
@@ -377,30 +368,24 @@ class SearchHandlersTest {
     @Test
     void checksTheDocValuesQuery() throws Exception {
         openIndex();
-        Optional<List<BytesValue>> one = Optional.of(List.of(text("80")));
+        List<BytesValue> one = List.of(text("80"));
 
-        assertFails(
-                () -> search(params(docValues("nope", null, one, Optional.empty()), 0, 10, Optional.empty())),
-                ErrorCode.FIELD_NOT_FOUND);
+        assertFails(() -> search(params(docValues("nope", null, one, null), 0, 10, null)), ErrorCode.FIELD_NOT_FOUND);
         for (SearchQuery query : List.of(
                 // no doc values
-                docValues("body", null, one, Optional.empty()),
+                docValues("body", null, one, null),
                 // numbers without an encoding, bytes with one
-                docValues("rank", null, one, Optional.empty()),
-                docValues("color", DocValuesNumber.LONG, one, Optional.empty()),
+                docValues("rank", null, one, null),
+                docValues("color", DocValuesNumber.LONG, one, null),
                 // not exactly one of values, range and prefix
-                docValues("rank", DocValuesNumber.LONG, one, Optional.of(range("1", "2"))),
-                docValues("rank", DocValuesNumber.LONG, Optional.empty(), Optional.empty()),
-                docValues("rank", DocValuesNumber.LONG, Optional.of(List.of()), Optional.empty()),
+                docValues("rank", DocValuesNumber.LONG, one, range("1", "2")),
+                docValues("rank", DocValuesNumber.LONG, null, null),
+                docValues("rank", DocValuesNumber.LONG, List.of(), null),
                 // values that don't parse
-                docValues("rank", DocValuesNumber.LONG, Optional.of(List.of(text("8x"))), Optional.empty()),
-                docValues("rank", DocValuesNumber.DOUBLE, Optional.of(List.of(text("NaN"))), Optional.empty()),
-                docValues(
-                        "rank",
-                        DocValuesNumber.LONG,
-                        Optional.of(List.of(new BytesValue("50", true))),
-                        Optional.empty()),
-                docValues("color", null, Optional.of(List.of(new BytesValue("zz", true))), Optional.empty()),
+                docValues("rank", DocValuesNumber.LONG, List.of(text("8x")), null),
+                docValues("rank", DocValuesNumber.DOUBLE, List.of(text("NaN")), null),
+                docValues("rank", DocValuesNumber.LONG, List.of(new BytesValue("50", true)), null),
+                docValues("color", null, List.of(new BytesValue("zz", true)), null),
                 // a prefix: with values, of numbers, in bad hex
                 new SearchQuery(
                         Optional.empty(),
@@ -408,15 +393,14 @@ class SearchHandlersTest {
                         Optional.empty(),
                         Optional.empty(),
                         Optional.of(new DocValuesQuery(
-                                "color", Optional.empty(), one, Optional.empty(), Optional.of(text("r")))),
+                                "color", Optional.empty(), Optional.of(one), Optional.empty(), Optional.of(text("r")))),
                         Optional.empty()),
                 docValuesPrefix("rank", DocValuesNumber.LONG, text("8")),
                 docValuesPrefix("rank", null, text("8")),
                 docValuesPrefix("color", null, new BytesValue("7", true)))) {
-            assertFails(() -> startSearch.handle(params(query, 0, 10, Optional.empty())), ErrorCode.INVALID_PARAMS);
+            assertFails(() -> startSearch.handle(params(query, 0, 10, null)), ErrorCode.INVALID_PARAMS);
         }
-        assertThatThrownBy(() -> startSearch.handle(
-                        params(docValues("rank", null, one, Optional.empty()), 0, 10, Optional.empty())))
+        assertThatThrownBy(() -> startSearch.handle(params(docValues("rank", null, one, null), 0, 10, null)))
                 .hasMessage("Invalid params: the field 'rank' has NUMERIC doc values, which hold numbers: say how"
                         + " they are encoded");
     }
@@ -425,12 +409,9 @@ class SearchHandlersTest {
     void searchesByKnn() throws Exception {
         openIndex();
 
-        SearchResults approximate =
-                search(params(knn("vec", OptionalInt.empty(), floats(3, 0), OptionalInt.of(1), false), 0, 10, NONE));
-        SearchResults exact =
-                search(params(knn("vec", OptionalInt.empty(), floats(3, 0), OptionalInt.empty(), true), 0, 10, NONE));
-        SearchResults fromDocument =
-                search(params(knn("bvec", OptionalInt.of(0), null, OptionalInt.empty(), true), 0, 10, NONE));
+        SearchResults approximate = search(params(knn("vec", null, floats(3, 0), 1, false), 0, 10, NONE));
+        SearchResults exact = search(params(knn("vec", null, floats(3, 0), null, true), 0, 10, NONE));
+        SearchResults fromDocument = search(params(knn("bvec", 0, null, null, true), 0, 10, NONE));
 
         // vec: [1, 0] (doc 0), none (doc 1), [3, 0] (doc 2)
         assertThat(approximate.hits()).extracting(Hit::docId).containsExactly(2);
@@ -475,8 +456,7 @@ class SearchHandlersTest {
         openIndex();
 
         for (boolean exact : List.of(true, false)) {
-            SearchQuery query =
-                    knn("vec", OptionalInt.of(0), null, exact ? OptionalInt.empty() : OptionalInt.of(2), exact);
+            SearchQuery query = knn("vec", 0, null, exact ? null : 2, exact);
             assertThat(explain(new StartExplainParams(query, BM25, 0)).match()).isTrue();
             assertThat(explain(new StartExplainParams(query, BM25, 1)).match()).isFalse();
         }
@@ -485,25 +465,23 @@ class SearchHandlersTest {
     @Test
     void checksTheKnnQuery() throws Exception {
         openIndex();
-        OptionalInt none = OptionalInt.empty();
-        OptionalInt ten = OptionalInt.of(10);
+        Integer none = null;
+        Integer ten = 10;
 
         assertFails(
                 () -> search(params(knn("nope", none, floats(1, 0), ten, false), 0, 10, NONE)),
                 ErrorCode.FIELD_NOT_FOUND);
-        assertFails(
-                () -> search(params(knn("vec", OptionalInt.of(3), null, ten, false), 0, 10, NONE)),
-                ErrorCode.DOC_NOT_FOUND);
+        assertFails(() -> search(params(knn("vec", 3, null, ten, false), 0, 10, NONE)), ErrorCode.DOC_NOT_FOUND);
         for (SearchQuery query : List.of(
                 // no vectors
                 knn("body", none, floats(1, 0), ten, false),
                 // not exactly one target
-                knn("vec", OptionalInt.of(0), floats(1, 0), ten, false),
+                knn("vec", 0, floats(1, 0), ten, false),
                 knn("vec", none, null, ten, false),
                 // k: missing, out of range, or with an exact query
                 knn("vec", none, floats(1, 0), none, false),
-                knn("vec", none, floats(1, 0), OptionalInt.of(0), false),
-                knn("vec", none, floats(1, 0), OptionalInt.of(KnnQuery.MAX_K + 1), false),
+                knn("vec", none, floats(1, 0), 0, false),
+                knn("vec", none, floats(1, 0), KnnQuery.MAX_K + 1, false),
                 knn("vec", none, floats(1, 0), ten, true),
                 // a target that doesn't fit
                 knn("vec", none, floats(1, 0, 0), ten, false),
@@ -521,11 +499,10 @@ class SearchHandlersTest {
                         ten,
                         false),
                 // a document without a vector
-                knn("vec", OptionalInt.of(1), null, ten, false))) {
+                knn("vec", 1, null, ten, false))) {
             assertFails(() -> startSearch.handle(params(query, 0, 10, NONE)), ErrorCode.INVALID_PARAMS);
         }
-        assertThatThrownBy(
-                        () -> startSearch.handle(params(knn("vec", OptionalInt.of(1), null, ten, false), 0, 10, NONE)))
+        assertThatThrownBy(() -> startSearch.handle(params(knn("vec", 1, null, ten, false), 0, 10, NONE)))
                 .hasMessage("Invalid params: document 1 has no vector in the field 'vec'");
         assertThatThrownBy(() -> startSearch.handle(params(knn("vec", none, floats(1, 0, 0), ten, false), 0, 10, NONE)))
                 .hasMessage("Invalid params: the field 'vec' has vectors of 2 dimensions, not 3");
@@ -539,7 +516,7 @@ class SearchHandlersTest {
                         "vec",
                         OptionalInt.of(0),
                         Optional.empty(),
-                        ten,
+                        OptionalInt.of(ten),
                         false,
                         Optional.of(new ClassicQuery(
                                 "red AND (", "body", QueryOperator.OR, DEFAULTS, 2, true, false, STANDARD)))));
@@ -551,9 +528,7 @@ class SearchHandlersTest {
     void rejectsPagesOutOfRange(int offset, int limit) throws Exception {
         openIndex();
 
-        assertFails(
-                () -> startSearch.handle(params(classic("red"), offset, limit, Optional.empty())),
-                ErrorCode.INVALID_PARAMS);
+        assertFails(() -> startSearch.handle(params(classic("red"), offset, limit, null)), ErrorCode.INVALID_PARAMS);
     }
 
     @Test
@@ -564,7 +539,7 @@ class SearchHandlersTest {
                 classic("red"),
                 StartSearchParams.MAX_WINDOW - StartSearchParams.MAX_LIMIT,
                 StartSearchParams.MAX_LIMIT,
-                Optional.empty()));
+                null));
 
         assertThat(results.hits()).isEmpty();
         assertThat(results.totalHits()).isEqualTo(2);
@@ -575,10 +550,9 @@ class SearchHandlersTest {
         openIndex();
         ParserOptions options = options(true, 2, 1, true);
 
-        SearchResults classic =
-                search(params(classic("*ed \"red x\" blu~", options, 1, false, false), 0, 10, Optional.empty()));
+        SearchResults classic = search(params(classic("*ed \"red x\" blu~", options, 1, false, false), 0, 10, null));
         assertThat(classic.query()).isEqualTo("body:*ed body:\"red x\"~2 body:blu~1");
-        SearchResults standard = search(params(standard("*ed \"red x\"", options, List.of()), 0, 10, Optional.empty()));
+        SearchResults standard = search(params(standard("*ed \"red x\"", options, List.of()), 0, 10, null));
         assertThat(standard.query()).isEqualTo("body:*ed body:\"red x\"~2");
         assertThat(standard.hits()).extracting(Hit::docId).containsExactly(0, 2);
     }
@@ -592,29 +566,20 @@ class SearchHandlersTest {
                 standard("red", options(false, 0, -1, true), List.of()),
                 classic("red", DEFAULTS, 3, false, false),
                 classic("red", DEFAULTS, 2, false, true))) {
-            assertFails(() -> startSearch.handle(params(query, 0, 10, Optional.empty())), ErrorCode.INVALID_PARAMS);
+            assertFails(() -> startSearch.handle(params(query, 0, 10, null)), ErrorCode.INVALID_PARAMS);
         }
     }
 
     @Test
     void readsRangeBoundsAsDates() throws Exception {
         openIndex();
-        ParserOptions dates = dates(Optional.of(DateResolution.DAY), Optional.of("en-US"), Optional.of("UTC"));
+        ParserOptions dates = dates(DateResolution.DAY, "en-US", "UTC");
 
-        assertThat(search(params(
-                                classic("published:[1/1/26 TO 1/31/26]", dates, 2, false, false),
-                                0,
-                                10,
-                                Optional.empty()))
+        assertThat(search(params(classic("published:[1/1/26 TO 1/31/26]", dates, 2, false, false), 0, 10, null))
                         .query())
                 .isEqualTo("published:[20260101 TO 20260131]");
-        ParserOptions berlin =
-                dates(Optional.of(DateResolution.DAY), Optional.of("de-DE"), Optional.of("Europe/Berlin"));
-        assertThat(search(params(
-                                standard("published:[01.01.26 TO 31.01.26]", berlin, List.of()),
-                                0,
-                                10,
-                                Optional.empty()))
+        ParserOptions berlin = dates(DateResolution.DAY, "de-DE", "Europe/Berlin");
+        assertThat(search(params(standard("published:[01.01.26 TO 31.01.26]", berlin, List.of()), 0, 10, null))
                         .query())
                 .isEqualTo("published:[20251231 TO 20260131]");
     }
@@ -624,12 +589,12 @@ class SearchHandlersTest {
         openIndex();
 
         for (ParserOptions options : List.of(
-                dates(Optional.empty(), Optional.of("en_US"), Optional.empty()),
-                dates(Optional.empty(), Optional.of(" "), Optional.empty()),
-                dates(Optional.empty(), Optional.empty(), Optional.of("Mars/Olympus")),
-                dates(Optional.empty(), Optional.empty(), Optional.of("")))) {
+                dates(null, "en_US", null),
+                dates(null, " ", null),
+                dates(null, null, "Mars/Olympus"),
+                dates(null, null, ""))) {
             assertFails(
-                    () -> startSearch.handle(params(classic("red", options, 2, false, false), 0, 10, Optional.empty())),
+                    () -> startSearch.handle(params(classic("red", options, 2, false, false), 0, 10, null)),
                     ErrorCode.INVALID_PARAMS);
         }
     }
@@ -637,17 +602,14 @@ class SearchHandlersTest {
     @Test
     void aFieldsOwnDateResolutionWins() throws Exception {
         openIndex();
-        ParserOptions hours = dates(
-                Optional.of(DateResolution.DAY),
-                List.of(new FieldDateResolution("id", DateResolution.HOUR)),
-                Optional.of("en-US"),
-                Optional.of("UTC"));
+        ParserOptions hours =
+                dates(DateResolution.DAY, List.of(new FieldDateResolution("id", DateResolution.HOUR)), "en-US", "UTC");
 
         assertThat(search(params(
                                 standard("+id:[1/1/26 TO 1/2/26] +body:[1/1/26 TO 1/31/26]", hours, List.of()),
                                 0,
                                 10,
-                                Optional.empty()))
+                                null))
                         .query())
                 .isEqualTo("+id:[2026010100 TO 2026010223] +body:[20260101 TO 20260131]");
     }
@@ -655,24 +617,21 @@ class SearchHandlersTest {
     @Test
     void rejectsDateResolutionsOfUnknownOrRepeatedFields() throws Exception {
         openIndex();
-        ParserOptions unknown = dates(
-                Optional.empty(),
-                List.of(new FieldDateResolution("nothing", DateResolution.DAY)),
-                Optional.empty(),
-                Optional.empty());
+        ParserOptions unknown =
+                dates(null, List.of(new FieldDateResolution("nothing", DateResolution.DAY)), null, null);
         ParserOptions twice = dates(
-                Optional.empty(),
+                null,
                 List.of(
                         new FieldDateResolution("id", DateResolution.DAY),
                         new FieldDateResolution("id", DateResolution.HOUR)),
-                Optional.empty(),
-                Optional.empty());
+                null,
+                null);
 
         assertFails(
-                () -> startSearch.handle(params(classic("red", unknown, 2, false, false), 0, 10, Optional.empty())),
+                () -> startSearch.handle(params(classic("red", unknown, 2, false, false), 0, 10, null)),
                 ErrorCode.FIELD_NOT_FOUND);
         assertFails(
-                () -> startSearch.handle(params(standard("red", twice, List.of()), 0, 10, Optional.empty())),
+                () -> startSearch.handle(params(standard("red", twice, List.of()), 0, 10, null)),
                 ErrorCode.INVALID_PARAMS);
     }
 
@@ -681,14 +640,11 @@ class SearchHandlersTest {
         openIndex();
 
         SearchResults results = search(params(
-                standard("size:[15 TO 30]", DEFAULTS, List.of(new PointField("size", PointType.INT))),
-                0,
-                10,
-                Optional.empty()));
+                standard("size:[15 TO 30]", DEFAULTS, List.of(new PointField("size", PointType.INT))), 0, 10, null));
         assertThat(results.query()).isEqualTo("size:[15 TO 30]");
         assertThat(results.hits()).extracting(Hit::docId).containsExactly(1, 2);
         // Without a type, the range is over text.
-        assertThat(search(params(standard("size:[15 TO 30]", DEFAULTS, List.of()), 0, 10, Optional.empty()))
+        assertThat(search(params(standard("size:[15 TO 30]", DEFAULTS, List.of()), 0, 10, null))
                         .hits())
                 .isEmpty();
         assertFails(
@@ -696,7 +652,7 @@ class SearchHandlersTest {
                         standard("size:[x TO 30]", DEFAULTS, List.of(new PointField("size", PointType.INT))),
                         0,
                         10,
-                        Optional.empty())),
+                        null)),
                 ErrorCode.INVALID_QUERY);
     }
 
@@ -706,17 +662,14 @@ class SearchHandlersTest {
 
         assertFails(
                 () -> startSearch.handle(params(
-                        standard("red", DEFAULTS, List.of(new PointField("sise", PointType.INT))),
-                        0,
-                        10,
-                        Optional.empty())),
+                        standard("red", DEFAULTS, List.of(new PointField("sise", PointType.INT))), 0, 10, null)),
                 ErrorCode.FIELD_NOT_FOUND);
         for (List<PointField> points : List.of(
                 List.of(new PointField("size", PointType.LONG)),
                 List.of(new PointField("body", PointType.INT)),
                 List.of(new PointField("size", PointType.INT), new PointField("size", PointType.FLOAT)))) {
             assertFails(
-                    () -> startSearch.handle(params(standard("red", DEFAULTS, points), 0, 10, Optional.empty())),
+                    () -> startSearch.handle(params(standard("red", DEFAULTS, points), 0, 10, null)),
                     ErrorCode.INVALID_PARAMS);
         }
     }
@@ -724,7 +677,7 @@ class SearchHandlersTest {
     @Test
     void sortsByDocValuesAndSendsTheSortValues() throws Exception {
         openIndex();
-        SearchResults byScore = search(params(classic("red"), 0, 10, Optional.of(List.of())));
+        SearchResults byScore = search(params(classic("red"), 0, 10, List.of()));
 
         SearchResults byColor = search(sorted(classic("red"), fieldKey("color", SortType.STRING, false)));
         SearchResults byRank = search(sorted(classic("red"), fieldKey("rank", SortType.LONG, false)));
@@ -821,7 +774,7 @@ class SearchHandlersTest {
         openIndex();
         SearchQuery like = moreLikeThis(0, List.of("body"), 25);
 
-        SearchResults results = search(params(like, 0, 10, Optional.of(List.of("id"))));
+        SearchResults results = search(params(like, 0, 10, List.of("id")));
 
         assertThat(results.query())
                 .isEqualTo("like(doc 0, fields [body], minTermFreq 1, minDocFreq 1, maxQueryTerms 25)");
@@ -838,9 +791,9 @@ class SearchHandlersTest {
     @Test
     void searchesForDocumentsLikeATextAndGivesTheChosenTerms() throws Exception {
         openIndex();
-        SearchQuery like = moreLikeText("Red red, blue and green", 0, OptionalInt.empty(), List.of("blue"));
+        SearchQuery like = moreLikeText("Red red, blue and green", 0, null, List.of("blue"));
 
-        SearchResults results = search(params(like, 0, 10, Optional.empty()));
+        SearchResults results = search(params(like, 0, 10, null));
 
         assertThat(results.query())
                 .isEqualTo("like(text \"Red red, blue and green\", fields [body], minTermFreq 1, minDocFreq 1, "
@@ -862,12 +815,12 @@ class SearchHandlersTest {
                         .score());
 
         // Like a document gives the terms too, other queries don't.
-        assertThat(search(params(moreLikeThis(0, List.of("body"), 25), 0, 10, Optional.empty()))
+        assertThat(search(params(moreLikeThis(0, List.of("body"), 25), 0, 10, null))
                         .moreLikeThisTerms()
                         .orElseThrow())
                 .extracting(LikeTerm::term)
                 .containsExactly("red");
-        assertThat(search(params(term("body", new BytesValue("red", false)), 0, 10, Optional.empty()))
+        assertThat(search(params(term("body", new BytesValue("red", false)), 0, 10, null))
                         .moreLikeThisTerms())
                 .isEmpty();
     }
@@ -902,29 +855,29 @@ class SearchHandlersTest {
                 OptionalInt.empty(),
                 List.of()));
         for (SearchQuery invalid : List.of(neither, both)) {
-            assertThatThrownBy(() -> startSearch.handle(params(invalid, 0, 10, Optional.empty())))
+            assertThatThrownBy(() -> startSearch.handle(params(invalid, 0, 10, null)))
                     .isInstanceOfSatisfying(
                             RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_PARAMS))
                     .hasMessageContaining("exactly one of docId and text");
         }
         // 65,536 bytes of UTF-8 are fine, one more is not: ä has two.
         String longest = "ä".repeat(MoreLikeThisQuery.MAX_TEXT_LENGTH / 2);
-        assertThat(search(params(moreLikeText(longest, 0, OptionalInt.empty(), List.of()), 0, 10, Optional.empty()))
+        assertThat(search(params(moreLikeText(longest, 0, null, List.of()), 0, 10, null))
                         .hits())
                 .isEmpty();
-        assertThatThrownBy(() -> startSearch.handle(params(
-                        moreLikeText(longest + "x", 0, OptionalInt.empty(), List.of()), 0, 10, Optional.empty())))
+        assertThatThrownBy(
+                        () -> startSearch.handle(params(moreLikeText(longest + "x", 0, null, List.of()), 0, 10, null)))
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_PARAMS))
                 .hasMessageContaining("65537 bytes");
         for (SearchQuery invalid : List.of(
-                moreLikeText("red", -1, OptionalInt.empty(), List.of()),
-                moreLikeText("red", 0, OptionalInt.of(0), List.of()),
-                moreLikeText("red", 5, OptionalInt.of(4), List.of()))) {
-            assertFails(() -> startSearch.handle(params(invalid, 0, 10, Optional.empty())), ErrorCode.INVALID_PARAMS);
+                moreLikeText("red", -1, null, List.of()),
+                moreLikeText("red", 0, 0, List.of()),
+                moreLikeText("red", 5, 4, List.of()))) {
+            assertFails(() -> startSearch.handle(params(invalid, 0, 10, null)), ErrorCode.INVALID_PARAMS);
         }
         // A word length shorter than "red" leaves it out.
-        assertThat(search(params(moreLikeText("red", 0, OptionalInt.of(2), List.of()), 0, 10, Optional.empty()))
+        assertThat(search(params(moreLikeText("red", 0, 2, List.of()), 0, 10, null))
                         .moreLikeThisTerms())
                 .contains(List.of());
     }
@@ -934,18 +887,17 @@ class SearchHandlersTest {
         openIndex();
 
         assertFails(
-                () -> startSearch.handle(params(moreLikeThis(3, List.of("body"), 25), 0, 10, Optional.empty())),
+                () -> startSearch.handle(params(moreLikeThis(3, List.of("body"), 25), 0, 10, null)),
                 ErrorCode.DOC_NOT_FOUND);
         assertFails(
                 () -> startExplain.handle(new StartExplainParams(moreLikeThis(-1, List.of("body"), 25), BM25, 0)),
                 ErrorCode.DOC_NOT_FOUND);
         assertFails(
-                () -> startSearch.handle(params(moreLikeThis(0, List.of("nope"), 25), 0, 10, Optional.empty())),
+                () -> startSearch.handle(params(moreLikeThis(0, List.of("nope"), 25), 0, 10, null)),
                 ErrorCode.FIELD_NOT_FOUND);
         // Doc values and points only: no terms.
         for (String field : List.of("rank", "size")) {
-            assertThatThrownBy(() ->
-                            startSearch.handle(params(moreLikeThis(0, List.of(field), 25), 0, 10, Optional.empty())))
+            assertThatThrownBy(() -> startSearch.handle(params(moreLikeThis(0, List.of(field), 25), 0, 10, null)))
                     .isInstanceOfSatisfying(
                             RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_PARAMS))
                     .hasMessageContaining("'" + field + "' is not indexed");
@@ -955,13 +907,9 @@ class SearchHandlersTest {
                 moreLikeThis(0, List.of("body", "body"), 25),
                 moreLikeThis(0, List.of("body"), 0),
                 moreLikeThis(0, List.of("body"), MoreLikeThisQuery.MAX_QUERY_TERMS + 1))) {
-            assertFails(() -> startSearch.handle(params(invalid, 0, 10, Optional.empty())), ErrorCode.INVALID_PARAMS);
+            assertFails(() -> startSearch.handle(params(invalid, 0, 10, null)), ErrorCode.INVALID_PARAMS);
         }
-        assertThat(search(params(
-                                moreLikeThis(0, List.of("body"), MoreLikeThisQuery.MAX_QUERY_TERMS),
-                                0,
-                                10,
-                                Optional.empty()))
+        assertThat(search(params(moreLikeThis(0, List.of("body"), MoreLikeThisQuery.MAX_QUERY_TERMS), 0, 10, null))
                         .hits())
                 .isNotEmpty();
     }
@@ -987,7 +935,7 @@ class SearchHandlersTest {
 
     @Test
     void failsWithoutOpenIndex() {
-        assertFails(() -> startSearch.handle(params(classic("red"), 0, 10, Optional.empty())), ErrorCode.NO_INDEX_OPEN);
+        assertFails(() -> startSearch.handle(params(classic("red"), 0, 10, null)), ErrorCode.NO_INDEX_OPEN);
         assertFails(
                 () -> startExplain.handle(new StartExplainParams(classic("red"), BM25, 0)), ErrorCode.NO_INDEX_OPEN);
     }
@@ -1024,11 +972,10 @@ class SearchHandlersTest {
         openIndex();
 
         // The whitespace tokenizer keeps the case, and the index has only "red".
-        SearchResults upper = search(params(classic("RED", whitespace()), 0, 10, Optional.empty()));
+        SearchResults upper = search(params(classic("RED", whitespace()), 0, 10, null));
         assertThat(upper.query()).isEqualTo("body:RED");
         assertThat(upper.hits()).isEmpty();
-        assertThat(search(params(classic("red", whitespace()), 0, 10, Optional.empty()))
-                        .hits())
+        assertThat(search(params(classic("red", whitespace()), 0, 10, null)).hits())
                 .isNotEmpty();
     }
 
@@ -1053,11 +1000,9 @@ class SearchHandlersTest {
                 List.of(),
                 List.of());
 
+        assertFails(() -> startSearch.handle(params(classic("red", broken), 0, 10, null)), ErrorCode.INVALID_ANALYZER);
         assertFails(
-                () -> startSearch.handle(params(classic("red", broken), 0, 10, Optional.empty())),
-                ErrorCode.INVALID_ANALYZER);
-        assertFails(
-                () -> startSearch.handle(params(moreLikeThis(0, List.of("body"), 25, broken), 0, 10, Optional.empty())),
+                () -> startSearch.handle(params(moreLikeThis(0, List.of("body"), 25, broken), 0, 10, null)),
                 ErrorCode.INVALID_ANALYZER);
         assertFails(
                 () -> startExplain.handle(new StartExplainParams(classic("red", both), BM25, 0)),
@@ -1068,9 +1013,7 @@ class SearchHandlersTest {
     void searchAndExplainJobsAreKeptApart() throws Exception {
         openIndex();
 
-        long jobId = startSearch
-                .handle(params(classic("red"), 0, 10, Optional.empty()))
-                .jobId();
+        long jobId = startSearch.handle(params(classic("red"), 0, 10, null)).jobId();
 
         assertFails(() -> getExplain.handle(new JobParams(jobId)), ErrorCode.JOB_NOT_FOUND);
         assertThat(awaitSearch(jobId).results()).isPresent();
@@ -1091,17 +1034,25 @@ class SearchHandlersTest {
 
     /** Lucene's defaults, with these date settings. */
     private static ParserOptions dates(
-            Optional<DateResolution> dateResolution, Optional<String> locale, Optional<String> timeZone) {
+            @Nullable DateResolution dateResolution, @Nullable String locale, @Nullable String timeZone) {
         return dates(dateResolution, List.of(), locale, timeZone);
     }
 
     /** Lucene's defaults, with these date settings and resolutions per field. */
     private static ParserOptions dates(
-            Optional<DateResolution> dateResolution,
+            @Nullable DateResolution dateResolution,
             List<FieldDateResolution> fieldDateResolutions,
-            Optional<String> locale,
-            Optional<String> timeZone) {
-        return new ParserOptions(false, 0, 0, true, dateResolution, fieldDateResolutions, locale, timeZone);
+            @Nullable String locale,
+            @Nullable String timeZone) {
+        return new ParserOptions(
+                false,
+                0,
+                0,
+                true,
+                Optional.ofNullable(dateResolution),
+                fieldDateResolutions,
+                Optional.ofNullable(locale),
+                Optional.ofNullable(timeZone));
     }
 
     private static SearchQuery classic(String expression) {
@@ -1166,13 +1117,18 @@ class SearchHandlersTest {
     }
 
     private static SearchQuery docValues(
-            String field, DocValuesNumber number, Optional<List<BytesValue>> values, Optional<DocValuesRange> range) {
+            String field, DocValuesNumber number, @Nullable List<BytesValue> values, @Nullable DocValuesRange range) {
         return new SearchQuery(
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
-                Optional.of(new DocValuesQuery(field, Optional.ofNullable(number), values, range, Optional.empty())),
+                Optional.of(new DocValuesQuery(
+                        field,
+                        Optional.ofNullable(number),
+                        Optional.ofNullable(values),
+                        Optional.ofNullable(range),
+                        Optional.empty())),
                 Optional.empty());
     }
 
@@ -1187,14 +1143,21 @@ class SearchHandlersTest {
                 Optional.empty());
     }
 
-    private static SearchQuery knn(String field, OptionalInt docId, KnnVector vector, OptionalInt k, boolean exact) {
+    private static SearchQuery knn(
+            String field, @Nullable Integer docId, KnnVector vector, @Nullable Integer k, boolean exact) {
         return new SearchQuery(
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
-                Optional.of(new KnnQuery(field, docId, Optional.ofNullable(vector), k, exact, Optional.empty())));
+                Optional.of(new KnnQuery(
+                        field,
+                        Optionals.optionalInt(docId),
+                        Optional.ofNullable(vector),
+                        Optionals.optionalInt(k),
+                        exact,
+                        Optional.empty())));
     }
 
     private static KnnVector floats(float... values) {
@@ -1238,7 +1201,7 @@ class SearchHandlersTest {
     }
 
     private static SearchQuery moreLikeText(
-            String text, int minWordLen, OptionalInt maxWordLen, List<String> stopWords) {
+            String text, int minWordLen, @Nullable Integer maxWordLen, List<String> stopWords) {
         return moreLikeThis(new MoreLikeThisQuery(
                 OptionalInt.empty(),
                 Optional.of(text),
@@ -1250,7 +1213,7 @@ class SearchHandlersTest {
                 false,
                 STANDARD,
                 minWordLen,
-                maxWordLen,
+                Optionals.optionalInt(maxWordLen),
                 stopWords));
     }
 
@@ -1276,8 +1239,9 @@ class SearchHandlersTest {
                 List.of());
     }
 
-    private static StartSearchParams params(SearchQuery query, int offset, int limit, Optional<List<String>> fields) {
-        return new StartSearchParams(query, BM25, List.of(), offset, limit, true, fields, Optional.empty());
+    private static StartSearchParams params(SearchQuery query, int offset, int limit, @Nullable List<String> fields) {
+        return new StartSearchParams(
+                query, BM25, List.of(), offset, limit, true, Optional.ofNullable(fields), Optional.empty());
     }
 
     private static SortKey fieldKey(String field, SortType type, boolean reverse) {

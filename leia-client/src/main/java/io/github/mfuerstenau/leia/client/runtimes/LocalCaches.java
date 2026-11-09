@@ -18,6 +18,7 @@ import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
+import org.jspecify.annotations.Nullable;
 import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
 import org.xml.sax.helpers.DefaultHandler;
@@ -84,10 +85,12 @@ public final class LocalCaches {
      *
      * @param env the environment, such as {@code System::getenv}
      * @param properties the system properties, such as {@code System::getProperty}
-     * @param home the user's home folder
+     * @param home the user's home folder, or null
      */
     public static LocalCaches detect(
-            Function<String, String> env, Function<String, String> properties, Optional<Path> home) {
+            Function<String, @Nullable String> env,
+            Function<String, @Nullable String> properties,
+            @Nullable Path home) {
         if ("false".equalsIgnoreCase(properties.apply(PROPERTY))) {
             return none();
         }
@@ -98,7 +101,7 @@ public final class LocalCaches {
         Optional.ofNullable(env.apply("GRADLE_USER_HOME"))
                 .filter(value -> !value.isBlank())
                 .flatMap(LocalCaches::path)
-                .or(() -> home.map(dir -> dir.resolve(".gradle")))
+                .or(() -> Optional.ofNullable(home).map(dir -> dir.resolve(".gradle")))
                 .map(dir -> dir.resolve("caches/modules-2/files-2.1"))
                 .filter(Files::isDirectory)
                 .ifPresent(root -> caches.add(new Cache("Gradle's cache", root, Layout.GRADLE)));
@@ -106,20 +109,26 @@ public final class LocalCaches {
     }
 
     private static Optional<Path> maven(
-            Function<String, String> env, Function<String, String> properties, Optional<Path> home) {
+            Function<String, @Nullable String> env,
+            Function<String, @Nullable String> properties,
+            @Nullable Path home) {
         String property = properties.apply("maven.repo.local");
         if (property != null && !property.isBlank()) {
             return path(property);
         }
-        Optional<Path> fromSettings = home.map(dir -> dir.resolve(".m2/settings.xml"))
+        Optional<Path> fromSettings = Optional.ofNullable(home)
+                .map(dir -> dir.resolve(".m2/settings.xml"))
                 .filter(Files::isRegularFile)
                 .flatMap(settings -> localRepository(settings, env, properties, home));
-        return fromSettings.or(() -> home.map(dir -> dir.resolve(".m2/repository")));
+        return fromSettings.or(() -> Optional.ofNullable(home).map(dir -> dir.resolve(".m2/repository")));
     }
 
     /** The {@code <localRepository>} of a Maven {@code settings.xml}, its placeholders expanded. */
     static Optional<Path> localRepository(
-            Path settings, Function<String, String> env, Function<String, String> properties, Optional<Path> home) {
+            Path settings,
+            Function<String, @Nullable String> env,
+            Function<String, @Nullable String> properties,
+            @Nullable Path home) {
         try (InputStream in = Files.newInputStream(settings)) {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
             factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
@@ -144,7 +153,10 @@ public final class LocalCaches {
 
     /** {@code ${user.home}}, {@code ${env.X}} and other system properties in {@code value}. */
     private static String expand(
-            String value, Function<String, String> env, Function<String, String> properties, Optional<Path> home) {
+            String value,
+            Function<String, @Nullable String> env,
+            Function<String, @Nullable String> properties,
+            @Nullable Path home) {
         Matcher matcher = PLACEHOLDER.matcher(value);
         StringBuilder expanded = new StringBuilder();
         while (matcher.find()) {
@@ -153,7 +165,7 @@ public final class LocalCaches {
             if (matcher.group(1) != null) {
                 replacement = env.apply(name);
             } else if (name.equals("user.home")) {
-                replacement = home.map(Path::toString).orElse(null);
+                replacement = home == null ? null : home.toString();
             } else {
                 replacement = properties.apply(name);
             }

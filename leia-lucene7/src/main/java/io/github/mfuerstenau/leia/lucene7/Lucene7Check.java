@@ -57,7 +57,7 @@ final class Lucene7Check implements Check {
     @Override
     public CheckResult check(
             Path dir, DirectoryKind kind, Options options, Consumer<String> line, LongConsumer progress) {
-        int checkLevel = options.level().orElse(2);
+        int checkLevel = Optional.ofNullable(options.level()).orElse(2);
         Cancellation cancellation = new Cancellation(progress);
         // Closed by the PrintStream that wraps it (ADR 0088)
         @SuppressWarnings("java:S2095")
@@ -69,7 +69,7 @@ final class Lucene7Check implements Check {
             checker.setInfoStream(infoStream, false);
             checker.setChecksumsOnly(checkLevel == 1);
             checker.setCrossCheckTermVectors(checkLevel >= 3);
-            status = checker.checkIndex(options.segments().orElse(null));
+            status = checker.checkIndex(options.segments());
             infoStream.flush();
             report.end();
         } catch (IOException | RuntimeException e) {
@@ -88,18 +88,18 @@ final class Lucene7Check implements Check {
             segments.add(new SegmentCheck(
                     segment.name,
                     segment.maxDoc,
-                    Optional.ofNullable(segment.codec).map(Codec::getName),
+                    Optional.ofNullable(segment.codec).map(Codec::getName).orElse(null),
                     segment.compound,
                     segment.numFiles,
                     Math.round(segment.sizeMB * 1024 * 1024),
                     segment.hasDeletions,
                     segment.openReaderPassed,
-                    error(segment)));
+                    error(segment).orElse(null)));
         }
         return new CheckResult(
                 status.clean,
-                Optional.empty(),
-                Optional.ofNullable(status.segmentsFileName),
+                null,
+                status.segmentsFileName,
                 status.missingSegments,
                 status.toolOutOfDate,
                 status.numSegments,

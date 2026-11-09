@@ -22,8 +22,8 @@ record SegmentKey(String value) {
 
     /** The key of {@code segment} of the index in {@code directory}; empty if it can't have one. */
     static Optional<SegmentKey> of(Path directory, RuntimeIndex.Segment segment) {
-        if (segment.id().isPresent()) {
-            return Optional.of(new SegmentKey("id " + segment.id().get() + " " + segment.maxDoc()));
+        if (segment.id() != null) {
+            return Optional.of(new SegmentKey("id " + segment.id() + " " + segment.maxDoc()));
         }
         if (segment.name().equals("?") || segment.files().isEmpty()) {
             return Optional.empty();

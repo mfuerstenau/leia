@@ -36,6 +36,7 @@ import java.util.function.LongFunction;
 import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.NullNode;
@@ -106,7 +107,7 @@ public final class McpServer {
             LeiaBackend backend,
             VersionResult version,
             DirectoryImpl defaultDirectory,
-            Optional<Path> home,
+            @Nullable Path home,
             List<Path> roots,
             boolean pinned) {
         this(backend, version, new Session(defaultDirectory, home, roots), pinned ? Tools.PINNED : Tools.ALL);
@@ -128,7 +129,7 @@ public final class McpServer {
     public OpenIndexResult open(String path) throws RpcException, InterruptedException {
         try {
             OpenIndexResult result = backend.call(
-                            Methods.OPEN_INDEX, openParams(session, session.expandHome(path), Optional.empty()))
+                            Methods.OPEN_INDEX, openParams(session, session.expandHome(path), null))
                     .get();
             session.opened(result);
             return result;
@@ -141,9 +142,11 @@ public final class McpServer {
     }
 
     /** The params of {@code openIndex} for {@code path} with a reader, through {@code directory} or the default. */
-    public static OpenIndexParams openParams(Session session, String path, Optional<DirectoryImpl> directory) {
+    public static OpenIndexParams openParams(Session session, String path, @Nullable DirectoryImpl directory) {
         return new OpenIndexParams(
-                path, Optional.of(directory.orElse(session.defaultDirectory())), Optional.of(OpenMode.READER));
+                path,
+                Optional.of(directory != null ? directory : session.defaultDirectory()),
+                Optional.of(OpenMode.READER));
     }
 
     /**
@@ -340,25 +343,24 @@ public final class McpServer {
     private static Messages.CallToolResult success(Record result) {
         JsonNode structured = Messages.MAPPER.valueToTree(result);
         return new Messages.CallToolResult(
-                List.of(new Messages.TextContent(Messages.MAPPER.writeValueAsString(structured))),
-                Optional.of(structured),
-                false);
+                List.of(new Messages.TextContent(Messages.MAPPER.writeValueAsString(structured))), structured, false);
     }
 
     private static Messages.CallToolResult failure(String text) {
-        return new Messages.CallToolResult(List.of(new Messages.TextContent(text)), Optional.empty(), true);
+        return new Messages.CallToolResult(List.of(new Messages.TextContent(text)), null, true);
     }
 
     /** A tool call that waits or runs: its id, the token of its progress, and whether it was cancelled. */
     private static final class Request {
         final JsonNode id;
-        final Optional<JsonNode> progressToken;
+        final @Nullable JsonNode progressToken;
         final AtomicBoolean cancelled = new AtomicBoolean();
 
-        Request(JsonNode id, JsonNode progressToken) {
+        Request(JsonNode id, @Nullable JsonNode progressToken) {
             this.id = id;
-            this.progressToken =
-                    Optional.ofNullable(progressToken).filter(token -> token.isString() || token.isIntegralNumber());
+            this.progressToken = progressToken != null && (progressToken.isString() || progressToken.isIntegralNumber())
+                    ? progressToken
+                    : null;
         }
     }
 
@@ -407,13 +409,17 @@ public final class McpServer {
         }
 
         private void progress(Jobs.Progress progress) {
-            if (request.progressToken.isEmpty()) {
+            JsonNode token = request.progressToken;
+            if (token == null) {
                 return;
             }
             ObjectNode params = Messages.MAPPER.createObjectNode();
-            params.set("progressToken", request.progressToken.get());
+            params.set("progressToken", token);
             params.put("progress", progress.scanned());
-            progress.total().ifPresent(total -> params.put("total", total));
+            Long total = progress.total();
+            if (total != null) {
+                params.put("total", total);
+            }
             output.send(Messages.notification("notifications/progress", params));
         }
     }

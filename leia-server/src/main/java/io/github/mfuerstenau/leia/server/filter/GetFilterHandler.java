@@ -34,10 +34,10 @@ public final class GetFilterHandler implements MethodHandler<JobParams, GetFilte
     public GetFilterResult handle(JobParams params) throws RpcException {
         long filterId = params.jobId();
         Jobs.Poll<DocFilter> poll = jobs.poll(filterId, DocFilter.class);
-        poll.result().ifPresent(filter -> filters.put(filterId, filter));
+        poll.outcome().ifPresent(filter -> filters.put(filterId, filter));
         return new GetFilterResult(
                 poll.progress(),
-                poll.result()
+                poll.outcome()
                         .map(filter -> new FilterResult(
                                 filterId,
                                 filter.matchCount(),

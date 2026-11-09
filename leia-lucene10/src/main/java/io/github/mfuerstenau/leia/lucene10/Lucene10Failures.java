@@ -4,6 +4,7 @@ import io.github.mfuerstenau.leia.core.IndexOpenException;
 import io.github.mfuerstenau.leia.core.MissingCodecException;
 import io.github.mfuerstenau.leia.runtime.IndexReadException;
 import io.github.mfuerstenau.leia.runtime.IndexReadException.Reason;
+import io.github.mfuerstenau.leia.runtime.support.Failures;
 import java.io.EOFException;
 import java.io.IOException;
 import org.apache.lucene.index.CorruptIndexException;
@@ -26,7 +27,7 @@ final class Lucene10Failures {
             case MISSING_CODEC -> Reason.MISSING_CODEC;
             case NOT_FOUND, NOT_AN_INDEX, NOT_READABLE -> Reason.NOT_READABLE;
         };
-        return new IndexReadException(reason, e.getMessage(), e);
+        return new IndexReadException(reason, Failures.message(e), e);
     }
 
     /** A failure to read a commit, with Lucene's message, classified as leia-core's {@code getCommit} does. */
@@ -38,6 +39,6 @@ final class Lucene10Failures {
             case CorruptIndexException _, EOFException _ -> Reason.CORRUPT;
             default -> Reason.NOT_READABLE;
         };
-        return reason == Reason.NOT_READABLE ? e : new IndexReadException(reason, e.getMessage(), e);
+        return reason == Reason.NOT_READABLE ? e : new IndexReadException(reason, Failures.message(e), e);
     }
 }

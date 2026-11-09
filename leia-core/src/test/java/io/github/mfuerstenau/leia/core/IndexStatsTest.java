@@ -8,7 +8,6 @@ import io.github.mfuerstenau.leia.core.FieldStats.TermStats;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Map;
-import java.util.Optional;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.FieldType;
@@ -29,6 +28,7 @@ import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.Version;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -64,7 +64,7 @@ class IndexStatsTest {
                     .containsExactly(tuple("_0", 0, 2, 1), tuple("_1", 2, 1, 1));
             // Each with its id and its own files, which the stored fields cache keys on (ADR 0113).
             assertThat(commit.segments()).allSatisfy(segment -> {
-                assertThat(segment.id()).hasValueSatisfying(id -> assertThat(id).hasSize(32));
+                assertThat(segment.id()).satisfies(id -> assertThat(id).hasSize(32));
                 assertThat(segment.files()).contains(segment.name() + ".si").isSorted();
             });
             assertThat(commit.segments().get(0).id())
@@ -209,14 +209,14 @@ class IndexStatsTest {
 
     @FunctionalInterface
     private interface FieldBuilder {
-        FieldStats build(Optional<TermStats> terms);
+        FieldStats build(@Nullable TermStats terms);
 
         default FieldStats withTerms(int docCount, long sumDocFreq, long sumTotalTermFreq) {
-            return build(Optional.of(new TermStats(docCount, sumDocFreq, sumTotalTermFreq)));
+            return build(new TermStats(docCount, sumDocFreq, sumTotalTermFreq));
         }
 
         default FieldStats withoutTerms() {
-            return build(Optional.empty());
+            return build(null);
         }
     }
 }

@@ -94,7 +94,7 @@ class RuntimesTest {
     void onlyLucene10TakesExtensionJars() {
         // The old runtimes' class loaders see no jar of --jar (ADR 0068, ADR 0073).
         assertThat(new Runtimes().known())
-                .filteredOn(known -> known.luceneVersion().isPresent())
+                .filteredOn(known -> known.luceneVersion() != null)
                 .hasSize(RuntimeFolders.KNOWN.size());
         assertThat(RuntimeFolders.runtimes())
                 .allSatisfy(runtime -> assertThat(runtime.extensions()).isEmpty());

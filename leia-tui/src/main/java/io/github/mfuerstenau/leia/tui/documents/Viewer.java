@@ -23,6 +23,7 @@ import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
 import io.github.mfuerstenau.leia.protocol.search.ValueHighlight;
+import io.github.mfuerstenau.leia.tui.Optionals;
 import io.github.mfuerstenau.leia.tui.Osc52;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
@@ -38,8 +39,9 @@ import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
-import java.util.OptionalLong;
+import org.jspecify.annotations.Nullable;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.TokenStreamLocation;
 import tools.jackson.databind.DeserializationFeature;
@@ -144,12 +146,12 @@ public final class Viewer {
             } catch (IllegalArgumentException e) {
                 throw new IllegalArgumentException("Key/value: " + e.getMessage());
             }
-            return new Split(items, keyValue.isEmpty() ? Optional.empty() : Optional.of(keyValue));
+            return new Split(items, keyValue.isEmpty() ? null : keyValue);
         }
     }
 
     /** {@link Delimiters} with their escapes resolved. */
-    record Split(String items, Optional<String> keyValue) {}
+    record Split(String items, @Nullable String keyValue) {}
 
     /** {@code typed} with its escapes resolved; throws with what is wrong otherwise. */
     static String unescape(String typed) {
@@ -299,12 +301,12 @@ public final class Viewer {
         private Content content;
 
         /** The whole value's length in bytes, while only the cut value is in. */
-        private OptionalLong fullLength;
+        private @Nullable Long fullLength;
 
         private boolean fetching;
 
         /** Why the whole value could not be fetched; or null. */
-        private String error;
+        private @Nullable String error;
 
         /** Matches of a pattern, in order. */
         private List<ByteRange> matches = List.of();
@@ -312,7 +314,7 @@ public final class Viewer {
         /** How many matches the value has; more than {@code matches} if not all are known. */
         private int matchCount;
 
-        private Value(int stored, String kind, Content content, OptionalLong fullLength) {
+        private Value(int stored, String kind, Content content, @Nullable Long fullLength) {
             this.stored = stored;
             this.kind = kind;
             this.content = content;
@@ -348,20 +350,18 @@ public final class Viewer {
                                     .putDouble(Double.parseDouble(text))
                                     .array());
             };
-            return new Value(index, storedType(value.type()), content, value.fullLength());
+            return new Value(index, storedType(value.type()), content, Optionals.orNull(value.fullLength()));
         }
 
         /** A byte string from doc values of type {@code kind}. */
         public static Value docValue(String kind, BytesValue value) {
-            return new Value(
-                    -1, kind + " doc value", Content.fromWire(value.value(), value.binary()), OptionalLong.empty());
+            return new Value(-1, kind + " doc value", Content.fromWire(value.value(), value.binary()), null);
         }
 
         /** A number from doc values of type {@code kind}, shown as {@code text}. */
         public static Value docValueNumber(String kind, long number, String text) {
             byte[] bytes = ByteBuffer.allocate(8).putLong(number).array();
-            return new Value(
-                    -1, kind + " doc value", new Content(Content.Kind.NUMBER, text, bytes), OptionalLong.empty());
+            return new Value(-1, kind + " doc value", new Content(Content.Kind.NUMBER, text, bytes), null);
         }
 
         /** A KNN vector: a component to a line, and the bytes of each component, big-endian. */
@@ -375,7 +375,7 @@ public final class Viewer {
                     -1,
                     Overview.vectorEncoding(vector.encoding()) + " vector",
                     new Content(Content.Kind.NUMBER, text, bytes.array()),
-                    OptionalLong.empty());
+                    null);
         }
 
         String kind() {
@@ -388,7 +388,7 @@ public final class Viewer {
 
         /** The size of the whole value in bytes. */
         private long size() {
-            return fullLength.orElse(content.bytes().length);
+            return fullLength != null ? fullLength : content.bytes().length;
         }
 
         /** Whether the value is a JSON object or array, or the beginning of one if it is cut. */
@@ -398,7 +398,7 @@ public final class Viewer {
             }
             String start = content.text().stripLeading();
             return (start.startsWith("{") || start.startsWith("["))
-                    && (fullLength.isPresent() || jsonError(content.text()).isEmpty());
+                    && (fullLength != null || jsonError(content.text()).isEmpty());
         }
     }
 
@@ -422,9 +422,12 @@ public final class Viewer {
      * @param detail what the mode label at the bottom adds, such as the number of items; or null
      * @param notice why the value is not shown in the mode, such as JSON that does not parse; or null
      */
-    record Formatted(List<List<Segment>> lines, String detail, String notice) {
+    record Formatted(
+            List<List<Segment>> lines,
+            @Nullable String detail,
+            @Nullable String notice) {
 
-        static Formatted text(String text, String notice) {
+        static Formatted text(String text, @Nullable String notice) {
             List<List<Segment>> lines = new ArrayList<>();
             for (String line : text.split("\n", -1)) {
                 lines.add(List.of(new Segment(Style.EMPTY, stripCr(line))));
@@ -544,7 +547,12 @@ public final class Viewer {
      *
      * @param matchRows the row each highlighted match starts on, in order
      */
-    private record Wrapped(int width, List<Line> lines, List<Integer> matchRows, String detail, String notice) {}
+    private record Wrapped(
+            int width,
+            List<Line> lines,
+            List<Integer> matchRows,
+            @Nullable String detail,
+            @Nullable String notice) {}
 
     /** The form that asks for the delimiters of the delimited mode. */
     private static final class DelimiterForm {
@@ -556,6 +564,7 @@ public final class Viewer {
         boolean onKeyValue;
 
         /** What is wrong with the delimiters; or null. */
+        @Nullable
         String error;
 
         DelimiterForm(Delimiters delimiters) {
@@ -576,7 +585,7 @@ public final class Viewer {
     private Delimiters delimiters;
 
     /** The delimiter form while it is open; or null. */
-    private DelimiterForm form;
+    private @Nullable DelimiterForm form;
 
     /** The first row shown. */
     private int scroll;
@@ -585,10 +594,10 @@ public final class Viewer {
     private int page = 10;
 
     /** Null after the shown value, the mode or the delimiters changed. */
-    private Wrapped wrapped;
+    private @Nullable Wrapped wrapped;
 
     /** What the last key did, such as copying; cleared by the next key. Or null. */
-    private String message;
+    private @Nullable String message;
 
     /** The match {@code m}/{@code M} last jumped to. */
     private int matchIndex;
@@ -671,7 +680,7 @@ public final class Viewer {
     /** Fetches the shown value whole, if it is cut and not fetched yet. */
     public Optional<Event> fetch() {
         Value value = values.get(current);
-        if (value.stored < 0 || value.fullLength.isEmpty() || value.fetching || value.error != null) {
+        if (value.stored < 0 || value.fullLength == null || value.fetching || value.error != null) {
             return Optional.empty();
         }
         value.fetching = true;
@@ -838,7 +847,7 @@ public final class Viewer {
 
     /** Edits the delimiter form. */
     private void formKey(KeyEvent key) {
-        StringBuilder input = form.onKeyValue ? form.keyValue : form.items;
+        StringBuilder input = Objects.requireNonNull(form).onKeyValue ? form.keyValue : form.items;
         switch (key.code()) {
             case ESCAPE -> form = null;
             case ENTER -> {
@@ -849,7 +858,7 @@ public final class Viewer {
                     delimiters = typed;
                     setMode(Mode.DELIMITED);
                 } catch (IllegalArgumentException e) {
-                    form.error = e.getMessage();
+                    Objects.requireNonNull(form).error = e.getMessage();
                 }
             }
             case TAB, UP, DOWN -> form.onKeyValue = !form.onKeyValue;
@@ -893,7 +902,7 @@ public final class Viewer {
      */
     private Optional<Event> copy() {
         Value value = values.get(current);
-        if (value.fullLength.isPresent()) {
+        if (value.fullLength != null) {
             message = "Not copied: the whole value is not in.";
             return Optional.empty();
         }
@@ -964,28 +973,28 @@ public final class Viewer {
 
     /** Scrolls to the match that {@code m} or {@code M} chose, once the text has it. */
     private void scrollToMatch(Value value) {
-        List<Integer> matchRows = wrapped.matchRows();
+        List<Integer> matchRows = Objects.requireNonNull(wrapped).matchRows();
         if (matchIndex < matchRows.size()) {
             // Two rows of context above the match.
             scroll = Math.max(matchRows.get(matchIndex) - 2, 0);
             toMatch = false;
-        } else if (value.fullLength.isEmpty() || value.error != null) {
+        } else if (value.fullLength == null || value.error != null) {
             // Otherwise the match is past the cut: once the whole value is in.
             toMatch = false;
         }
     }
 
     /** What the bottom border says left of the position. */
-    private String status(Value value, Wrapped shown) {
+    private String status(Value value, @Nullable Wrapped shown) {
         if (message != null) {
             return message;
         }
         if (value.error != null) {
             return "Cut; cannot fetch it whole: " + value.error;
         }
-        if (value.fullLength.isPresent()) {
+        if (value.fullLength != null) {
             return "Cut at " + TextFormat.size(value.content.bytes().length) + " of "
-                    + TextFormat.size(value.fullLength.getAsLong()) + "; fetching it whole…";
+                    + TextFormat.size(value.fullLength) + "; fetching it whole…";
         }
         if (shown != null && shown.notice() != null) {
             return shown.notice();
@@ -1208,8 +1217,8 @@ public final class Viewer {
         List<String> items = splitAll(text, split.items());
         String detail = items.size() == 1 ? "1 item" : items.size() + " items";
         List<List<Segment>> lines = new ArrayList<>();
-        Optional<String> keyValues = split.keyValue();
-        if (keyValues.isEmpty()) {
+        String keyValue = split.keyValue();
+        if (keyValue == null) {
             String number = "%" + Integer.toString(items.size()).length() + "d  ";
             for (int i = 0; i < items.size(); i++) {
                 lines.add(List.of(
@@ -1218,7 +1227,6 @@ public final class Viewer {
             }
             return new Formatted(lines, detail, null);
         }
-        String keyValue = keyValues.get();
         // Each item's key, and its value; null for an item without one.
         List<String[]> pairs = new ArrayList<>();
         for (String item : items) {

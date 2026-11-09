@@ -13,7 +13,6 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -36,8 +35,8 @@ class CompletionListTest {
 
     private CompletionList list(String input) {
         PathCompletion.Completion completion =
-                PathCompletion.completeWithFiles(input, Optional.empty(), name -> name.endsWith(".jar"));
-        return new CompletionList(completion, Optional.empty(), name -> name.endsWith(".jar"));
+                PathCompletion.completeWithFiles(input, null, name -> name.endsWith(".jar"));
+        return new CompletionList(completion, null, name -> name.endsWith(".jar"));
     }
 
     private static String render(CompletionList list, int height) {

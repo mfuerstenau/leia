@@ -126,7 +126,7 @@ class OverviewTest {
     }
 
     private static void done(Overview overview, String field, long uniqueTerms) {
-        overview.setScan(field, Optional.of(FieldScan.done(terms(field, uniqueTerms, List.of()), 50)));
+        overview.setScan(field, FieldScan.done(terms(field, uniqueTerms, List.of()), 50));
     }
 
     private static Optional<String> selected(Overview overview) {
@@ -291,12 +291,12 @@ class OverviewTest {
         Overview overview = overview(List.of(indexed("body", 0), field("price", 1)), 50);
         overview.setScan(
                 "body",
-                Optional.of(FieldScan.done(
+                FieldScan.done(
                         terms(
                                 "body",
                                 1234,
                                 List.of(top("red", false, 7), top("ff0041", true, 2), top("a\nb", false, 1))),
-                        50)));
+                        50));
 
         String screen = render(overview, 140, 30);
 
@@ -338,9 +338,9 @@ class OverviewTest {
                         indexed("failed", 3),
                         field("price", 4)),
                 50);
-        overview.setScan("queued", Optional.of(new FieldScan.Queued()));
-        overview.setScan("running", Optional.of(new FieldScan.Running(1024)));
-        overview.setScan("failed", Optional.of(new FieldScan.Failed("boom")));
+        overview.setScan("queued", new FieldScan.Queued());
+        overview.setScan("running", new FieldScan.Running(1024));
+        overview.setScan("failed", new FieldScan.Failed("boom"));
 
         String screen = render(overview, 140, 30);
 
@@ -358,10 +358,10 @@ class OverviewTest {
         Overview overview = overview(List.of(indexed("body", 0), field("price", 1)), 50);
         assertThat(render(overview, 140, 30)).contains("Enter counts the terms and finds the top 50.");
 
-        overview.setScan("body", Optional.of(new FieldScan.Running(2048)));
+        overview.setScan("body", new FieldScan.Running(2048));
         assertThat(render(overview, 140, 30)).contains("Scanning… 2048 terms so far.");
 
-        overview.setScan("body", Optional.of(new FieldScan.Failed("Cannot read")));
+        overview.setScan("body", new FieldScan.Failed("Cannot read"));
         assertThat(render(overview, 140, 30)).contains("The scan failed: Cannot read");
 
         overview.handleKey(key(KeyCode.DOWN));
@@ -373,8 +373,8 @@ class OverviewTest {
         Overview overview = overview(List.of(indexed("body", 0), indexed("id", 1)), 50);
         overview.setScan(
                 "body",
-                Optional.of(FieldScan.done(
-                        terms("body", 3, List.of(top("a", false, 3), top("b", false, 2), top("c", false, 1))), 50)));
+                FieldScan.done(
+                        terms("body", 3, List.of(top("a", false, 3), top("b", false, 2), top("c", false, 1))), 50));
         assertThat(overview.selectedTopTerm()).isEmpty();
 
         assertThat(overview.handleKey(key(KeyCode.TAB))).isTrue();
@@ -404,8 +404,8 @@ class OverviewTest {
         Overview overview = overview(
                 List.of(indexed("a", 0), field("b", 1), indexed("c", 2), indexed("d", 3), indexed("e", 4)), 50);
         done(overview, "c", 0);
-        overview.setScan("d", Optional.of(new FieldScan.Failed("boom")));
-        overview.setScan("e", Optional.of(new FieldScan.Queued()));
+        overview.setScan("d", new FieldScan.Failed("boom"));
+        overview.setScan("e", new FieldScan.Queued());
 
         assertThat(overview.fieldsToScan()).containsExactly("a", "d");
     }
@@ -453,12 +453,12 @@ class OverviewTest {
         Overview overview = overview(List.of(field("id", 0), field("body", 1), field("tag", 2)), 50);
         assertThat(render(overview, 220, 30)).contains("Stored", " Fields (3) ");
 
-        overview.setStoredFields(Optional.of(new StoredFieldsState.Running(2)));
+        overview.setStoredFields(new StoredFieldsState.Running(2));
         assertThat(overview.scanningStoredFields()).isTrue();
         assertThat(render(overview, 220, 30)).contains("Fields (3, stored fields 2/3 docs…)");
 
-        overview.setStoredFields(Optional.of(new StoredFieldsState.Done(
-                new StoredFields(List.of(new StoredField("body", 2, 3), new StoredField("id", 1, 3)), 1, 0, 5))));
+        overview.setStoredFields(new StoredFieldsState.Done(
+                new StoredFields(List.of(new StoredField("body", 2, 3), new StoredField("id", 1, 3)), 1, 0, 5)));
         String screen = render(overview, 220, 30);
         assertThat(screen).contains("Fields (3, 2 stored)");
         assertThat(row(screen, "body")).containsPattern(" 2┃");
@@ -470,7 +470,7 @@ class OverviewTest {
         overview.handleKey(key('s'));
         assertThat(names(overview)).containsExactly("body", "id", "tag");
 
-        overview.setStoredFields(Optional.of(new StoredFieldsState.Failed("Cannot read")));
+        overview.setStoredFields(new StoredFieldsState.Failed("Cannot read"));
         assertThat(render(overview, 220, 30)).contains("stored fields failed");
     }
 
@@ -534,9 +534,9 @@ class OverviewTest {
     void showsAtMostTheTopNAndRescansForMore() {
         List<TopTerm> three = List.of(top("a", false, 3), top("b", false, 2), top("c", false, 1));
         Overview overview = overview(List.of(indexed("body", 0), indexed("id", 1)), 3);
-        overview.setScan("body", Optional.of(FieldScan.done(terms("body", 10, three), 3)));
+        overview.setScan("body", FieldScan.done(terms("body", 10, three), 3));
         // Every term of the field is in.
-        overview.setScan("id", Optional.of(FieldScan.done(terms("id", 3, three), 3)));
+        overview.setScan("id", FieldScan.done(terms("id", 3, three), 3));
         assertThat(overview.fieldsToScan()).isEmpty();
 
         overview.setTopN(2);

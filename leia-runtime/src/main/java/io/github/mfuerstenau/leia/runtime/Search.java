@@ -9,8 +9,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.function.LongConsumer;
+import org.jspecify.annotations.Nullable;
 
 /** The classic query parser, term queries and search of a {@link RuntimeIndex}. */
 public interface Search {
@@ -45,13 +45,13 @@ public interface Search {
             int offset,
             int limit,
             boolean exactTotalHits,
-            Optional<List<String>> fields,
+            @Nullable List<String> fields,
             LongConsumer progress)
             throws IOException;
 
     /** Searches as {@link #search(ParsedQuery, int, int, boolean, Optional, LongConsumer)}, counting every hit. */
     default SearchResults search(
-            ParsedQuery query, int offset, int limit, Optional<List<String>> fields, LongConsumer progress)
+            ParsedQuery query, int offset, int limit, @Nullable List<String> fields, LongConsumer progress)
             throws IOException {
         return search(query, offset, limit, true, fields, progress);
     }
@@ -162,24 +162,21 @@ public interface Search {
      * @param timeZone the time zone the dates are read in; empty, the JVM's default
      */
     record Dates(
-            Optional<DateResolution> resolution,
+            @Nullable DateResolution resolution,
             Map<String, DateResolution> fields,
-            Optional<Locale> locale,
-            Optional<ZoneId> timeZone) {
+            @Nullable Locale locale,
+            @Nullable ZoneId timeZone) {
 
         /** No resolutions: every bound stays text. */
-        public static final Dates NONE = new Dates(Optional.empty(), Map.of(), Optional.empty(), Optional.empty());
+        public static final Dates NONE = new Dates(null, Map.of(), null, null);
 
         public Dates {
-            Objects.requireNonNull(resolution);
             fields = Map.copyOf(fields);
-            Objects.requireNonNull(locale);
-            Objects.requireNonNull(timeZone);
         }
 
         /** The resolution of {@code field}: its own, or else the default one. */
         public Optional<DateResolution> resolution(String field) {
-            return Optional.ofNullable(fields.get(field)).or(() -> resolution);
+            return Optional.ofNullable(fields.get(field)).or(() -> Optional.ofNullable(resolution));
         }
     }
 
@@ -214,45 +211,28 @@ public interface Search {
          */
         record Preset(
                 String className,
-                Optional<WordSet> stopwords,
-                Optional<WordSet> stemExclusion,
-                OptionalInt maxTokenLength,
-                Optional<StemDictionary> stemOverride,
-                Optional<Japanese> japanese,
-                Optional<Korean> korean,
-                Optional<Collation> collation,
-                Optional<JapaneseCompletion> japaneseCompletion)
+                @Nullable WordSet stopwords,
+                @Nullable WordSet stemExclusion,
+                @Nullable Integer maxTokenLength,
+                @Nullable StemDictionary stemOverride,
+                @Nullable Japanese japanese,
+                @Nullable Korean korean,
+                @Nullable Collation collation,
+                @Nullable JapaneseCompletion japaneseCompletion)
                 implements AnalyzerSpec {
 
             public Preset {
                 Objects.requireNonNull(className);
-                Objects.requireNonNull(stopwords);
-                Objects.requireNonNull(stemExclusion);
-                Objects.requireNonNull(maxTokenLength);
-                Objects.requireNonNull(stemOverride);
-                Objects.requireNonNull(japanese);
-                Objects.requireNonNull(korean);
-                Objects.requireNonNull(collation);
-                Objects.requireNonNull(japaneseCompletion);
             }
 
             /** The analyzer with these stop words and this longest token, and no other options. */
-            public Preset(String className, Optional<WordSet> stopwords, OptionalInt maxTokenLength) {
-                this(
-                        className,
-                        stopwords,
-                        Optional.empty(),
-                        maxTokenLength,
-                        Optional.empty(),
-                        Optional.empty(),
-                        Optional.empty(),
-                        Optional.empty(),
-                        Optional.empty());
+            public Preset(String className, @Nullable WordSet stopwords, @Nullable Integer maxTokenLength) {
+                this(className, stopwords, null, maxTokenLength, null, null, null, null, null);
             }
 
             /** The analyzer with its default settings. */
             public Preset(String className) {
-                this(className, Optional.empty(), OptionalInt.empty());
+                this(className, null, null);
             }
 
             /** The simple name of {@link #className}, such as {@code EnglishAnalyzer}. */
@@ -315,13 +295,12 @@ public interface Search {
          * @param mode the tokenizer's mode
          * @param stopTags the parts of speech that are removed
          */
-        record Japanese(Optional<Path> userDictionary, Optional<JapaneseMode> mode, Optional<WordSet> stopTags) {
+        record Japanese(
+                @Nullable Path userDictionary,
+                @Nullable JapaneseMode mode,
+                @Nullable WordSet stopTags) {
 
-            public Japanese {
-                Objects.requireNonNull(userDictionary);
-                Objects.requireNonNull(mode);
-                Objects.requireNonNull(stopTags);
-            }
+            public Japanese {}
         }
 
         /** {@code JapaneseTokenizer.Mode}. */
@@ -340,17 +319,12 @@ public interface Search {
          * @param outputUnknownUnigrams whether unknown words are also split into unigrams
          */
         record Korean(
-                Optional<Path> userDictionary,
-                Optional<KoreanDecompoundMode> decompoundMode,
-                Optional<WordSet> stopTags,
-                Optional<Boolean> outputUnknownUnigrams) {
+                @Nullable Path userDictionary,
+                @Nullable KoreanDecompoundMode decompoundMode,
+                @Nullable WordSet stopTags,
+                @Nullable Boolean outputUnknownUnigrams) {
 
-            public Korean {
-                Objects.requireNonNull(userDictionary);
-                Objects.requireNonNull(decompoundMode);
-                Objects.requireNonNull(stopTags);
-                Objects.requireNonNull(outputUnknownUnigrams);
-            }
+            public Korean {}
         }
 
         /** {@code KoreanTokenizer.DecompoundMode}. */
@@ -367,12 +341,12 @@ public interface Search {
          * @param locale a BCP 47 language tag; empty for the root locale
          */
         record Collation(
-                String locale, Optional<CollationStrength> strength, Optional<CollationDecomposition> decomposition) {
+                String locale,
+                @Nullable CollationStrength strength,
+                @Nullable CollationDecomposition decomposition) {
 
             public Collation {
                 Objects.requireNonNull(locale);
-                Objects.requireNonNull(strength);
-                Objects.requireNonNull(decomposition);
             }
         }
 
@@ -399,12 +373,10 @@ public interface Search {
          * @param userDictionary a user dictionary file in Kuromoji's CSV format, UTF-8
          * @param mode the romanization mode
          */
-        record JapaneseCompletion(Optional<Path> userDictionary, Optional<JapaneseCompletionMode> mode) {
+        record JapaneseCompletion(
+                @Nullable Path userDictionary, @Nullable JapaneseCompletionMode mode) {
 
-            public JapaneseCompletion {
-                Objects.requireNonNull(userDictionary);
-                Objects.requireNonNull(mode);
-            }
+            public JapaneseCompletion {}
         }
 
         /** {@code JapaneseCompletionFilter.Mode}. */
@@ -424,14 +396,13 @@ public interface Search {
                 List<Component> charFilters,
                 Component tokenizer,
                 List<Component> tokenFilters,
-                Optional<Path> configDir)
+                @Nullable Path configDir)
                 implements AnalyzerSpec {
 
             public Custom {
                 charFilters = List.copyOf(charFilters);
                 Objects.requireNonNull(tokenizer);
                 tokenFilters = List.copyOf(tokenFilters);
-                Objects.requireNonNull(configDir);
             }
         }
 
@@ -439,13 +410,13 @@ public interface Search {
          * An analyzer wrapped by Lucene's {@code ShingleAnalyzerWrapper}, then by its {@code
          * LimitTokenCountAnalyzer}; at least one of them is present.
          */
-        record Wrapped(AnalyzerSpec analyzer, Optional<Shingles> shingles, Optional<LimitTokenCount> limitTokenCount)
-                implements AnalyzerSpec {
+        record Wrapped(
+                AnalyzerSpec analyzer,
+                @Nullable Shingles shingles,
+                @Nullable LimitTokenCount limitTokenCount) implements AnalyzerSpec {
 
             public Wrapped {
                 Objects.requireNonNull(analyzer);
-                Objects.requireNonNull(shingles);
-                Objects.requireNonNull(limitTokenCount);
             }
         }
 
@@ -538,7 +509,13 @@ public interface Search {
     final class InvalidAnalyzerException extends Exception {
         private static final long serialVersionUID = 1L;
 
-        public InvalidAnalyzerException(String message, Throwable cause) {
+        /** The message, which every constructor takes. */
+        @Override
+        public String getMessage() {
+            return Objects.requireNonNullElse(super.getMessage(), getClass().getSimpleName());
+        }
+
+        public InvalidAnalyzerException(String message, @Nullable Throwable cause) {
             super(message, cause);
         }
     }
@@ -547,7 +524,13 @@ public interface Search {
     final class InvalidQueryException extends Exception {
         private static final long serialVersionUID = 1L;
 
-        public InvalidQueryException(String message, Throwable cause) {
+        /** The message, which every constructor takes. */
+        @Override
+        public String getMessage() {
+            return Objects.requireNonNullElse(super.getMessage(), getClass().getSimpleName());
+        }
+
+        public InvalidQueryException(String message, @Nullable Throwable cause) {
             super(message, cause);
         }
     }
@@ -599,7 +582,7 @@ public interface Search {
             boolean totalHitsExact,
             List<Hit> hits,
             long tookMillis,
-            Optional<List<MoreLikeThisSearch.LikeTerm>> likeTerms) {
+            @Nullable List<MoreLikeThisSearch.LikeTerm> likeTerms) {
 
         /** What a search found, every hit counted. */
         public SearchResults(
@@ -608,13 +591,13 @@ public interface Search {
                 long totalHits,
                 List<Hit> hits,
                 long tookMillis,
-                Optional<List<MoreLikeThisSearch.LikeTerm>> likeTerms) {
+                @Nullable List<MoreLikeThisSearch.LikeTerm> likeTerms) {
             this(query, rewrittenQuery, totalHits, true, hits, tookMillis, likeTerms);
         }
 
         /** What a search with a query other than More-Like-This found, every hit counted. */
         public SearchResults(String query, String rewrittenQuery, long totalHits, List<Hit> hits, long tookMillis) {
-            this(query, rewrittenQuery, totalHits, hits, tookMillis, Optional.empty());
+            this(query, rewrittenQuery, totalHits, hits, tookMillis, null);
         }
     }
 }

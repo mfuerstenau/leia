@@ -28,6 +28,6 @@ public final class GetFieldTermScanHandler implements MethodHandler<JobParams, G
     @Override
     public GetFieldTermScanResult handle(JobParams params) throws RpcException {
         Jobs.Poll<FieldTerms> poll = jobs.poll(params.jobId(), FieldTerms.class);
-        return new GetFieldTermScanResult(poll.progress(), poll.result());
+        return new GetFieldTermScanResult(poll.progress(), poll.outcome());
     }
 }

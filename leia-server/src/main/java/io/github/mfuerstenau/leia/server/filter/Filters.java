@@ -5,6 +5,7 @@ import io.github.mfuerstenau.leia.server.RpcException;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The filter that the server keeps for the open index (ADR 0031): at most one, since the TUI browses
@@ -17,7 +18,7 @@ public final class Filters {
 
     private record Kept(long id, DocFilter filter) {}
 
-    private Optional<Kept> kept = Optional.empty();
+    private @Nullable Kept kept;
 
     @Inject
     public Filters() {
@@ -26,7 +27,7 @@ public final class Filters {
 
     /** Keeps {@code filter} under {@code id}, in place of the filter kept before. */
     public void put(long id, DocFilter filter) {
-        kept = Optional.of(new Kept(id, filter));
+        kept = new Kept(id, filter);
     }
 
     /**
@@ -35,7 +36,8 @@ public final class Filters {
      * @throws RpcException {@code FILTER_NOT_FOUND} if no filter is kept under it
      */
     public DocFilter get(long id) throws RpcException {
-        return kept.filter(k -> k.id() == id)
+        return Optional.ofNullable(kept)
+                .filter(k -> k.id() == id)
                 .map(Kept::filter)
                 .orElseThrow(() -> new RpcException(
                         ErrorCode.FILTER_NOT_FOUND,
@@ -49,15 +51,15 @@ public final class Filters {
      * @return whether one was kept under it
      */
     boolean release(long id) {
-        boolean released = kept.filter(k -> k.id() == id).isPresent();
+        boolean released = kept != null && kept.id() == id;
         if (released) {
-            kept = Optional.empty();
+            kept = null;
         }
         return released;
     }
 
     /** Forgets the filter, whose document ids belong to an index that is being closed. */
     public void clear() {
-        kept = Optional.empty();
+        kept = null;
     }
 }

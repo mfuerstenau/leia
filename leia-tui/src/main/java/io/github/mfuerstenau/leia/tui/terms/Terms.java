@@ -44,6 +44,7 @@ import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.Posting;
 import io.github.mfuerstenau.leia.protocol.terms.PostingsFilter;
 import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
+import io.github.mfuerstenau.leia.tui.Optionals;
 import io.github.mfuerstenau.leia.tui.points.PointFormats;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
@@ -57,11 +58,12 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
-import java.util.OptionalLong;
 import java.util.Set;
 import java.util.stream.LongStream;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The terms screen: the fields with postings, the terms of the selected field and the postings of
@@ -114,15 +116,19 @@ public final class Terms {
          * #termsLoaded} or {@link #termsFailed}. With {@code more}, it continues the shown terms;
          * otherwise it replaces them.
          */
-        record LoadTerms(String field, Optional<BytesValue> from, boolean more) implements Request {}
+        record LoadTerms(String field, @Nullable BytesValue from, boolean more) implements Request {}
 
         /**
          * A page of the postings of a term from {@code fromDoc} on, reported back with {@link
          * #postingsLoaded} or {@link #postingsFailed}. With {@code more}, it continues the shown
          * postings; otherwise it replaces them. {@code filter} is the filter to read them through.
          */
-        record LoadPostings(String field, BytesValue term, int fromDoc, boolean more, Optional<PostingsFilter> filter)
-                implements Request {}
+        record LoadPostings(
+                String field,
+                BytesValue term,
+                int fromDoc,
+                boolean more,
+                @Nullable PostingsFilter filter) implements Request {}
 
         /** Show this document on the documents screen. */
         record Document(TermHit hit) implements Request {}
@@ -164,17 +170,20 @@ public final class Terms {
          * otherwise it starts one.
          */
         record LoadKnnNode(
-                String field, long serial, OptionalInt segment, OptionalInt ord, OptionalInt docId, boolean walk)
+                String field,
+                long serial,
+                @Nullable Integer segment,
+                @Nullable Integer ord,
+                @Nullable Integer docId,
+                boolean walk)
                 implements Request {
 
             static LoadKnnNode ofOrd(String field, long serial, int segment, int ord, boolean walk) {
-                return new LoadKnnNode(
-                        field, serial, OptionalInt.of(segment), OptionalInt.of(ord), OptionalInt.empty(), walk);
+                return new LoadKnnNode(field, serial, segment, ord, null, walk);
             }
 
             static LoadKnnNode ofDoc(String field, long serial, int docId) {
-                return new LoadKnnNode(
-                        field, serial, OptionalInt.empty(), OptionalInt.empty(), OptionalInt.of(docId), false);
+                return new LoadKnnNode(field, serial, null, null, docId, false);
             }
         }
 
@@ -212,7 +221,13 @@ public final class Terms {
      * @param index the posting's place among the term's postings, from 0
      * @param freq how often the term occurs in the document; empty if frequencies are not indexed
      */
-    public record TermHit(String field, BytesValue term, int docId, int index, int docFreq, OptionalInt freq) {}
+    public record TermHit(
+            String field,
+            BytesValue term,
+            int docId,
+            int index,
+            int docFreq,
+            @Nullable Integer freq) {}
 
     /** The columns, from left to right. */
     private enum Column {
@@ -227,22 +242,24 @@ public final class Terms {
         final String field;
 
         /** The text the list starts from, if it was sought. */
-        final Optional<String> from;
+        final @Nullable String from;
 
         final List<TermEntry> entries;
 
-        /** Where the next page starts; empty after the last term. */
-        Optional<BytesValue> next;
+        /** Where the next page starts; null after the last term. */
+        @Nullable
+        BytesValue next;
 
-        /** Why the last page could not be fetched; no more pages are fetched then. */
-        Optional<String> error = Optional.empty();
+        /** Why the last page could not be fetched; no more pages are fetched then. Null if it could. */
+        @Nullable
+        String error;
 
         int selected;
         final TableState table = new TableState();
 
-        TermList(String field, Optional<BytesValue> from, List<TermEntry> entries, Optional<BytesValue> next) {
+        TermList(String field, @Nullable BytesValue from, List<TermEntry> entries, @Nullable BytesValue next) {
             this.field = field;
-            this.from = from.map(term -> TextFormat.bytesText(term.value(), term.binary()));
+            this.from = from == null ? null : TextFormat.bytesText(from.value(), from.binary());
             this.entries = new ArrayList<>(entries);
             this.next = next;
         }
@@ -263,16 +280,18 @@ public final class Terms {
         final BytesValue term;
 
         /** The filter the postings were read through. */
-        final Optional<PostingsFilter> filter;
+        final @Nullable PostingsFilter filter;
 
         int docFreq;
         final List<Posting> postings;
 
-        /** Where the next page starts; empty after the last posting. */
-        OptionalInt nextDoc;
+        /** Where the next page starts; null after the last posting. */
+        @Nullable
+        Integer nextDoc;
 
-        /** Why the last page could not be fetched; no more pages are fetched then. */
-        Optional<String> error = Optional.empty();
+        /** Why the last page could not be fetched; no more pages are fetched then. Null if it could. */
+        @Nullable
+        String error;
 
         int selected;
         final TableState table = new TableState();
@@ -283,10 +302,10 @@ public final class Terms {
         PostingList(
                 String field,
                 BytesValue term,
-                Optional<PostingsFilter> filter,
+                @Nullable PostingsFilter filter,
                 int docFreq,
                 List<Posting> postings,
-                OptionalInt nextDoc) {
+                @Nullable Integer nextDoc) {
             this.field = field;
             this.term = term;
             this.filter = filter;
@@ -295,8 +314,8 @@ public final class Terms {
             this.nextDoc = nextDoc;
         }
 
-        boolean isOf(String field, BytesValue term, Optional<PostingsFilter> filter) {
-            return this.field.equals(field) && this.term.equals(term) && this.filter.equals(filter);
+        boolean isOf(String field, BytesValue term, @Nullable PostingsFilter filter) {
+            return this.field.equals(field) && this.term.equals(term) && Objects.equals(this.filter, filter);
         }
 
         Optional<TermHit> hit() {
@@ -304,7 +323,8 @@ public final class Terms {
                 return Optional.empty();
             }
             Posting posting = postings.get(selected);
-            return Optional.of(new TermHit(field, term, posting.docId(), selected, docFreq, posting.freq()));
+            return Optional.of(
+                    new TermHit(field, term, posting.docId(), selected, docFreq, Optionals.orNull(posting.freq())));
         }
     }
 
@@ -318,21 +338,21 @@ public final class Terms {
     private final TableState fieldTable = new TableState();
 
     /** The terms shown; null before the first page. */
-    private TermList terms;
+    private @Nullable TermList terms;
 
     /** The postings shown; null before the first page. */
-    private PostingList postings;
+    private @Nullable PostingList postings;
 
     private Column focus = Column.FIELDS;
 
     /** The text typed into the seek prompt while it is open; null otherwise. */
-    private StringBuilder seek;
+    private @Nullable StringBuilder seek;
 
     /** The first page of terms asked for last; a reply for another first page is dropped. Null before. */
-    private Request.LoadTerms wantedFirst;
+    private Request.@Nullable LoadTerms wantedFirst;
 
     /** The filter of the documents screen, once it is built (ADR 0032). */
-    private OptionalLong filter = OptionalLong.empty();
+    private @Nullable Long filter;
 
     /** Whether only the postings in the filter are shown, rather than all of them marked. */
     private boolean onlyFiltered;
@@ -341,25 +361,25 @@ public final class Terms {
     private final Set<Request> pending = new HashSet<>();
 
     /** The tree of the selected point field; null before it is in, or for a field with postings. */
-    private PointTree pointTree;
+    private @Nullable PointTree pointTree;
 
     /** The tree asked for last; a reply for another is dropped. Null before. */
-    private Request.LoadPointTree wantedTree;
+    private Request.@Nullable LoadPointTree wantedTree;
 
     /** The serial of the next tree asked for. */
     private long nextTreeSerial = 1;
 
     /** The graphs of the selected vector field; null before they are in, or for another row. */
-    private KnnGraphTree knnTree;
+    private @Nullable KnnGraphTree knnTree;
 
     /** The graphs asked for last; a reply for others is dropped. Null before. */
-    private Request.LoadKnnGraph wantedGraph;
+    private Request.@Nullable LoadKnnGraph wantedGraph;
 
     /** The node asked for last; a reply for another is dropped. Null before. */
-    private Request.LoadKnnNode wantedNode;
+    private Request.@Nullable LoadKnnNode wantedNode;
 
-    /** The document whose node is to be shown once the graphs are in (ADR 0085); empty if none. */
-    private OptionalInt wantedDocNode = OptionalInt.empty();
+    /** The document whose node is to be shown once the graphs are in (ADR 0085); null if none. */
+    private @Nullable Integer wantedDocNode;
 
     /**
      * The keys pressed in the tree or neighbours/points column while the selected row's tree or graphs
@@ -371,7 +391,7 @@ public final class Terms {
     private PointFormats pointFormats = new PointFormats();
 
     /** What a key that doesn't work on the shown field said; until the next key. */
-    private String note;
+    private @Nullable String note;
 
     /** What the index can do (ADR 0044): the keys it lacks a feature for are refused and left out of the legend. */
     private Set<Feature> features = Feature.all();
@@ -429,13 +449,13 @@ public final class Terms {
     }
 
     /**
-     * Takes the filter of the documents screen: the one built, or empty. The postings are fetched
+     * Takes the filter of the documents screen: the one built, or null. The postings are fetched
      * again through a new filter; without one, all of them are shown.
      */
-    public void setFilter(OptionalLong filter) {
-        if (!filter.equals(this.filter)) {
+    public void setFilter(@Nullable Long filter) {
+        if (!Objects.equals(filter, this.filter)) {
             this.filter = filter;
-            if (filter.isEmpty()) {
+            if (filter == null) {
                 onlyFiltered = false;
             }
         }
@@ -443,7 +463,7 @@ public final class Terms {
 
     /** Whether {@code b} has a filter to show only the postings of. */
     public boolean filtered() {
-        return filter.isPresent();
+        return filter != null;
     }
 
     /** Whether only the postings in the filter are shown. */
@@ -451,11 +471,9 @@ public final class Terms {
         return onlyFiltered;
     }
 
-    /** What the postings are read through. */
-    private Optional<PostingsFilter> postingsFilter() {
-        return filter.isPresent()
-                ? Optional.of(new PostingsFilter(filter.getAsLong(), onlyFiltered))
-                : Optional.empty();
+    /** What the postings are read through; null without a filter. */
+    private @Nullable PostingsFilter postingsFilter() {
+        return filter != null ? new PostingsFilter(filter, onlyFiltered) : null;
     }
 
     /** What to fetch when the screen is shown. */
@@ -516,11 +534,11 @@ public final class Terms {
             postings = null;
             // A first page of the field that was sought or browsed to is still the one wanted.
             if (wantedFirst == null || !wantedFirst.field().equals(field)) {
-                wantedFirst = new Request.LoadTerms(field, Optional.empty(), false);
+                wantedFirst = new Request.LoadTerms(field, null, false);
             }
             return send(wantedFirst);
         }
-        if (terms.error.isEmpty() && terms.selected + 1 >= terms.entries.size() && terms.next.isPresent()) {
+        if (terms.error == null && terms.selected + 1 >= terms.entries.size() && terms.next != null) {
             return send(new Request.LoadTerms(field, terms.next, true));
         }
         return postingsRequest(field);
@@ -555,18 +573,16 @@ public final class Terms {
 
     /** The postings of the selected term, or their next page once the last one is selected. */
     private Optional<Request> postingsRequest(String field) {
-        Optional<BytesValue> term = terms.selectedTerm();
+        Optional<BytesValue> term = Objects.requireNonNull(terms).selectedTerm();
         if (term.isEmpty()) {
             return Optional.empty();
         }
-        Optional<PostingsFilter> postingsFilter = postingsFilter();
+        PostingsFilter postingsFilter = postingsFilter();
         if (postings == null || !postings.isOf(field, term.get(), postingsFilter)) {
             return send(new Request.LoadPostings(field, term.get(), 0, false, postingsFilter));
         }
-        if (postings.error.isEmpty()
-                && postings.selected + 1 >= postings.postings.size()
-                && postings.nextDoc.isPresent()) {
-            return send(new Request.LoadPostings(field, term.get(), postings.nextDoc.getAsInt(), true, postingsFilter));
+        if (postings.error == null && postings.selected + 1 >= postings.postings.size() && postings.nextDoc != null) {
+            return send(new Request.LoadPostings(field, term.get(), postings.nextDoc, true, postingsFilter));
         }
         return Optional.empty();
     }
@@ -582,7 +598,7 @@ public final class Terms {
 
     /** Whether {@code request} continues the shown terms. */
     private boolean continuesTerms(Request.LoadTerms request) {
-        return terms != null && terms.field.equals(request.field()) && terms.next.equals(request.from());
+        return terms != null && terms.field.equals(request.field()) && Objects.equals(terms.next, request.from());
     }
 
     /** Whether {@code request} has the postings that the selected term needs. */
@@ -594,14 +610,15 @@ public final class Terms {
                 && terms != null
                 && terms.field.equals(request.field())
                 && terms.selectedTerm().filter(request.term()::equals).isPresent()
-                && postingsFilter().equals(request.filter());
+                && Objects.equals(postingsFilter(), request.filter());
     }
 
     /** Whether {@code request} continues the shown postings. */
     private boolean continuesPostings(Request.LoadPostings request) {
         return postings != null
                 && postings.isOf(request.field(), request.term(), request.filter())
-                && postings.nextDoc.equals(OptionalInt.of(request.fromDoc()));
+                && postings.nextDoc != null
+                && postings.nextDoc == request.fromDoc();
     }
 
     /** Shows a page of terms. Returns what the screen needs next. */
@@ -611,13 +628,17 @@ public final class Terms {
             if (!continuesTerms(request)) {
                 return Optional.empty();
             }
-            terms.entries.addAll(result.terms());
-            terms.next = result.next();
+            Objects.requireNonNull(terms).entries.addAll(result.terms());
+            terms.next = result.next().orElse(null);
         } else {
             if (!wanted(request)) {
                 return Optional.empty();
             }
-            terms = new TermList(request.field(), request.from(), result.terms(), result.next());
+            terms = new TermList(
+                    request.field(),
+                    request.from(),
+                    result.terms(),
+                    result.next().orElse(null));
         }
         return nextRequest();
     }
@@ -630,12 +651,12 @@ public final class Terms {
                 return Optional.empty();
             }
             // The selection may have moved on to a term whose postings are still missing.
-            terms.error = Optional.of(error);
+            Objects.requireNonNull(terms).error = error;
             return nextRequest();
         }
         if (wanted(request)) {
-            terms = new TermList(request.field(), request.from(), List.of(), Optional.empty());
-            terms.error = Optional.of(error);
+            terms = new TermList(request.field(), request.from(), List.of(), null);
+            terms.error = error;
             postings = null;
         }
         return Optional.empty();
@@ -651,8 +672,8 @@ public final class Terms {
             if (!continuesPostings(request)) {
                 return Optional.empty();
             }
-            postings.postings.addAll(result.postings());
-            postings.nextDoc = result.nextDoc();
+            Objects.requireNonNull(postings).postings.addAll(result.postings());
+            postings.nextDoc = Optionals.orNull(result.nextDoc());
             postings.docFreq = result.docFreq();
             if (postings.stepPending) {
                 postings.stepPending = false;
@@ -671,7 +692,7 @@ public final class Terms {
                     request.filter(),
                     result.docFreq(),
                     result.postings(),
-                    result.nextDoc());
+                    Optionals.orNull(result.nextDoc()));
         }
         return nextRequest();
     }
@@ -681,13 +702,12 @@ public final class Terms {
         pending.remove(request);
         if (request.more()) {
             if (continuesPostings(request)) {
-                postings.error = Optional.of(error);
+                Objects.requireNonNull(postings).error = error;
                 postings.stepPending = false;
             }
         } else if (wanted(request)) {
-            postings = new PostingList(
-                    request.field(), request.term(), request.filter(), 0, List.of(), OptionalInt.empty());
-            postings.error = Optional.of(error);
+            postings = new PostingList(request.field(), request.term(), request.filter(), 0, List.of(), null);
+            postings.error = error;
         }
     }
 
@@ -728,7 +748,10 @@ public final class Terms {
         cellOf(request).ifPresent(node -> {
             node.loaded(result);
             if (node.points != null
-                    && pointTree.selectedNode().filter(node::equals).isPresent()) {
+                    && Objects.requireNonNull(pointTree)
+                            .selectedNode()
+                            .filter(node::equals)
+                            .isPresent()) {
                 pointTree.showLeaf(node);
                 focus = Column.POSTINGS;
             }
@@ -740,7 +763,7 @@ public final class Terms {
         pending.remove(request);
         cellOf(request).ifPresent(node -> {
             node.loading = false;
-            node.error = Optional.of(error);
+            node.error = error;
         });
     }
 
@@ -772,7 +795,7 @@ public final class Terms {
             return Optional.empty();
         }
         knnTree = new KnnGraphTree(request.serial(), request.field(), error);
-        wantedDocNode = OptionalInt.empty();
+        wantedDocNode = null;
         return replayHeldKeys();
     }
 
@@ -818,11 +841,11 @@ public final class Terms {
 
     /** The node of the document asked for, once the graphs it is in are shown. */
     private Optional<Request> docNodeRequest() {
-        if (wantedDocNode.isEmpty() || knnTree == null || knnTree.graph == null) {
+        if (wantedDocNode == null || knnTree == null || knnTree.graph == null) {
             return Optional.empty();
         }
-        int docId = wantedDocNode.getAsInt();
-        wantedDocNode = OptionalInt.empty();
+        int docId = wantedDocNode;
+        wantedDocNode = null;
         wantedNode = Request.LoadKnnNode.ofDoc(knnTree.field, knnTree.serial, docId);
         return send(wantedNode);
     }
@@ -840,7 +863,7 @@ public final class Terms {
         pending.remove(request);
         levelOf(request).ifPresent(level -> {
             level.loading = false;
-            level.error = Optional.of(error);
+            level.error = error;
         });
     }
 
@@ -861,10 +884,10 @@ public final class Terms {
             return;
         }
         if (!request.walk()) {
-            knnTree.path.clear();
+            Objects.requireNonNull(knnTree).path.clear();
         }
-        knnTree.path.add(new KnnGraphTree.Shown(result));
-        knnTree.nodeError = Optional.empty();
+        Objects.requireNonNull(knnTree).path.add(new KnnGraphTree.Shown(result));
+        knnTree.nodeError = null;
         focus = Column.POSTINGS;
     }
 
@@ -872,7 +895,7 @@ public final class Terms {
     public void knnNodeFailed(Request.LoadKnnNode request, String error) {
         pending.remove(request);
         if (wantedNode(request)) {
-            knnTree.nodeError = Optional.of(error);
+            Objects.requireNonNull(knnTree).nodeError = error;
         }
     }
 
@@ -885,7 +908,7 @@ public final class Terms {
      * page, fetches the next page on the row after a level's nodes, and shows the neighbours of a node.
      */
     private Optional<Request> openGraphRow() {
-        Optional<KnnGraphTree.Item> selected = knnTree.selectedItem();
+        Optional<KnnGraphTree.Item> selected = Objects.requireNonNull(knnTree).selectedItem();
         if (selected.isEmpty()) {
             return Optional.empty();
         }
@@ -919,26 +942,31 @@ public final class Terms {
             return Optional.empty();
         }
         level.loading = true;
-        level.error = Optional.empty();
+        level.error = null;
         return send(new Request.LoadKnnNodes(
-                knnTree.field, knnTree.serial, level.segment, level.number, level.nodes.size()));
+                Objects.requireNonNull(knnTree).field,
+                knnTree.serial,
+                level.segment,
+                level.number,
+                level.nodes.size()));
     }
 
     /** The neighbours of {@code node} of {@code segment}, as the start of a walk. */
     private Optional<Request> openNode(int segment, KnnGraphNode node) {
-        wantedNode = Request.LoadKnnNode.ofOrd(knnTree.field, knnTree.serial, segment, node.ord(), false);
+        wantedNode = Request.LoadKnnNode.ofOrd(
+                Objects.requireNonNull(knnTree).field, knnTree.serial, segment, node.ord(), false);
         return send(wantedNode);
     }
 
     /** Enter on a neighbour: walks on to it. */
     private Optional<Request> walkOn() {
-        Optional<KnnGraphTree.Shown> shown = knnTree.shown();
+        Optional<KnnGraphTree.Shown> shown = Objects.requireNonNull(knnTree).shown();
         if (shown.isEmpty()) {
             return Optional.empty();
         }
         return shown.get().selectedNeighbour().flatMap(neighbour -> {
             wantedNode = Request.LoadKnnNode.ofOrd(
-                    knnTree.field,
+                    Objects.requireNonNull(knnTree).field,
                     knnTree.serial,
                     shown.get().node.segment(),
                     neighbour.node().ord(),
@@ -949,7 +977,7 @@ public final class Terms {
 
     /** {@code <}: back to the node the walk came from. */
     private void walkBack() {
-        if (knnTree.path.size() > 1) {
+        if (Objects.requireNonNull(knnTree).path.size() > 1) {
             knnTree.path.removeLast();
             // A node still on its way would land on the wrong step.
             wantedNode = null;
@@ -962,17 +990,18 @@ public final class Terms {
     private Optional<Request> graphDocument() {
         Optional<KnnGraphNode> node = Optional.empty();
         if (focus == Column.POSTINGS) {
-            node = knnTree.shown()
+            node = Objects.requireNonNull(knnTree)
+                    .shown()
                     .flatMap(KnnGraphTree.Shown::selectedNeighbour)
                     .map(KnnGraphNeighbour::node);
         } else if (focus == Column.TERMS) {
-            node = knnTree.selectedItem().flatMap(item -> switch (item) {
+            node = Objects.requireNonNull(knnTree).selectedItem().flatMap(item -> switch (item) {
                 case KnnGraphTree.Item.EntryItem entry -> Optional.of(entry.node());
                 case KnnGraphTree.Item.NodeItem nodeItem -> Optional.of(nodeItem.node());
                 default -> Optional.empty();
             });
         }
-        return node.map(n -> new Request.VectorDocument(knnTree.field, n.docId()));
+        return node.map(n -> new Request.VectorDocument(Objects.requireNonNull(knnTree).field, n.docId()));
     }
 
     /**
@@ -980,7 +1009,7 @@ public final class Terms {
      * needs first.
      */
     private Optional<Request> openCell() {
-        Optional<PointTree.Node> selected = pointTree.selectedNode();
+        Optional<PointTree.Node> selected = Objects.requireNonNull(pointTree).selectedNode();
         if (selected.isEmpty()) {
             return Optional.empty();
         }
@@ -1020,12 +1049,11 @@ public final class Terms {
             postings.selected++;
             return postings.hit().map(Request.Document::new);
         }
-        if (postings.error.isPresent() || postings.nextDoc.isEmpty()) {
+        if (postings.error != null || postings.nextDoc == null) {
             return Optional.empty();
         }
         postings.stepPending = true;
-        return send(new Request.LoadPostings(
-                postings.field, postings.term, postings.nextDoc.getAsInt(), true, postings.filter));
+        return send(new Request.LoadPostings(postings.field, postings.term, postings.nextDoc, true, postings.filter));
     }
 
     /**
@@ -1049,7 +1077,7 @@ public final class Terms {
         note = null;
         heldKeys.clear();
         focus = Column.POSTINGS;
-        wantedDocNode = OptionalInt.of(docId);
+        wantedDocNode = docId;
         if (knnTree != null && knnTree.field.equals(field)) {
             return docNodeRequest();
         }
@@ -1058,7 +1086,7 @@ public final class Terms {
 
     /** Shows the terms of {@code field} from {@code term} on, with the focus on the term's postings. */
     public Optional<Request> browse(String field, BytesValue term) {
-        return show(field, Optional.of(term), false);
+        return show(field, term, false);
     }
 
     /**
@@ -1066,7 +1094,7 @@ public final class Terms {
      * with a term its terms from there on with the focus on the term's postings, and otherwise its
      * terms with the focus on them. Nothing changes if the screen has no such row.
      */
-    public Optional<Request> show(String field, Optional<BytesValue> term, boolean points) {
+    public Optional<Request> show(String field, @Nullable BytesValue term, boolean points) {
         int row = -1;
         RowKind kind = points ? RowKind.POINTS : RowKind.TERMS;
         for (int i = 0; i < fields.size(); i++) {
@@ -1082,7 +1110,7 @@ public final class Terms {
         seek = null;
         note = null;
         heldKeys.clear();
-        if (points || term.isEmpty()) {
+        if (points || term == null) {
             focus = Column.TERMS;
             return nextRequest();
         }
@@ -1099,13 +1127,13 @@ public final class Terms {
     public static final class Mark {
         private final int fieldRow;
         private final Column focus;
-        private final TermList terms;
-        private final PostingList postings;
-        private final PointTree pointTree;
-        private final KnnGraphTree knnTree;
-        private final Request.LoadTerms wantedFirst;
-        private final Request.LoadPointTree wantedTree;
-        private final Request.LoadKnnGraph wantedGraph;
+        private final @Nullable TermList terms;
+        private final @Nullable PostingList postings;
+        private final @Nullable PointTree pointTree;
+        private final @Nullable KnnGraphTree knnTree;
+        private final Request.@Nullable LoadTerms wantedFirst;
+        private final Request.@Nullable LoadPointTree wantedTree;
+        private final Request.@Nullable LoadKnnGraph wantedGraph;
 
         private Mark(Terms of) {
             this.fieldRow = of.fieldRow;
@@ -1140,7 +1168,7 @@ public final class Terms {
         wantedTree = mark.wantedTree;
         wantedGraph = mark.wantedGraph;
         wantedNode = null;
-        wantedDocNode = OptionalInt.empty();
+        wantedDocNode = null;
         seek = null;
         note = null;
         heldKeys.clear();
@@ -1247,8 +1275,8 @@ public final class Terms {
             return Optional.of(openCell());
         }
         if (focus == Column.POSTINGS) {
-            return Optional.of(
-                    pointTree.selectedPoint().map(point -> new Request.PointDocument(pointTree.field, point.docId())));
+            PointTree tree = Objects.requireNonNull(pointTree);
+            return Optional.of(tree.selectedPoint().map(point -> new Request.PointDocument(tree.field, point.docId())));
         }
         return Optional.empty();
     }
@@ -1257,7 +1285,7 @@ public final class Terms {
         if (key.isChar('E')) {
             return selectedField().map(field -> new Request.Export(field.name()));
         }
-        if (key.isChar('b') && filter.isPresent()) {
+        if (key.isChar('b') && filter != null) {
             onlyFiltered = !onlyFiltered;
             return nextRequest();
         }
@@ -1332,7 +1360,7 @@ public final class Terms {
         if (key.isChar('E') && !points && !graph) {
             return Optional.of(new Need(Feature.EXPORT_TERMS, "Export"));
         }
-        if (key.isChar('b') && filter.isPresent()) {
+        if (key.isChar('b') && filter != null) {
             return Optional.of(new Need(Feature.FILTER, "Filter"));
         }
         return Optional.empty();
@@ -1447,11 +1475,12 @@ public final class Terms {
         }
         if (terms == null
                 || selectedField()
-                        .filter(field -> field.name().equals(terms.field))
+                        .filter(field -> field.name().equals(Objects.requireNonNull(terms).field))
                         .isEmpty()) {
             return Optional.empty();
         }
-        return terms.selectedTerm().map(term -> new Request.Search(terms.field, term));
+        TermList list = Objects.requireNonNull(terms);
+        return list.selectedTerm().map(term -> new Request.Search(list.field, term));
     }
 
     private Optional<Request> seekKey(KeyEvent key) {
@@ -1460,9 +1489,9 @@ public final class Terms {
                 seek = null;
                 return Optional.empty();
             }
-            case CHAR -> seek.appendCodePoint(key.codePoint());
+            case CHAR -> Objects.requireNonNull(seek).appendCodePoint(key.codePoint());
             case BACKSPACE -> {
-                if (!seek.isEmpty()) {
+                if (!Objects.requireNonNull(seek).isEmpty()) {
                     seek.setLength(seek.offsetByCodePoints(seek.length(), -1));
                 }
             }
@@ -1474,8 +1503,7 @@ public final class Terms {
         if (field.isEmpty()) {
             return Optional.empty();
         }
-        Optional<BytesValue> from =
-                seek.isEmpty() ? Optional.empty() : Optional.of(new BytesValue(seek.toString(), false));
+        BytesValue from = seek.isEmpty() ? null : new BytesValue(seek.toString(), false);
         wantedFirst = new Request.LoadTerms(field.get().name(), from, false);
         return send(wantedFirst);
     }
@@ -1502,14 +1530,14 @@ public final class Terms {
         if (selectedVectorField().isPresent()) {
             if (knnTree != null) {
                 Selection.moved(knnTree.selected, knnTree.visible().size(), key)
-                        .ifPresent(row -> knnTree.selected = row);
+                        .ifPresent(row -> Objects.requireNonNull(knnTree).selected = row);
             }
             return Optional.empty();
         }
         if (selectedPointField().isPresent()) {
             if (pointTree != null) {
                 Selection.moved(pointTree.selected, pointTree.visible().size(), key)
-                        .ifPresent(row -> pointTree.selected = row);
+                        .ifPresent(row -> Objects.requireNonNull(pointTree).selected = row);
             }
             return Optional.empty();
         }
@@ -1537,8 +1565,11 @@ public final class Terms {
         }
         if (selectedPointField().isPresent()) {
             if (pointTree != null && pointTree.leaf != null) {
-                Selection.moved(pointTree.pointSelected, pointTree.leaf.points.size(), key)
-                        .ifPresent(row -> pointTree.pointSelected = row);
+                Selection.moved(
+                                pointTree.pointSelected,
+                                Objects.requireNonNull(pointTree.leaf.points).size(),
+                                key)
+                        .ifPresent(row -> Objects.requireNonNull(pointTree).pointSelected = row);
             }
             return Optional.empty();
         }
@@ -1632,16 +1663,16 @@ public final class Terms {
         String title;
         if (seek != null) {
             title = " " + field + " from " + TextFormat.escapeControl(seek.toString()) + "▏ ";
-        } else if (terms.from.isPresent()) {
-            title = " " + field + " from " + terms.from.get() + " (/ seeks) ";
+        } else if (terms.from != null) {
+            title = " " + field + " from " + terms.from + " (/ seeks) ";
         } else {
             title = " " + field + " (/ seeks) ";
         }
         if (terms.entries.isEmpty()) {
             String text;
-            if (terms.error.isPresent()) {
-                text = "Cannot read the terms: " + terms.error.get();
-            } else if (terms.from.isPresent()) {
+            if (terms.error != null) {
+                text = "Cannot read the terms: " + terms.error;
+            } else if (terms.from != null) {
                 text = "No term from there on.";
             } else {
                 text = "The field has no terms.";
@@ -1660,7 +1691,7 @@ public final class Terms {
                     right(Integer.toString(entry.docFreq()), docsWidth),
                     right(Long.toString(entry.totalTermFreq()), freqWidth)));
         }
-        tailRow(terms.next.isPresent(), terms.error).ifPresent(rows::add);
+        tailRow(terms.next != null, terms.error).ifPresent(rows::add);
         terms.table.select(terms.selected);
         Table table = table(rows, focused)
                 .widths(Constraint.fill(), Constraint.length(docsWidth), Constraint.length(freqWidth))
@@ -1676,13 +1707,13 @@ public final class Terms {
             frame.renderWidget(panel(" Postings ", focused), area);
             return;
         }
-        boolean onlyMatches = postings.filter.map(PostingsFilter::onlyMatches).orElse(false);
+        boolean onlyMatches = postings.filter != null && postings.filter.onlyMatches();
         String title = postingsTitle(onlyMatches);
         if (postings.postings.isEmpty()) {
             message(frame, area, title, focused, noPostingsText(onlyMatches));
             return;
         }
-        boolean marked = postings.filter.isPresent() && !onlyMatches;
+        boolean marked = postings.filter != null && !onlyMatches;
         int docWidth = Selection.numberWidth(postings.postings.stream().mapToLong(Posting::docId)) + (marked ? 2 : 0);
         Row header = Row.from(right("Doc", docWidth), right("Freq", 4), Cell.from(""))
                 .style(Palette.current().heading());
@@ -1690,7 +1721,7 @@ public final class Terms {
         for (Posting posting : postings.postings) {
             rows.add(postingRow(posting, marked, docWidth));
         }
-        tailRow(postings.nextDoc.isPresent(), postings.error).ifPresent(rows::add);
+        tailRow(postings.nextDoc != null, postings.error).ifPresent(rows::add);
         postings.table.select(postings.selected);
         Table table = table(rows, focused)
                 .widths(Constraint.length(docWidth), Constraint.length(4), Constraint.fill())
@@ -1701,15 +1732,15 @@ public final class Terms {
     }
 
     private String postingsTitle(boolean onlyMatches) {
-        if (postings.filter.isEmpty()) {
+        if (Objects.requireNonNull(postings).filter == null) {
             return POSTINGS_TITLE + postings.docFreq + ") ";
         }
         return POSTINGS_TITLE + postings.docFreq + (onlyMatches ? ") · filter only " : ") · • filter ");
     }
 
     private String noPostingsText(boolean onlyMatches) {
-        if (postings.error.isPresent()) {
-            return "Cannot read the postings: " + postings.error.get();
+        if (Objects.requireNonNull(postings).error != null) {
+            return "Cannot read the postings: " + postings.error;
         }
         return onlyMatches ? "No postings in the filter." : "No postings.";
     }
@@ -1746,7 +1777,7 @@ public final class Terms {
                     area,
                     fitTitle(name, "", List.of(), width),
                     focused,
-                    "Cannot read the points: " + pointTree.error.orElse(""));
+                    "Cannot read the points: " + Objects.requireNonNullElse(pointTree.error, ""));
             return;
         }
         GetPointTreeResult tree = pointTree.tree;
@@ -1772,7 +1803,7 @@ public final class Terms {
         Style dim = Palette.current().muted();
         for (PointTree.Node node : visible) {
             String marker;
-            if (node.leaf.orElse(false)) {
+            if (Boolean.TRUE.equals(node.leaf)) {
                 marker = "•";
             } else if (node.expanded) {
                 marker = "▾";
@@ -1781,9 +1812,9 @@ public final class Terms {
             }
             List<Span> spans = new ArrayList<>();
             spans.add(Span.raw("  ".repeat(node.depth()) + marker + " "));
-            if (node.name.isPresent() || node.depth() == 0) {
+            if (node.name != null || node.depth() == 0) {
                 spans.add(Span.styled(
-                        node.name.orElse("#" + node.segment) + "  ",
+                        Objects.requireNonNullElse(node.name, "#" + node.segment) + "  ",
                         Palette.current().heading()));
             }
             spans.add(Span.raw(node.size + " pts  "));
@@ -1791,8 +1822,9 @@ public final class Terms {
             if (node.loading) {
                 spans.add(Span.styled("  …", dim));
             }
-            node.error.ifPresent(error -> spans.add(
-                    Span.styled("  cannot read it: " + error, Palette.current().error())));
+            Optional.ofNullable(node.error)
+                    .ifPresent(error -> spans.add(Span.styled(
+                            "  cannot read it: " + error, Palette.current().error())));
             rows.add(Row.from(Cell.from(Line.from(spans))));
         }
         pointTree.table.select(pointTree.selected);
@@ -1839,8 +1871,8 @@ public final class Terms {
         PointTree.Node leaf = pointTree.leaf;
         PointFormat format = pointFormats.of(selectedPointField().orElseThrow());
         String title = leaf.pointsCut
-                ? " Points (" + leaf.points.size() + " of " + leaf.size + ") "
-                : " Points (" + leaf.points.size() + ") ";
+                ? " Points (" + Objects.requireNonNull(leaf.points).size() + " of " + leaf.size + ") "
+                : " Points (" + Objects.requireNonNull(leaf.points).size() + ") ";
         int docWidth = Selection.numberWidth(leaf.points.stream().mapToLong(LeafPoint::docId));
         Row header = Row.from(right("Doc", docWidth), Cell.from("Value"))
                 .style(Palette.current().heading());
@@ -1883,7 +1915,7 @@ public final class Terms {
                     area,
                     fitTitle(name, "", List.of(), width),
                     focused,
-                    "Cannot read the graphs: " + knnTree.error.orElse(""));
+                    "Cannot read the graphs: " + Objects.requireNonNullElse(knnTree.error, ""));
             return;
         }
         GetKnnGraphResult graph = knnTree.graph;
@@ -1943,8 +1975,9 @@ public final class Terms {
                 if (level.loading) {
                     spans.add(Span.styled("  …", dim));
                 }
-                level.error.ifPresent(error -> spans.add(Span.styled(
-                        "  cannot read it: " + error, Palette.current().error())));
+                Optional.ofNullable(level.error)
+                        .ifPresent(error -> spans.add(Span.styled(
+                                "  cannot read it: " + error, Palette.current().error())));
             }
             case KnnGraphTree.Item.NodeItem nodeItem -> {
                 spans.add(Span.raw("      " + nodeText(nodeItem.node())));
@@ -1997,14 +2030,14 @@ public final class Terms {
     private void renderNeighbours(Frame frame, Rect area) {
         boolean focused = focus == Column.POSTINGS;
         Optional<KnnGraphTree.Shown> shown = knnTree == null ? Optional.empty() : knnTree.shown();
-        Optional<String> error = knnTree == null ? Optional.empty() : knnTree.nodeError;
+        Optional<String> error = knnTree == null ? Optional.empty() : Optional.ofNullable(knnTree.nodeError);
         if (shown.isEmpty()) {
             String text = error.map(e -> "Cannot read the node: " + e).orElse("⏎ on a node shows its neighbours.");
             message(frame, area, " Neighbours ", focused, text);
             return;
         }
         GetKnnGraphNodeResult node = shown.get().node;
-        List<String> ords = knnTree.path.stream()
+        List<String> ords = Objects.requireNonNull(knnTree).path.stream()
                 .map(step -> Integer.toString(step.node.node().ord()))
                 .toList();
         // A step that failed says so in the title, which the walk's ordinals give otherwise.

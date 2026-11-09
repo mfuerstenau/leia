@@ -32,7 +32,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
@@ -72,19 +71,17 @@ class RuntimeDownloadPilotTest {
     void start() throws Exception {
         repository = new FakeRepository();
         runtimes = Files.createDirectories(tmp.resolve("runtimes"));
-        backend = LeiaBackend.start(Optional.of(runtimes), List.of());
+        backend = LeiaBackend.start(runtimes, List.of());
         VersionResult version =
                 backend.call(Methods.VERSION, new VersionParams()).get();
-        app = new App(version, Optional.empty(), History.inMemory(), DirectoryImpl.FS)
-                .withRuntimeFolders(new RuntimesDirs(Optional.of(runtimes)));
+        app = new App(version, null, History.inMemory(), DirectoryImpl.FS)
+                .withRuntimeFolders(RuntimesDirs.of(runtimes));
         // As if lucene5 were missing: the other tests of this JVM may have loaded it already.
         app.runtimesLoaded(new GetRuntimesResult(
-                List.of(new RuntimeFolder(
-                        "lucene5", List.of(4, 5), RuntimeState.MISSING, Optional.empty(), Optional.empty())),
-                List.of()));
+                List.of(new RuntimeFolder("lucene5", List.of(4, 5), RuntimeState.MISSING, null, null)), List.of()));
         RuntimeInstall install =
                 new RuntimeInstall(runtimes, repository.base(), RuntimeDownloadPilotTest.class.getClassLoader());
-        run(new Session(app, backend, Optional.of(new RuntimeService(install, MirrorSettings.none()))));
+        run(new Session(app, backend, new RuntimeService(install, MirrorSettings.none())));
     }
 
     /** Runs {@code session} in place of the one that runs. */
@@ -142,10 +139,7 @@ class RuntimeDownloadPilotTest {
             Mirror other = new Mirror(second.base(), "Second", Mirror.Origin.OPTION);
             RuntimeInstall install = new RuntimeInstall(
                     runtimes, List.of(local, other), RuntimeDownloadPilotTest.class.getClassLoader());
-            run(new Session(
-                    app,
-                    backend,
-                    Optional.of(new RuntimeService(install, new MirrorSettings(List.of(), Optional.of(saved))))));
+            run(new Session(app, backend, new RuntimeService(install, new MirrorSettings(List.of(), saved))));
 
             pilot.press('D');
             settle();

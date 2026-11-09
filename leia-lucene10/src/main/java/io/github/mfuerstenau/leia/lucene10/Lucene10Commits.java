@@ -89,30 +89,30 @@ final class Lucene10Commits implements Commits {
                 segment.sizeInBytes(),
                 segment.diagnostics(),
                 segment.attributes(),
-                Optional.of(segment.id()),
-                Optional.of(segment.codec()),
-                Optional.of(new Formats(
+                segment.id(),
+                segment.codec(),
+                new Formats(
                         formats.postings(),
                         formats.docValues(),
                         formats.storedFields(),
                         formats.termVectors(),
                         formats.norms(),
                         // Lucene 10 always has them.
-                        Optional.of(formats.points()),
-                        Optional.of(formats.knnVectors()),
+                        formats.points(),
+                        formats.knnVectors(),
                         formats.fieldInfos(),
                         formats.segmentInfo(),
                         formats.liveDocs(),
-                        formats.compound())),
+                        formats.compound()),
                 segment.fieldFormats().stream()
                         .map(field -> new FieldFormats(
                                 field.field(), field.postings(), field.docValues(), field.knnVectors()))
                         .toList(),
-                segment.fieldInfosMessage(),
+                segment.fieldInfosMessage().orElse(null),
                 segment.fieldInfosGen(),
                 segment.docValuesGen(),
                 segment.softDelCount(),
-                segment.minVersion().map(Version::toString),
+                segment.minVersion() != null ? segment.minVersion().toString() : null,
                 segment.indexSort(),
                 segment.hasBlocks());
     }

@@ -14,7 +14,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Stream;
@@ -52,10 +51,10 @@ class LocalCachesTest {
         RuntimeFolders.ListedJar core = core7();
         Path file = putMaven(home.resolve(".m2/repository"), core);
 
-        LocalCaches caches = LocalCaches.detect(NONE, NONE, Optional.of(home));
+        LocalCaches caches = LocalCaches.detect(NONE, NONE, home);
 
         assertThat(caches.caches()).extracting(LocalCaches.Cache::name).containsExactly("Maven's local repository");
-        assertThat(caches.find(core.mavenPath().orElseThrow(), core))
+        assertThat(caches.find(core.mavenPath(), core))
                 .hasValueSatisfying(local -> assertThat(local.file()).isEqualTo(file));
     }
 
@@ -69,10 +68,10 @@ class LocalCachesTest {
         Path good = Files.createDirectories(version.resolve("ffffgood")).resolve(core.name());
         Files.copy(built(known("lucene7")).resolve(core.name()), good);
 
-        LocalCaches caches = LocalCaches.detect(NONE, NONE, Optional.of(home));
+        LocalCaches caches = LocalCaches.detect(NONE, NONE, home);
 
         assertThat(caches.caches()).extracting(LocalCaches.Cache::name).containsExactly("Gradle's cache");
-        assertThat(caches.find(core.mavenPath().orElseThrow(), core))
+        assertThat(caches.find(core.mavenPath(), core))
                 .hasValueSatisfying(local -> assertThat(local.file()).isEqualTo(good));
     }
 
@@ -82,7 +81,7 @@ class LocalCachesTest {
         Function<String, String> env =
                 Map.of("GRADLE_USER_HOME", tmp.resolve("gradle-home").toString())::get;
 
-        assertThat(LocalCaches.detect(env, NONE, Optional.of(home)).caches())
+        assertThat(LocalCaches.detect(env, NONE, home).caches())
                 .extracting(LocalCaches.Cache::root)
                 .containsExactly(gradleHome);
     }
@@ -96,13 +95,13 @@ class LocalCachesTest {
                   <localRepository>${user.home}/own-repository</localRepository>
                 </settings>
                 """);
-        assertThat(LocalCaches.detect(NONE, NONE, Optional.of(home)).caches())
+        assertThat(LocalCaches.detect(NONE, NONE, home).caches())
                 .extracting(LocalCaches.Cache::root)
                 .containsExactly(settingsRepository);
 
         Path property = Files.createDirectories(tmp.resolve("repo-local"));
         Function<String, String> properties = Map.of("maven.repo.local", property.toString())::get;
-        assertThat(LocalCaches.detect(NONE, properties, Optional.of(home)).caches())
+        assertThat(LocalCaches.detect(NONE, properties, home).caches())
                 .extracting(LocalCaches.Cache::root)
                 .containsExactly(property);
     }
@@ -115,7 +114,7 @@ class LocalCachesTest {
                 <settings><localRepository>&x;</localRepository></settings>
                 """);
 
-        assertThat(LocalCaches.detect(NONE, NONE, Optional.of(home)).caches())
+        assertThat(LocalCaches.detect(NONE, NONE, home).caches())
                 .extracting(LocalCaches.Cache::root)
                 .containsExactly(repository);
     }
@@ -124,25 +123,24 @@ class LocalCachesTest {
     void isOffWithThePropertyAndWithoutCaches() throws Exception {
         putMaven(home.resolve(".m2/repository"), core7());
 
-        assertThat(LocalCaches.detect(NONE, Map.of(LocalCaches.PROPERTY, "false")::get, Optional.of(home))
+        assertThat(LocalCaches.detect(NONE, Map.of(LocalCaches.PROPERTY, "false")::get, home)
                         .caches())
                 .isEmpty();
-        assertThat(LocalCaches.detect(NONE, NONE, Optional.of(tmp.resolve("nobody")))
-                        .caches())
+        assertThat(LocalCaches.detect(NONE, NONE, tmp.resolve("nobody")).caches())
                 .isEmpty();
-        assertThat(LocalCaches.detect(NONE, NONE, Optional.empty()).caches()).isEmpty();
+        assertThat(LocalCaches.detect(NONE, NONE, null).caches()).isEmpty();
     }
 
     @Test
     void ignoresACopyOfAnotherSizeOrHash() throws Exception {
         RuntimeFolders.ListedJar core = core7();
         Path file = putMaven(home.resolve(".m2/repository"), core);
-        LocalCaches caches = LocalCaches.detect(NONE, NONE, Optional.of(home));
+        LocalCaches caches = LocalCaches.detect(NONE, NONE, home);
 
         Files.write(file, new byte[(int) core.size()]);
-        assertThat(caches.find(core.mavenPath().orElseThrow(), core)).isEmpty();
+        assertThat(caches.find(core.mavenPath(), core)).isEmpty();
         Files.writeString(file, "short");
-        assertThat(caches.find(core.mavenPath().orElseThrow(), core)).isEmpty();
+        assertThat(caches.find(core.mavenPath(), core)).isEmpty();
     }
 
     @Test
@@ -199,7 +197,7 @@ class LocalCachesTest {
                 home.resolve("runtimes"),
                 List.of(new Mirror(repository.base(), "Local", Mirror.Origin.OPTION)),
                 LocalCachesTest.class.getClassLoader(),
-                LocalCaches.detect(NONE, NONE, Optional.of(home)));
+                LocalCaches.detect(NONE, NONE, home));
     }
 
     private void assertInstalled() throws IOException {
@@ -217,7 +215,7 @@ class LocalCachesTest {
 
     /** Puts {@code jar} of lucene7 into a Maven repository at {@code root}. */
     private static Path putMaven(Path root, RuntimeFolders.ListedJar jar) throws IOException {
-        Path file = root.resolve(jar.mavenPath().orElseThrow());
+        Path file = root.resolve(jar.mavenPath());
         Files.createDirectories(file.getParent());
         Files.copy(built(known("lucene7")).resolve(jar.name()), file);
         return file;

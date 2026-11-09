@@ -86,11 +86,11 @@ class ParserSettingsTest {
         OptionsForm form = new OptionsForm(settings(), false);
         // Leading wildcard, slop, prefix, increments, then quantity and price.
         press(form, key(KeyCode.END), key(' '));
-        assertThat(form.draft().points.get(1).pointType()).hasValue(PointType.DOUBLE);
+        assertThat(form.draft().points.get(1).pointType()).isEqualTo(PointType.DOUBLE);
         press(form, key(' '));
-        assertThat(form.draft().points.get(1).pointType()).isEmpty();
+        assertThat(form.draft().points.get(1).pointType()).isNull();
         press(form, key(KeyCode.UP), key(KeyCode.LEFT));
-        assertThat(form.draft().points.get(0).pointType()).isEmpty();
+        assertThat(form.draft().points.get(0).pointType()).isNull();
         ParserSettings settings = applied(form);
         assertThat(settings.pointFields()).isEmpty();
         assertThat(settings.pointsText()).isEqualTo("quantity text · price text");
@@ -140,11 +140,11 @@ class ParserSettingsTest {
         // Leading wildcard, slop, fuzzy max edits, prefix, increments, split, auto phrases.
         press(form, KeyCode.DOWN, 7);
         press(form, key(KeyCode.RIGHT));
-        assertThat(form.draft().dateResolution).hasValue(DateResolution.YEAR);
+        assertThat(form.draft().dateResolution).isEqualTo(DateResolution.YEAR);
         press(form, key(KeyCode.LEFT), key(KeyCode.LEFT));
-        assertThat(form.draft().dateResolution).hasValue(DateResolution.MILLISECOND);
+        assertThat(form.draft().dateResolution).isEqualTo(DateResolution.MILLISECOND);
         press(form, key(' '));
-        assertThat(form.draft().dateResolution).isEmpty();
+        assertThat(form.draft().dateResolution).isNull();
         press(form, key('+'), key('+'), key('+'));
         ParserSettings settings = applied(form);
         assertThat(settings.options().dateResolution()).hasValue(DateResolution.DAY);
@@ -161,24 +161,24 @@ class ParserSettingsTest {
         // While typing, letters are text, not keys of the popup.
         typeText(form, "de-DEx");
         press(form, key(KeyCode.BACKSPACE), key(KeyCode.ENTER));
-        assertThat(form.draft().locale).hasValue("de-DE");
+        assertThat(form.draft().locale).isEqualTo("de-DE");
         press(form, key(KeyCode.DOWN), key(KeyCode.RIGHT));
         typeText(form, "  Europe/Berlin ");
         press(form, key(KeyCode.ENTER));
-        assertThat(form.draft().timeZone).hasValue("Europe/Berlin");
+        assertThat(form.draft().timeZone).isEqualTo("Europe/Berlin");
         // Esc goes back to the popup without taking the text.
         press(form, key(KeyCode.RIGHT));
         typeText(form, "UTC");
         press(form, key(KeyCode.ESCAPE));
-        assertThat(form.draft().timeZone).hasValue("Europe/Berlin");
+        assertThat(form.draft().timeZone).isEqualTo("Europe/Berlin");
         assertThat(applied(form).changed(false)).containsExactly("locale de-DE", "zone Europe/Berlin");
     }
 
     @Test
     void clearsTheLocaleAndTheTimeZone() {
         ParserSettings settings = settings();
-        settings.locale = Optional.of("de-DE");
-        settings.timeZone = Optional.of("UTC");
+        settings.locale = "de-DE";
+        settings.timeZone = "UTC";
         OptionsForm form = new OptionsForm(settings, false);
         press(form, KeyCode.DOWN, 5);
         press(form, key('d'), key(KeyCode.DOWN));
@@ -189,8 +189,8 @@ class ParserSettingsTest {
         typeText(form, "  ");
         press(form, key(KeyCode.ENTER));
         ParserSettings cleared = applied(form);
-        assertThat(cleared.locale).isEmpty();
-        assertThat(cleared.timeZone).isEmpty();
+        assertThat(cleared.locale).isNull();
+        assertThat(cleared.timeZone).isNull();
         assertThat(cleared.changed(false)).isEmpty();
     }
 
@@ -211,7 +211,7 @@ class ParserSettingsTest {
         // The point row comes after the date rows.
         press(form, KeyCode.DOWN, 2);
         press(form, key(KeyCode.RIGHT));
-        assertThat(form.draft().points.getFirst().pointType()).hasValue(PointType.FLOAT);
+        assertThat(form.draft().points.getFirst().pointType()).isEqualTo(PointType.FLOAT);
         ParserSettings applied = applied(form);
         assertThat(applied.options().fieldDateResolutions())
                 .containsExactly(

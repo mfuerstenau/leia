@@ -42,10 +42,8 @@ public final class FakeRepository implements AutoCloseable {
     public FakeRepository() throws IOException {
         for (RuntimeFolders.Known known : RuntimeFolders.KNOWN) {
             for (RuntimeFolders.ListedJar jar : listed(known)) {
-                if (jar.mavenPath().isPresent()) {
-                    served.put(
-                            jar.mavenPath().get(),
-                            Files.readAllBytes(built(known).resolve(jar.name())));
+                if (jar.mavenPath() != null) {
+                    served.put(jar.mavenPath(), Files.readAllBytes(built(known).resolve(jar.name())));
                 }
             }
         }
@@ -122,7 +120,7 @@ public final class FakeRepository implements AutoCloseable {
 
     /** The Lucene jars of {@code known}, as its list names them. */
     public static List<RuntimeFolders.ListedJar> lucene(RuntimeFolders.Known known) throws IOException {
-        return listed(known).stream().filter(jar -> jar.mavenPath().isPresent()).toList();
+        return listed(known).stream().filter(jar -> jar.mavenPath() != null).toList();
     }
 
     /**

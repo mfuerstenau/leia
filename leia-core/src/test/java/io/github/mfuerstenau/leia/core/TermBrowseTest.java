@@ -11,8 +11,6 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
-import java.util.Optional;
-import java.util.OptionalInt;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.FieldType;
@@ -27,6 +25,7 @@ import org.apache.lucene.index.Term;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.FixedBitSet;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -48,48 +47,46 @@ class TermBrowseTest {
     @Test
     void pagesThroughTheTermsOfAField() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            TermPage first = index.terms("body", Optional.empty(), 2);
+            TermPage first = index.terms("body", null, 2);
 
             // The deleted document 1 still counts.
             assertThat(first.terms()).containsExactly(entry("blue", 4, 4), entry("green", 1, 1));
-            assertThat(first.next()).hasValue(new BytesRef("red"));
+            assertThat(first.next()).isEqualTo(new BytesRef("red"));
 
             TermPage second = index.terms("body", first.next(), 2);
             assertThat(second.terms()).containsExactly(entry("red", 1, 2), entry("yellow", 1, 1));
-            assertThat(second.next()).isEmpty();
+            assertThat(second.next()).isNull();
         }
     }
 
     @Test
     void seeksToTheFirstTermFromAText() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            assertThat(index.terms("body", Optional.of(new BytesRef("c")), 1).terms())
-                    .containsExactly(entry("green", 1, 1));
-            assertThat(index.terms("body", Optional.of(new BytesRef("red")), 1).terms())
-                    .containsExactly(entry("red", 1, 2));
+            assertThat(index.terms("body", new BytesRef("c"), 1).terms()).containsExactly(entry("green", 1, 1));
+            assertThat(index.terms("body", new BytesRef("red"), 1).terms()).containsExactly(entry("red", 1, 2));
 
-            TermPage pastTheEnd = index.terms("body", Optional.of(new BytesRef("z")), 10);
+            TermPage pastTheEnd = index.terms("body", new BytesRef("z"), 10);
             assertThat(pastTheEnd.terms()).isEmpty();
-            assertThat(pastTheEnd.next()).isEmpty();
+            assertThat(pastTheEnd.next()).isNull();
         }
     }
 
     @Test
     void fieldWithoutPostingsHasNoTerms() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            TermPage page = index.terms("stored", Optional.empty(), 10);
+            TermPage page = index.terms("stored", null, 10);
 
             assertThat(page.terms()).isEmpty();
-            assertThat(page.next()).isEmpty();
+            assertThat(page.next()).isNull();
         }
     }
 
     @Test
     void binaryTermsAreBytes() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            assertThat(index.terms("key", Optional.empty(), 10).terms()).containsExactly(new Entry(BINARY, 1, 1));
+            assertThat(index.terms("key", null, 10).terms()).containsExactly(new Entry(BINARY, 1, 1));
             assertThat(index.postings("key", BINARY, 0, 10).orElseThrow().postings())
-                    .containsExactly(new Posting(3, false, OptionalInt.empty()));
+                    .containsExactly(new Posting(3, false, null));
         }
     }
 
@@ -104,12 +101,12 @@ class TermBrowseTest {
             // Across both segments; document 1 is deleted.
             assertThat(first.postings())
                     .containsExactly(posting(0, false, 1), posting(1, true, 1), posting(2, false, 1));
-            assertThat(first.nextDoc()).hasValue(3);
+            assertThat(first.nextDoc()).isEqualTo(3);
 
             PostingsPage second =
                     index.postings("body", new BytesRef("blue"), 3, 3).orElseThrow();
             assertThat(second.postings()).containsExactly(posting(3, false, 1));
-            assertThat(second.nextDoc()).isEmpty();
+            assertThat(second.nextDoc()).isNull();
         }
     }
 
@@ -119,32 +116,27 @@ class TermBrowseTest {
             DocFilter filter = filter(4, 1, 3);
             BytesRef blue = new BytesRef("blue");
 
-            PostingsPage marked = index.postings(
-                            "body", blue, 0, 10, Optional.of(new PostingsPage.Filter(filter, false)))
+            PostingsPage marked = index.postings("body", blue, 0, 10, new PostingsPage.Filter(filter, false))
                     .orElseThrow();
             assertThat(marked.postings())
                     .extracting(Posting::docId, Posting::inFilter)
-                    .containsExactly(
-                            tuple(0, Optional.of(false)),
-                            tuple(1, Optional.of(true)),
-                            tuple(2, Optional.of(false)),
-                            tuple(3, Optional.of(true)));
+                    .containsExactly(tuple(0, false), tuple(1, true), tuple(2, false), tuple(3, true));
 
-            Optional<PostingsPage.Filter> only = Optional.of(new PostingsPage.Filter(filter, true));
+            PostingsPage.Filter only = new PostingsPage.Filter(filter, true);
             PostingsPage first = index.postings("body", blue, 0, 1, only).orElseThrow();
             assertThat(first.docFreq()).isEqualTo(4);
             // The deleted document 1 is in the filter.
-            assertThat(first.postings()).containsExactly(new Posting(1, true, OptionalInt.of(1), Optional.of(true)));
-            assertThat(first.nextDoc()).hasValue(3);
+            assertThat(first.postings()).containsExactly(new Posting(1, true, 1, true));
+            assertThat(first.nextDoc()).isEqualTo(3);
             PostingsPage second = index.postings("body", blue, 2, 1, only).orElseThrow();
             assertThat(second.postings()).extracting(Posting::docId).containsExactly(3);
-            assertThat(second.nextDoc()).isEmpty();
+            assertThat(second.nextDoc()).isNull();
 
             // Red is only in document 0, which the filter leaves out.
             PostingsPage none =
                     index.postings("body", new BytesRef("red"), 0, 10, only).orElseThrow();
             assertThat(none.postings()).isEmpty();
-            assertThat(none.nextDoc()).isEmpty();
+            assertThat(none.nextDoc()).isNull();
         }
     }
 
@@ -159,7 +151,7 @@ class TermBrowseTest {
                     index.postings("body", new BytesRef("red"), 1, 10).orElseThrow();
             assertThat(afterRed.docFreq()).isEqualTo(1);
             assertThat(afterRed.postings()).isEmpty();
-            assertThat(afterRed.nextDoc()).isEmpty();
+            assertThat(afterRed.nextDoc()).isNull();
 
             assertThat(index.postings("body", new BytesRef("blue"), 100, 10)
                             .orElseThrow()
@@ -174,7 +166,7 @@ class TermBrowseTest {
             assertThat(index.postings("id", new BytesRef("3"), 0, 10)
                             .orElseThrow()
                             .postings())
-                    .containsExactly(new Posting(2, false, OptionalInt.empty()));
+                    .containsExactly(new Posting(2, false, null));
         }
     }
 
@@ -190,51 +182,47 @@ class TermBrowseTest {
     void readsThePositionsOfATermInADocument() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             assertThat(index.positions(0, "body", new BytesRef("red")))
-                    .hasValue(List.of(
-                            position(0, 0, 3, Optional.of(new BytesRef("p0"))), position(2, 9, 12, Optional.empty())));
+                    .hasValue(List.of(position(0, 0, 3, new BytesRef("p0")), position(2, 9, 12, null)));
             // From the second segment.
-            assertThat(index.positions(2, "body", new BytesRef("yellow")))
-                    .hasValue(List.of(position(1, 5, 11, Optional.empty())));
+            assertThat(index.positions(2, "body", new BytesRef("yellow"))).hasValue(List.of(position(1, 5, 11, null)));
             // A deleted document.
-            assertThat(index.positions(1, "body", new BytesRef("green")))
-                    .hasValue(List.of(position(0, 0, 5, Optional.empty())));
+            assertThat(index.positions(1, "body", new BytesRef("green"))).hasValue(List.of(position(0, 0, 5, null)));
         }
     }
 
     @Test
     void readsThePositionsWithThePostings() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            List<TermPosition> red =
-                    List.of(position(0, 0, 3, Optional.of(new BytesRef("p0"))), position(2, 9, 12, Optional.empty()));
-            assertThat(index.postings("body", new BytesRef("red"), 0, 10, Optional.empty(), 5)
+            List<TermPosition> red = List.of(position(0, 0, 3, new BytesRef("p0")), position(2, 9, 12, null));
+            assertThat(index.postings("body", new BytesRef("red"), 0, 10, null, 5)
                             .orElseThrow()
                             .postings())
                     .singleElement()
                     .extracting(Posting::positions)
-                    .isEqualTo(Optional.of(red));
+                    .isEqualTo(red);
             // Cut, and from the postings of a deleted document.
-            assertThat(index.postings("body", new BytesRef("red"), 0, 10, Optional.empty(), 1)
+            assertThat(index.postings("body", new BytesRef("red"), 0, 10, null, 1)
                             .orElseThrow()
                             .postings()
                             .getFirst()
                             .positions())
-                    .hasValue(List.of(red.getFirst()));
-            assertThat(index.postings("body", new BytesRef("green"), 0, 10, Optional.empty(), 1)
+                    .isEqualTo(List.of(red.getFirst()));
+            assertThat(index.postings("body", new BytesRef("green"), 0, 10, null, 1)
                             .orElseThrow()
                             .postings())
-                    .extracting(Posting::deleted, posting -> posting.positions().orElseThrow())
-                    .containsExactly(tuple(true, List.of(position(0, 0, 5, Optional.empty()))));
+                    .extracting(Posting::deleted, Posting::positions)
+                    .containsExactly(tuple(true, List.of(position(0, 0, 5, null))));
             // Without positions indexed the list is empty, and without maxPositions there is none.
-            assertThat(index.postings("id", new BytesRef("3"), 0, 10, Optional.empty(), 5)
+            assertThat(index.postings("id", new BytesRef("3"), 0, 10, null, 5)
                             .orElseThrow()
                             .postings())
                     .extracting(Posting::positions)
-                    .containsExactly(Optional.of(List.of()));
+                    .containsExactly(List.of());
             assertThat(index.postings("body", new BytesRef("red"), 0, 10)
                             .orElseThrow()
                             .postings())
                     .extracting(Posting::positions)
-                    .containsExactly(Optional.empty());
+                    .containsExactly((List<TermPosition>) null);
         }
     }
 
@@ -257,10 +245,10 @@ class TermBrowseTest {
     @Test
     void rejectsUnknownFieldsAndBadPages() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            assertThatThrownBy(() -> index.terms("nope", Optional.empty(), 10))
+            assertThatThrownBy(() -> index.terms("nope", null, 10))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessage("No field nope");
-            assertThatThrownBy(() -> index.terms("body", Optional.empty(), 0))
+            assertThatThrownBy(() -> index.terms("body", null, 0))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessage("limit must be at least 1: 0");
             assertThatThrownBy(() -> index.postings("nope", new BytesRef("x"), 0, 10))
@@ -280,7 +268,7 @@ class TermBrowseTest {
     void browsesALucene9Index() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(testIndex("lucene9"))) {
             // "document number N" for N = 1..3; document 2 is deleted.
-            assertThat(index.terms("body", Optional.empty(), 10).terms())
+            assertThat(index.terms("body", null, 10).terms())
                     .extracting(entry -> entry.term().utf8ToString())
                     .containsExactly("1", "2", "3", "document", "number");
             assertThat(index.postings("body", new BytesRef("document"), 0, 10)
@@ -289,7 +277,7 @@ class TermBrowseTest {
                     .containsExactly(posting(0, false, 1), posting(1, true, 1), posting(2, false, 1));
             assertThat(index.positions(2, "body", new BytesRef("number")).orElseThrow())
                     .extracting(TermPosition::position)
-                    .containsExactly(OptionalInt.of(1));
+                    .containsExactly(1);
         }
     }
 
@@ -306,11 +294,11 @@ class TermBrowseTest {
     }
 
     private static Posting posting(int docId, boolean deleted, int freq) {
-        return new Posting(docId, deleted, OptionalInt.of(freq));
+        return new Posting(docId, deleted, freq);
     }
 
-    private static TermPosition position(int position, int start, int end, Optional<BytesRef> payload) {
-        return new TermPosition(OptionalInt.of(position), OptionalInt.of(start), OptionalInt.of(end), payload);
+    private static TermPosition position(int position, int start, int end, @Nullable BytesRef payload) {
+        return new TermPosition(position, start, end, payload);
     }
 
     /**

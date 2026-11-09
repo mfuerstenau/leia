@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.LongConsumer;
@@ -69,8 +70,8 @@ public final class RuntimeHighlights {
                 progress -> {
                     try {
                         // A deleted document is highlighted too, as on Lucene 10.
-                        List<Documents.StoredDocument> stored =
-                                documents.storedValues(docId, docId + 1, field.map(Set::of), true);
+                        List<Documents.StoredDocument> stored = documents.storedValues(
+                                docId, docId + 1, field.map(Set::of).orElse(null), true);
                         Map<String, List<RuntimeIndex.StoredValue>> values = stored.isEmpty()
                                 ? Map.of()
                                 : RuntimeResults.storedDocument(stored.getFirst())
@@ -196,7 +197,7 @@ public final class RuntimeHighlights {
 
         @Override
         public synchronized Exception getCause() {
-            return (Exception) super.getCause();
+            return (Exception) Objects.requireNonNull(super.getCause());
         }
     }
 }

@@ -2,7 +2,6 @@ package io.github.mfuerstenau.leia.core;
 
 import java.io.IOException;
 import java.util.Objects;
-import java.util.Optional;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.queries.function.FunctionScoreQuery;
@@ -14,6 +13,7 @@ import org.apache.lucene.search.FieldExistsQuery;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.QueryVisitor;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Every document with a KNN vector in a field, scored by the field's similarity to a target (ADR
@@ -25,9 +25,9 @@ final class ExactKnnQuery extends Query {
 
     private final String field;
     private final KnnVector target;
-    private final Optional<Query> filter;
+    private final @Nullable Query filter;
 
-    ExactKnnQuery(String field, KnnVector target, Optional<Query> filter) {
+    ExactKnnQuery(String field, KnnVector target, @Nullable Query filter) {
         this.field = field;
         this.target = target;
         this.filter = filter;
@@ -36,7 +36,9 @@ final class ExactKnnQuery extends Query {
     @Override
     public Query rewrite(IndexSearcher searcher) {
         BooleanQuery.Builder matches = new BooleanQuery.Builder().add(new FieldExistsQuery(field), Occur.FILTER);
-        filter.ifPresent(query -> matches.add(query, Occur.FILTER));
+        if (filter != null) {
+            matches.add(filter, Occur.FILTER);
+        }
         return new FunctionScoreQuery(matches.build(), new Similarity(field, target));
     }
 
@@ -54,8 +56,7 @@ final class ExactKnnQuery extends Query {
             case KnnVector.Floats floats -> Float.toString(floats.values()[0]);
             case KnnVector.Bytes bytes -> Byte.toString(bytes.values()[0]);
         };
-        return "ExactKnnQuery:" + field + "[" + first + ",...]"
-                + filter.map(query -> "[" + query + "]").orElse("");
+        return "ExactKnnQuery:" + field + "[" + first + ",...]" + (filter != null ? "[" + filter + "]" : "");
     }
 
     @Override
@@ -64,7 +65,7 @@ final class ExactKnnQuery extends Query {
                 && o instanceof ExactKnnQuery other
                 && field.equals(other.field)
                 && target.equals(other.target)
-                && filter.equals(other.filter);
+                && Objects.equals(filter, other.filter);
     }
 
     @Override

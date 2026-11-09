@@ -21,8 +21,8 @@ class DocFilterTest {
         return TestFilters.built(filterId, matchCount, 10);
     }
 
-    private static Optional<FilterMatch> found(int docId, int index) {
-        return Optional.of(new FilterMatch(docId, index));
+    private static FilterMatch found(int docId, int index) {
+        return new FilterMatch(docId, index);
     }
 
     @Test
@@ -51,9 +51,8 @@ class DocFilterTest {
         DocFilter filter = new DocFilter(1, "red", filterParams(true), 8);
         filter.progress(built(2, 1));
 
-        assertThat(filter.stepped(8, true, FilterStep.NEAREST, Optional.empty()))
-                .isEqualTo(new Stepped.LookBack(8));
-        assertThat(filter.stepped(9, true, FilterStep.MOVE, Optional.empty())).isEqualTo(new Stepped.Nothing());
+        assertThat(filter.stepped(8, true, FilterStep.NEAREST, null)).isEqualTo(new Stepped.LookBack(8));
+        assertThat(filter.stepped(9, true, FilterStep.MOVE, null)).isEqualTo(new Stepped.Nothing());
         assertThat(filter.title(9, 10).text()).isEqualTo("filter red, deleted too: 1 match · no next match");
         filter.clearNote();
         assertThat(filter.title(9, 10).text()).isEqualTo("filter red, deleted too: 1 match");
@@ -96,9 +95,8 @@ class DocFilterTest {
         DocFilter filter = new DocFilter(1, "red", filterParams(false), 3);
         filter.progress(built(2, 0));
 
-        assertThat(filter.stepped(3, true, FilterStep.NEAREST, Optional.empty()))
-                .isEqualTo(new Stepped.LookBack(3));
-        assertThat(filter.stepped(3, false, FilterStep.MOVE, Optional.empty())).isEqualTo(new Stepped.Nothing());
+        assertThat(filter.stepped(3, true, FilterStep.NEAREST, null)).isEqualTo(new Stepped.LookBack(3));
+        assertThat(filter.stepped(3, false, FilterStep.MOVE, null)).isEqualTo(new Stepped.Nothing());
         assertThat(filter.title(3, 10).text()).isEqualTo("filter red: no matches");
     }
 

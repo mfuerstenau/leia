@@ -152,11 +152,7 @@ final class RuntimeFilters {
             GetPostingsResult page = backend.call(
                     Methods.GET_POSTINGS,
                     new GetPostingsParams(
-                            "body",
-                            ALPHA,
-                            from.getAsInt(),
-                            limit,
-                            Optional.of(new PostingsFilter(filterId, onlyMatches))));
+                            "body", ALPHA, from.getAsInt(), limit, new PostingsFilter(filterId, onlyMatches)));
             assertThat(page.postings()).hasSizeLessThanOrEqualTo(limit);
             assertThat(page.docFreq()).isGreaterThanOrEqualTo(page.postings().size());
             postings.addAll(page.postings());

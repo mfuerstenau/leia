@@ -27,6 +27,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The TUI (ADR 0034), as leia-app starts it once the backend runs (ADR 0126). Until the TUI takes
@@ -47,22 +48,22 @@ public final class Tui {
      * @param directory the {@code Directory} the open prompt starts with
      * @param theme the theme of {@code --theme}, among {@code themes}
      * @param log the log, which the log window shows (ADR 0087)
-     * @param runtimes the install of the window of {@code D}; empty if leia doesn't run from {@code
+     * @param runtimes the install of the window of {@code D}; null if leia doesn't run from {@code
      *     leia.jar} (ADR 0080)
      * @param started when leia started, for {@code leia.exitAfterFirstFrame}
      */
     public record Start(
             Platform platform,
-            Optional<String> indexPath,
+            @Nullable String indexPath,
             OpenMode mode,
             DirectoryImpl directory,
             RuntimesDirs runtimesDirs,
             DefaultJars defaultJars,
             Themes themes,
-            Optional<Theme> theme,
+            @Nullable Theme theme,
             LeiaBackend backend,
             LeiaLog.Opened log,
-            Optional<RuntimeService> runtimes,
+            @Nullable RuntimeService runtimes,
             Instant started) {}
 
     /** The bundled themes and the user's own of {@code platform}'s config folders (ADR 0096, ADR 0122). */
@@ -99,20 +100,24 @@ public final class Tui {
         History history = platform.historyFile()
                 .map(write -> History.load(platform.historyReadFile().orElse(write), write))
                 .orElseGet(History::inMemory);
-        ThemeFile themeFile =
-                new ThemeFile(platform.themeFile().or(platform::themeWriteFile), platform.themeWriteFile());
+        ThemeFile themeFile = new ThemeFile(
+                platform.themeFile().or(platform::themeWriteFile).orElse(null),
+                platform.themeWriteFile().orElse(null));
         Palette.use(themeFile.resolve(start.theme(), platform.env().apply("NO_COLOR"), start.themes()));
         App app = new App(version, platform.home(), history, start.directory())
                 .withCwd(Path.of("").toAbsolutePath())
                 .withDefaultJars(start.defaultJars())
                 .withThemes(start.themes(), themeFile)
                 .withRuntimeFolders(start.runtimesDirs())
-                .withLog(start.log().buffer(), platform.logFile());
+                .withLog(start.log().buffer(), platform.logFile().orElse(null));
         app.runtimesLoaded(
                 backend.call(Methods.GET_RUNTIMES, new GetRuntimesParams()).get());
         Session session = new Session(app, backend, start.runtimes());
         // The first frame shows the path being opened.
-        start.indexPath().ifPresent(path -> app.opening(path, start.mode()));
+        String indexPath = start.indexPath();
+        if (indexPath != null) {
+            app.opening(indexPath, start.mode());
+        }
         PrintStream stdout = System.out;
         PrintStream stderr = System.err;
         Instant[] firstFrame = new Instant[1];
@@ -130,10 +135,8 @@ public final class Tui {
                 firstFrame[0] = Instant.now();
                 if (exitAfterFirstFrame) {
                     runner.quit();
-                } else {
-                    start.indexPath()
-                            .ifPresent(path -> runner.dispatch(
-                                    Session.perform(new Action.Open(path, app.directory(), start.mode()))));
+                } else if (indexPath != null) {
+                    runner.dispatch(Session.perform(new Action.Open(indexPath, app.directory(), start.mode())));
                 }
             });
             runner.run(session::handle, session::render);

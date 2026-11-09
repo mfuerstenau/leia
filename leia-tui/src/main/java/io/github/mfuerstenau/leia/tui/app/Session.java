@@ -48,6 +48,7 @@ import io.github.mfuerstenau.leia.protocol.terms.GetTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.StartFieldTermScanParams;
 import io.github.mfuerstenau.leia.server.LeiaBackend;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.tui.Optionals;
 import io.github.mfuerstenau.leia.tui.Osc52;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
 import io.github.mfuerstenau.leia.tui.terms.Terms;
@@ -58,7 +59,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
-import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
@@ -71,6 +71,7 @@ import java.util.function.Function;
 import java.util.function.LongFunction;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Runs leia's {@link App} on a {@link TuiRunner}: hands it the keys, makes the calls of its {@link
@@ -121,31 +122,31 @@ public final class Session {
      * Plans and installs into the runtimes folder (ADR 0098, ADR 0126); empty if leia doesn't run
      * from {@code leia.jar}.
      */
-    private final Optional<RuntimeService> runtimes;
+    private final @Nullable RuntimeService runtimes;
 
     /** The install of runtimes, while one runs (ADR 0080). */
     // A thread-safe handle, published through volatile (ADR 0088)
     @SuppressWarnings("java:S3077")
-    private volatile InstallJob installer;
+    private volatile @Nullable InstallJob installer;
 
     /** Set once leia quits, which cancels a download. */
     private final AtomicBoolean quitting = new AtomicBoolean();
 
     /** What made leia quit, if not the user: set on the UI thread. */
-    private Throwable failure;
+    private @Nullable Throwable failure;
 
     /** The polls whose call hasn't come back yet, so that a slow one isn't sent again: on the UI thread. */
     private final Set<Poll> polling = new HashSet<>();
 
     public Session(App app, LeiaBackend backend) {
-        this(app, backend, Optional.empty());
+        this(app, backend, null);
     }
 
     /**
      * @param runtimes plans and installs the runtimes that the window of {@code D} downloads (ADR 0080,
      *     ADR 0126)
      */
-    public Session(App app, LeiaBackend backend, Optional<RuntimeService> runtimes) {
+    public Session(App app, LeiaBackend backend, @Nullable RuntimeService runtimes) {
         this.ui = app;
         this.backend = backend;
         this.exporter = new DocumentExporter(DocumentExporter.Calls.of(backend));
@@ -224,11 +225,11 @@ public final class Session {
     private boolean handleEvent(Event event, TuiRunner runner) {
         return switch (event) {
             case KeyEvent key -> {
-                perform(ui.handleKey(key), runner);
+                ui.handleKey(key).ifPresent(next -> perform(next, runner));
                 yield true;
             }
             case Reply reply -> {
-                perform(reply.apply().apply(ui), runner);
+                reply.apply().apply(ui).ifPresent(next -> perform(next, runner));
                 yield true;
             }
             case TickEvent _ -> {
@@ -241,10 +242,6 @@ public final class Session {
 
     public void render(Frame frame) {
         ui.render(frame);
-    }
-
-    private void perform(Optional<Action> action, TuiRunner runner) {
-        action.ifPresent(next -> perform(next, runner));
     }
 
     // The dispatch over the sealed Action (ADR 0088)
@@ -303,7 +300,8 @@ public final class Session {
             case Action.LoadTerms load ->
                 complete(
                         backend.call(
-                                Methods.GET_TERMS, new GetTermsParams(load.field(), load.from(), Terms.TERMS_PAGE)),
+                                Methods.GET_TERMS,
+                                new GetTermsParams(load.field(), Optional.ofNullable(load.from()), Terms.TERMS_PAGE)),
                         runner,
                         result -> app -> app.termsLoaded(load, result),
                         message -> app -> app.termsFailed(load, message));
@@ -353,7 +351,11 @@ public final class Session {
                 complete(
                         backend.call(
                                 Methods.GET_KNN_GRAPH_NODE,
-                                new GetKnnGraphNodeParams(load.field(), load.segment(), load.ord(), load.docId())),
+                                new GetKnnGraphNodeParams(
+                                        load.field(),
+                                        Optionals.optionalInt(load.segment()),
+                                        Optionals.optionalInt(load.ord()),
+                                        Optionals.optionalInt(load.docId()))),
                         runner,
                         result -> app -> app.knnNodeLoaded(load, result),
                         message -> app -> app.knnNodeFailed(load, message));
@@ -435,7 +437,10 @@ public final class Session {
                 startJob(
                         backend.call(
                                 Methods.START_CHECK_INDEX,
-                                new StartCheckIndexParams(start.level(), start.threads(), start.only())),
+                                new StartCheckIndexParams(
+                                        Optionals.optionalInt(start.level()),
+                                        Optionals.optionalInt(start.threads()),
+                                        Optional.ofNullable(start.only()))),
                         runner,
                         app -> jobId -> app.checkStarted(start.checkId(), jobId),
                         app -> message -> app.checkFailed(start.checkId(), message));
@@ -476,7 +481,11 @@ public final class Session {
                 complete(
                         backend.call(Methods.STEP_FILTER, step.params()),
                         runner,
-                        result -> app -> app.filterStepped(step.serial(), step.params(), step.step(), result.match()),
+                        result -> app -> app.filterStepped(
+                                step.serial(),
+                                step.params(),
+                                step.step(),
+                                result.match().orElse(null)),
                         message -> changing(app -> app.filterStepFailed(step.serial(), message)));
             case Action.ClearFilter clear -> clearFilter(clear.cancel(), clear.release(), runner);
             case Action.CancelScan cancel -> cancelJobs(List.of(cancel.jobId()), runner);
@@ -491,7 +500,11 @@ public final class Session {
             case Action.AddJars add -> addJars(add, runner);
             case Action.PlanRuntimes plan -> planRuntimes(plan, runner);
             case Action.InstallRuntimes install -> installRuntimes(install.job(), runner);
-            case Action.UseMirror use -> runtimes.ifPresent(service -> service.useMirror(use.mirror()));
+            case Action.UseMirror use -> {
+                if (runtimes != null) {
+                    runtimes.useMirror(use.mirror());
+                }
+            }
             case Action.LoadRuntimes _ ->
                 complete(
                         backend.call(Methods.LOAD_RUNTIMES, new LoadRuntimesParams()),
@@ -531,16 +544,19 @@ public final class Session {
     /** Loads a document, and starts finding its matches if asked to. */
     private void loadDocument(Action.LoadDocument load, TuiRunner runner) {
         cancelJobs(load.cancel(), runner);
-        load.matches()
-                .ifPresent(matches -> startJob(
-                        backend.call(Methods.START_HIGHLIGHT, matches.params()),
-                        runner,
-                        app -> jobId -> app.documentMatchesStarted(matches.matchesId(), jobId),
-                        app -> message -> app.documentMatchesFailed(matches.matchesId(), message)));
+        Documents.MatchesStart matches = load.matches();
+        if (matches != null) {
+            startJob(
+                    backend.call(Methods.START_HIGHLIGHT, matches.params()),
+                    runner,
+                    app -> jobId -> app.documentMatchesStarted(matches.matchesId(), jobId),
+                    app -> message -> app.documentMatchesFailed(matches.matchesId(), message));
+        }
+        Documents.Locate locate = load.locate();
         backend.call(Methods.GET_DOCUMENT, new GetDocumentParams(load.docId())).whenComplete((result, error) -> {
             if (error == null) {
-                if (load.locate().isPresent()) {
-                    locate(load.locate().get(), result, runner);
+                if (locate != null) {
+                    locate(locate, result, runner);
                 } else {
                     reply(runner, app -> app.documentLoaded(result));
                 }
@@ -578,14 +594,14 @@ public final class Session {
 
     /** Plans the download on a thread of its own: it hashes the jars that are there (ADR 0080). */
     private void planRuntimes(Action.PlanRuntimes plan, TuiRunner runner) {
-        if (runtimes.isEmpty()) {
+        RuntimeService service = runtimes;
+        if (service == null) {
             reply(runner, app -> {
                 app.runtimesPlanFailed("leia doesn't run from leia.jar, so it has no runtimes folder");
                 return Optional.empty();
             });
             return;
         }
-        RuntimeService service = runtimes.get();
         RuntimeInstall install = service.install();
         service.plan(plan.runtimes(), plan.present()).whenComplete((planned, error) -> {
             if (error == null) {
@@ -650,7 +666,7 @@ public final class Session {
         backend.call(Methods.STEP_FILTER, params).whenComplete((result, error) -> {
             if (error == null) {
                 reply(runner, app -> {
-                    app.filterLocated(locate.serial(), params, result.match());
+                    app.filterLocated(locate.serial(), params, result.match().orElse(null));
                     return app.documentLoaded(document);
                 });
                 return;
@@ -772,14 +788,18 @@ public final class Session {
     }
 
     /** Cancels the job that builds a filter, and releases a built one; nothing is reported back. */
-    private void clearFilter(OptionalLong cancel, OptionalLong release, TuiRunner runner) {
-        cancel.ifPresent(jobId -> cancelJobs(List.of(jobId), runner));
-        release.ifPresent(filterId -> backend.call(Methods.RELEASE_FILTER, new ReleaseFilterParams(filterId))
-                .whenComplete((released, error) -> {
-                    if (error != null) {
-                        rpcException(error, runner);
-                    }
-                }));
+    private void clearFilter(@Nullable Long cancel, @Nullable Long release, TuiRunner runner) {
+        if (cancel != null) {
+            cancelJobs(List.of(cancel), runner);
+        }
+        if (release != null) {
+            backend.call(Methods.RELEASE_FILTER, new ReleaseFilterParams(release))
+                    .whenComplete((released, error) -> {
+                        if (error != null) {
+                            rpcException(error, runner);
+                        }
+                    });
+        }
     }
 
     /**
@@ -946,7 +966,7 @@ public final class Session {
                                     result.skipped(),
                                     result.features(),
                                     result.luceneRuntime(),
-                                    result.server()));
+                                    result.server().orElse(null)));
                 } else {
                     closeUnseen(statsError, runner);
                 }
@@ -1017,7 +1037,7 @@ public final class Session {
      * The {@link RpcException} that {@code error} is, an expected failure that the app shows; or
      * null after anything else, which ends leia.
      */
-    private RpcException rpcException(Throwable error, TuiRunner runner) {
+    private @Nullable RpcException rpcException(Throwable error, TuiRunner runner) {
         Throwable cause = error instanceof CompletionException && error.getCause() != null ? error.getCause() : error;
         if (cause instanceof RpcException rpc) {
             return rpc;

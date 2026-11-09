@@ -9,7 +9,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -18,6 +17,7 @@ import org.apache.lucene.index.CheckIndex;
 import org.apache.lucene.index.SegmentCommitInfo;
 import org.apache.lucene.index.SegmentInfos;
 import org.apache.lucene.store.Directory;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Checks an index directory with Lucene's {@link CheckIndex} (ADR 0022): the latest commit, every
@@ -44,8 +44,8 @@ public final class IndexCheck {
      *
      * @param path the index directory
      * @param error why it could not be checked at all, such as no {@code segments_N}; then nothing
-     *     else is known
-     * @param segmentsFile the {@code segments_N} file of the latest commit
+     *     else is known; null if it was checked
+     * @param segmentsFile the {@code segments_N} file of the latest commit; null if unknown
      * @param clean whether no problem was found
      * @param missingSegments whether the latest commit (or an older one) could not be read
      * @param toolOutOfDate whether the index was written by a newer Lucene than leia's
@@ -58,8 +58,8 @@ public final class IndexCheck {
      */
     public record Result(
             Path path,
-            Optional<String> error,
-            Optional<String> segmentsFile,
+            @Nullable String error,
+            @Nullable String segmentsFile,
             boolean clean,
             boolean missingSegments,
             boolean toolOutOfDate,
@@ -70,8 +70,7 @@ public final class IndexCheck {
             List<SegmentResult> segments) {
 
         static Result failed(Path path, String error) {
-            return new Result(
-                    path, Optional.of(error), Optional.empty(), false, false, false, 0, 0, 0, false, List.of());
+            return new Result(path, error, null, false, false, false, 0, 0, 0, false, List.of());
         }
     }
 
@@ -80,24 +79,24 @@ public final class IndexCheck {
      *
      * @param name the segment's name, such as {@code _0}
      * @param maxDoc its documents, deleted ones included
-     * @param codec its codec, if its {@code .si} file could be read
+     * @param codec its codec; null if its {@code .si} file could not be read
      * @param compound whether it is a compound file
      * @param files the files it consists of
      * @param sizeBytes the size of those files
      * @param hasDeletions whether it has deleted documents
      * @param openReaderPassed whether a reader could open it
-     * @param error the test it failed and why, with the causes; empty if it passed
+     * @param error the test it failed and why, with the causes; null if it passed
      */
     public record SegmentResult(
             String name,
             int maxDoc,
-            Optional<String> codec,
+            @Nullable String codec,
             boolean compound,
             int files,
             long sizeBytes,
             boolean hasDeletions,
             boolean openReaderPassed,
-            Optional<String> error) {}
+            @Nullable String error) {}
 
     /**
      * Checks the latest commit of the index in {@code dir} at {@code level}. The report that {@code
@@ -123,7 +122,7 @@ public final class IndexCheck {
             DirectoryImpl directoryImpl,
             int level,
             int threads,
-            List<String> onlySegments,
+            @Nullable List<String> onlySegments,
             Consumer<String> output,
             ScanProgress progress) {
         CheckIndex.Level.checkIfLevelInBounds(level);
@@ -159,8 +158,8 @@ public final class IndexCheck {
      * Checks segments in parallel if there are several to check, on {@code threads} threads at most,
      * one per segment, on an executor that is never interrupted.
      */
-    private static CheckIndex.Status run(CheckIndex checker, List<String> commit, int threads, List<String> only)
-            throws IOException {
+    private static CheckIndex.Status run(
+            CheckIndex checker, List<String> commit, int threads, @Nullable List<String> only) throws IOException {
         long segments = only == null
                 ? commit.size()
                 : commit.stream().filter(only::contains).count();
@@ -207,18 +206,18 @@ public final class IndexCheck {
             segments.add(new SegmentResult(
                     segment.name,
                     segment.maxDoc,
-                    Optional.ofNullable(segment.codec).map(Object::toString),
+                    segment.codec != null ? segment.codec.toString() : null,
                     segment.compound,
                     segment.numFiles,
                     Math.round(segment.sizeMB * 1024 * 1024),
                     segment.hasDeletions,
                     segment.openReaderPassed,
-                    Optional.ofNullable(segment.error).map(IndexCheck::describe)));
+                    segment.error != null ? describe(segment.error) : null));
         }
         return new Result(
                 dir,
-                Optional.empty(),
-                Optional.ofNullable(status.segmentsFileName),
+                null,
+                status.segmentsFileName,
                 status.clean,
                 status.missingSegments,
                 status.toolOutOfDate,

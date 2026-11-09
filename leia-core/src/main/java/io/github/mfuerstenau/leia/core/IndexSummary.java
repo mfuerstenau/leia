@@ -1,8 +1,8 @@
 package io.github.mfuerstenau.leia.core;
 
 import java.nio.file.Path;
-import java.util.Optional;
 import org.apache.lucene.util.Version;
+import org.jspecify.annotations.Nullable;
 
 /**
  * What identifies an opened index directory: where it is, which commit was opened, and which Lucene
@@ -15,7 +15,7 @@ import org.apache.lucene.util.Version;
  * @param numDocs live documents
  * @param maxDoc documents including deleted ones
  * @param createdVersionMajor the major Lucene version that created the index
- * @param minSegmentLuceneVersion the oldest Lucene version that wrote one of its segments; empty if
+ * @param minSegmentLuceneVersion the oldest Lucene version that wrote one of its segments; null if
  *     the index has no segments
  */
 public record IndexSummary(
@@ -25,4 +25,4 @@ public record IndexSummary(
         int numDocs,
         int maxDoc,
         int createdVersionMajor,
-        Optional<Version> minSegmentLuceneVersion) {}
+        @Nullable Version minSegmentLuceneVersion) {}

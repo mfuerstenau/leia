@@ -8,8 +8,8 @@ import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.TreeMap;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The analysis that the analysis screen tries and the search screen parses and likes with (ADR
@@ -18,13 +18,13 @@ import java.util.TreeMap;
  *
  * @param defaultAnalyzer the analyzer of every field without one of its own
  * @param fields the fields with their own analyzer, by name
- * @param stopWords the auto stop words; empty for none
+ * @param stopWords the auto stop words; null for none
  * @param stopWordsBeforeReopen whether the stop words were found before the index was reopened
  */
 public record AnalysisSettings(
         AnalyzerSettings defaultAnalyzer,
         Map<String, AnalyzerSettings> fields,
-        Optional<AutoStopWords> stopWords,
+        @Nullable AutoStopWords stopWords,
         boolean stopWordsBeforeReopen) {
 
     public AnalysisSettings {
@@ -33,12 +33,13 @@ public record AnalysisSettings(
 
     /** The standard analyzer for every field, and no stop words. */
     public AnalysisSettings() {
-        this(new AnalyzerSettings(), Map.of(), Optional.empty(), false);
+        this(new AnalyzerSettings(), Map.of(), null, false);
     }
 
     /** The analyzer of {@code field}: its own, or the default one; the default one for no field. */
-    public AnalyzerSettings analyzer(Optional<String> field) {
-        return field.map(fields::get).orElse(defaultAnalyzer);
+    public AnalyzerSettings analyzer(@Nullable String field) {
+        AnalyzerSettings own = field == null ? null : fields.get(field);
+        return own != null ? own : defaultAnalyzer;
     }
 
     /** Whether {@code field} has an analyzer of its own. */
@@ -47,12 +48,12 @@ public record AnalysisSettings(
     }
 
     /** With {@code analyzer} for {@code field}, or as the default for no field. */
-    public AnalysisSettings withAnalyzer(Optional<String> field, AnalyzerSettings analyzer) {
-        if (field.isEmpty()) {
+    public AnalysisSettings withAnalyzer(@Nullable String field, AnalyzerSettings analyzer) {
+        if (field == null) {
             return new AnalysisSettings(analyzer, fields, stopWords, stopWordsBeforeReopen);
         }
         Map<String, AnalyzerSettings> changed = new TreeMap<>(fields);
-        changed.put(field.get(), analyzer);
+        changed.put(field, analyzer);
         return new AnalysisSettings(defaultAnalyzer, changed, stopWords, stopWordsBeforeReopen);
     }
 
@@ -63,8 +64,8 @@ public record AnalysisSettings(
         return new AnalysisSettings(defaultAnalyzer, changed, stopWords, stopWordsBeforeReopen);
     }
 
-    /** With these stop words, just found; empty for none. */
-    public AnalysisSettings withStopWords(Optional<AutoStopWords> found) {
+    /** With these stop words, just found; null for none. */
+    public AnalysisSettings withStopWords(@Nullable AutoStopWords found) {
         return new AnalysisSettings(defaultAnalyzer, fields, found, false);
     }
 
@@ -73,18 +74,20 @@ public record AnalysisSettings(
      * reopen keeps them and marks them as found before it.
      */
     public AnalysisSettings forIndex(boolean reopen) {
-        if (stopWords.isEmpty()) {
+        if (stopWords == null) {
             return this;
         }
         return reopen
                 ? new AnalysisSettings(defaultAnalyzer, fields, stopWords, true)
-                : new AnalysisSettings(defaultAnalyzer, fields, Optional.empty(), false);
+                : new AnalysisSettings(defaultAnalyzer, fields, null, false);
     }
 
     /** The stop words of {@code field}; none if it has none. */
     public List<String> stopWords(String field) {
-        return stopWords.stream()
-                .flatMap(found -> found.fields().stream())
+        if (stopWords == null) {
+            return List.of();
+        }
+        return stopWords.fields().stream()
                 .filter(words -> words.field().equals(field))
                 .findFirst()
                 .map(FieldStopWords::words)
@@ -93,8 +96,10 @@ public record AnalysisSettings(
 
     /** The fields that have stop words, and those words. */
     private List<FieldStopWords> fieldsWithStopWords() {
-        return stopWords.stream()
-                .flatMap(found -> found.fields().stream())
+        if (stopWords == null) {
+            return List.of();
+        }
+        return stopWords.fields().stream()
                 .filter(words -> !words.words().isEmpty())
                 .toList();
     }

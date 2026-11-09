@@ -14,7 +14,6 @@ import io.github.mfuerstenau.leia.protocol.jars.RuntimeState;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Optional;
 import java.util.jar.JarOutputStream;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -37,7 +36,7 @@ class RuntimeRestartBackendTest {
         Path runtimes = Files.createDirectories(tmp.resolve("runtimes"));
         Path jar = tmp.resolve("empty.jar");
         new JarOutputStream(Files.newOutputStream(jar)).close();
-        try (RealBackend backend = RealBackend.start(Optional.of(runtimes), List.of(jar))) {
+        try (RealBackend backend = RealBackend.start(runtimes, List.of(jar))) {
             copyFolder(built, runtimes, "lucene10");
             copyFolder(built, runtimes, "lucene7");
 
@@ -45,8 +44,7 @@ class RuntimeRestartBackendTest {
 
             assertThat(result.loaded()).containsExactly("lucene7");
             assertThat(result.runtimes().getFirst())
-                    .isEqualTo(new RuntimeFolder(
-                            "lucene10", List.of(9, 10), RuntimeState.RESTART, Optional.empty(), Optional.empty()));
+                    .isEqualTo(new RuntimeFolder("lucene10", List.of(9, 10), RuntimeState.RESTART, null, null));
             assertThat(state(result, "lucene7")).isEqualTo(RuntimeState.LOADED);
             // Asked again, it stays so.
             assertThat(backend.call(Methods.LOAD_RUNTIMES, new LoadRuntimesParams())

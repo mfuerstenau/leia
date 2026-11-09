@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The query line of the search screen's doc values mode (ADR 0033): one value, several values (a
@@ -33,8 +34,8 @@ public final class DocValuesSyntax {
     public sealed interface Parsed {
         record Values(List<String> values) implements Parsed {}
 
-        /** A range; an empty bound is open. */
-        record Range(Optional<String> lower, Optional<String> upper, boolean includeLower, boolean includeUpper)
+        /** A range; a null bound is open. */
+        record Range(@Nullable String lower, @Nullable String upper, boolean includeLower, boolean includeUpper)
                 implements Parsed {}
 
         /** The start of a value, for a field of bytes (ADR 0036). */
@@ -43,18 +44,18 @@ public final class DocValuesSyntax {
 
     /**
      * The query for {@code line} on {@code field}. {@code number} says how a number field encodes its
-     * numbers, and is empty for a field of bytes, whose values are hex if {@code hex}.
+     * numbers, and is null for a field of bytes, whose values are hex if {@code hex}.
      *
      * @throws IllegalArgumentException if the line doesn't read, is a prefix for a number field, or
      *     has a value that is not hex
      */
-    public static DocValuesQuery query(String field, Optional<DocValuesNumber> number, boolean hex, String line) {
-        boolean binary = hex && number.isEmpty();
+    public static DocValuesQuery query(String field, @Nullable DocValuesNumber number, boolean hex, String line) {
+        boolean binary = hex && number == null;
         return switch (parse(line)) {
             case Parsed.Values values ->
                 new DocValuesQuery(
                         field,
-                        number,
+                        Optional.ofNullable(number),
                         Optional.of(values.values().stream()
                                 .map(text -> value(text, binary))
                                 .toList()),
@@ -63,20 +64,24 @@ public final class DocValuesSyntax {
             case Parsed.Range range ->
                 new DocValuesQuery(
                         field,
-                        number,
+                        Optional.ofNullable(number),
                         Optional.empty(),
                         Optional.of(new DocValuesRange(
-                                range.lower().map(text -> value(text, binary)),
-                                range.upper().map(text -> value(text, binary)),
+                                Optional.ofNullable(range.lower()).map(text -> value(text, binary)),
+                                Optional.ofNullable(range.upper()).map(text -> value(text, binary)),
                                 range.includeLower(),
                                 range.includeUpper())),
                         Optional.empty());
             case Parsed.Prefix prefix -> {
-                if (number.isPresent()) {
+                if (number != null) {
                     throw new IllegalArgumentException("A prefix is for doc values of bytes; numbers take a range.");
                 }
                 yield new DocValuesQuery(
-                        field, number, Optional.empty(), Optional.empty(), Optional.of(value(prefix.prefix(), binary)));
+                        field,
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.of(value(prefix.prefix(), binary)));
             }
         };
     }
@@ -148,8 +153,9 @@ public final class DocValuesSyntax {
 
     private record Token(String text, boolean quoted) {
         /** The bound the token stands for: empty for an unquoted {@code *}. */
-        Optional<String> bound() {
-            return quoted || !text.equals("*") ? Optional.of(text) : Optional.empty();
+        @Nullable
+        String bound() {
+            return quoted || !text.equals("*") ? text : null;
         }
 
         /** Whether the token is a prefix outside a range: unquoted and ending in {@code *}. */

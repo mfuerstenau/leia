@@ -8,7 +8,6 @@ import io.github.mfuerstenau.leia.protocol.analysis.FieldAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.FieldStopWords;
 import io.github.mfuerstenau.leia.tui.analysis.AnalyzerSettings.Kind;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /** The analysis with field analyzers and auto stop words, as the requests send it (ADR 0039). */
@@ -21,7 +20,7 @@ class AnalysisSettingsTest {
         assertThat(settings.isStandard()).isTrue();
         assertThat(settings.text()).isEqualTo("standard analyzer");
         assertThat(settings.analyzer()).isEqualTo(AnalyzerSettings.standardAnalyzer());
-        assertThat(settings.analyzer(Optional.of("body"))).isSameAs(settings.defaultAnalyzer());
+        assertThat(settings.analyzer("body")).isSameAs(settings.defaultAnalyzer());
     }
 
     @Test
@@ -38,10 +37,10 @@ class AnalysisSettingsTest {
                         new FieldStopWords("title", List.of("lamp"))));
 
         AnalysisSettings settings = new AnalysisSettings()
-                .withAnalyzer(Optional.empty(), english)
-                .withAnalyzer(Optional.of("title"), custom)
-                .withAnalyzer(Optional.of("raw"), new AnalyzerSettings())
-                .withStopWords(Optional.of(found));
+                .withAnalyzer(null, english)
+                .withAnalyzer("title", custom)
+                .withAnalyzer("raw", new AnalyzerSettings())
+                .withStopWords(found);
 
         Analyzer analyzer = settings.analyzer();
         assertThat(analyzer.preset()).isEqualTo(english.analyzer().preset());
@@ -58,7 +57,7 @@ class AnalysisSettingsTest {
         assertThat(settings.stopWords("title")).containsExactly("lamp");
 
         AnalysisSettings dropped =
-                settings.withoutAnalyzer("title").withoutAnalyzer("raw").withStopWords(Optional.empty());
+                settings.withoutAnalyzer("title").withoutAnalyzer("raw").withStopWords(null);
         assertThat(dropped.analyzer().fields()).isEmpty();
         assertThat(dropped.analyzer().autoStopWords()).isEmpty();
         assertThat(dropped.text()).isEqualTo("EnglishAnalyzer");
@@ -67,13 +66,13 @@ class AnalysisSettingsTest {
     @Test
     void stopWordsBelongToTheirIndex() {
         var found = new AutoStopWords(1, List.of(new FieldStopWords("body", List.of("the"))));
-        AnalysisSettings settings = new AnalysisSettings().withStopWords(Optional.of(found));
+        AnalysisSettings settings = new AnalysisSettings().withStopWords(found);
 
         AnalysisSettings reopened = settings.forIndex(true);
-        assertThat(reopened.stopWords()).hasValue(found);
+        assertThat(reopened.stopWords()).isEqualTo(found);
         assertThat(reopened.text())
                 .isEqualTo("standard analyzer · 1 auto stop word in 1 field (from before the reopen)");
-        assertThat(settings.forIndex(false).stopWords()).isEmpty();
+        assertThat(settings.forIndex(false).stopWords()).isNull();
         assertThat(settings.forIndex(false).isStandard()).isTrue();
     }
 }

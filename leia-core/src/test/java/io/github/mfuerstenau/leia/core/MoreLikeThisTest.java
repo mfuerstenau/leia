@@ -12,8 +12,6 @@ import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -39,6 +37,7 @@ import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.similarities.Similarity;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -83,8 +82,8 @@ class MoreLikeThisTest {
 
     @Test
     void analyzesStoredStringsWithTheCallersAnalyzer() throws Exception {
-        var whitespace = new AnalyzerSpec.Custom(
-                List.of(), new AnalyzerSpec.Component("whitespace", Map.of()), List.of(), Optional.empty());
+        var whitespace =
+                new AnalyzerSpec.Custom(List.of(), new AnalyzerSpec.Component("whitespace", Map.of()), List.of(), null);
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex());
                 Analyzer analyzer = Analyzers.build(whitespace)) {
             // "Red Lamp Red" without lowercasing: "Red" is no term of the index.
@@ -97,13 +96,13 @@ class MoreLikeThisTest {
     void leavesOutTermsByTheirFrequenciesAndKeepsTheBest() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             // Document frequencies count deleted documents: apple 3, banana 3, cherry 2.
-            var onlyRare = new MoreLikeThisOptions(List.of("body"), 1, 1, OptionalInt.of(2), 25, false);
+            var onlyRare = new MoreLikeThisOptions(List.of("body"), 1, 1, 2, 25, false);
             assertThat(search(index, Queries.moreLikeThis(0, onlyRare, ANALYZER))
                             .rewrittenQuery())
                     .isEqualTo("body:cherry");
 
             // apple scores tf 2 × idf; the rarer cherry has tf 1.
-            var best = new MoreLikeThisOptions(List.of("body"), 1, 1, OptionalInt.empty(), 1, false);
+            var best = new MoreLikeThisOptions(List.of("body"), 1, 1, null, 1, false);
             assertThat(search(index, Queries.moreLikeThis(0, best, ANALYZER)).rewrittenQuery())
                     .isEqualTo("body:apple");
 
@@ -119,7 +118,7 @@ class MoreLikeThisTest {
     @Test
     void boostsTheTermsByTheirScores() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            var boost = new MoreLikeThisOptions(List.of("body", "title"), 1, 1, OptionalInt.of(3), 25, true);
+            var boost = new MoreLikeThisOptions(List.of("body", "title"), 1, 1, 3, 25, true);
             SearchResults results = search(index, Queries.moreLikeThis(0, boost, ANALYZER));
 
             assertThat(results.query())
@@ -169,8 +168,7 @@ class MoreLikeThisTest {
                     Queries.moreLikeThis(0, options, ANALYZER),
                     Queries.moreLikeText("apple banana red lamp", options, ANALYZER))) {
                 calls.set(0);
-                assertThatThrownBy(() ->
-                                index.search(query, BM25, Optional.empty(), 0, 10, true, Optional.empty(), cancelled))
+                assertThatThrownBy(() -> index.search(query, BM25, null, 0, 10, true, null, cancelled))
                         .isInstanceOf(CancellationException.class);
                 calls.set(0);
                 assertThatThrownBy(() -> index.explain(query, BM25, 0, cancelled))
@@ -184,26 +182,26 @@ class MoreLikeThisTest {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             // body has a term vector: apple tf 2, banana 1, cherry 1; five documents have body.
             SearchResults vector = search(index, Queries.moreLikeThis(0, options(List.of("body"), 1, 1), ANALYZER));
-            assertThat(vector.moreLikeThisTerms().orElseThrow())
+            assertThat(vector.moreLikeThisTerms())
                     .extracting(LikeTerm::term, LikeTerm::tf, LikeTerm::docFreq)
                     .containsExactly(tuple("apple", 2, 3), tuple("cherry", 1, 2), tuple("banana", 1, 3));
-            LikeTerm apple = vector.moreLikeThisTerms().orElseThrow().getFirst();
+            LikeTerm apple = vector.moreLikeThisTerms().getFirst();
             assertThat(apple.field()).isEqualTo("body");
             assertThat(apple.idf()).isCloseTo((float) (1 + Math.log(6.0 / 4)), within(1e-6f));
             assertThat(apple.score()).isEqualTo(apple.tf() * apple.idf());
 
             // title has no term vector: its stored "Red Lamp Red" is analyzed.
             SearchResults stored = search(index, Queries.moreLikeThis(0, options(List.of("title"), 1, 1), ANALYZER));
-            assertThat(stored.moreLikeThisTerms().orElseThrow())
+            assertThat(stored.moreLikeThisTerms())
                     .extracting(LikeTerm::term, LikeTerm::tf)
                     .containsExactly(tuple("red", 2), tuple("lamp", 1));
 
             // Without terms, the list is empty; other queries have none.
             SearchResults none = search(index, Queries.moreLikeThis(0, options(List.of("n"), 1, 1), ANALYZER));
-            assertThat(none.moreLikeThisTerms()).contains(List.of());
+            assertThat(none.moreLikeThisTerms()).isEqualTo(List.of());
             assertThat(search(index, Queries.term("body", new BytesRef("apple")))
                             .moreLikeThisTerms())
-                    .isEmpty();
+                    .isNull();
         }
     }
 
@@ -212,7 +210,7 @@ class MoreLikeThisTest {
         Path dir = writeIndex();
         try (FSDirectory directory = FSDirectory.open(dir);
                 DirectoryReader reader = DirectoryReader.open(directory)) {
-            var boost = new MoreLikeThisOptions(List.of("body", "title"), 1, 1, OptionalInt.empty(), 25, true);
+            var boost = new MoreLikeThisOptions(List.of("body", "title"), 1, 1, null, 25, true);
             for (Query query : List.of(
                     Queries.moreLikeThis(0, boost, ANALYZER),
                     Queries.moreLikeText("apple cherry cherry red lamp lamp table", boost, ANALYZER))) {
@@ -249,21 +247,21 @@ class MoreLikeThisTest {
                     .isEqualTo("like(text \"Apple apple cherry, banana and durian\", fields [body], minTermFreq 1, "
                             + "minDocFreq 1, maxQueryTerms 25)");
             // "and" is in no document of body.
-            assertThat(results.moreLikeThisTerms().orElseThrow())
+            assertThat(results.moreLikeThisTerms())
                     .extracting(LikeTerm::term, LikeTerm::tf)
                     .containsExactly(tuple("apple", 2), tuple("durian", 1), tuple("cherry", 1), tuple("banana", 1));
             assertThat(results.hits()).extracting(Hit::docId).containsExactlyInAnyOrder(0, 1, 2, 4);
 
             // Each field analyzes the text, and their terms compete for the places.
-            var both = new MoreLikeThisOptions(List.of("body", "title"), 1, 1, OptionalInt.empty(), 2, false);
+            var both = new MoreLikeThisOptions(List.of("body", "title"), 1, 1, null, 2, false);
             SearchResults fields = search(index, Queries.moreLikeText("red red durian", both, ANALYZER));
-            assertThat(fields.moreLikeThisTerms().orElseThrow())
+            assertThat(fields.moreLikeThisTerms())
                     .extracting(LikeTerm::field, LikeTerm::term)
                     .containsExactly(tuple("title", "red"), tuple("body", "durian"));
 
             // An empty text has no terms, and finds nothing.
             SearchResults empty = search(index, Queries.moreLikeText("", options(List.of("body"), 1, 1), ANALYZER));
-            assertThat(empty.moreLikeThisTerms()).contains(List.of());
+            assertThat(empty.moreLikeThisTerms()).isEqualTo(List.of());
             assertThat(empty.hits()).isEmpty();
 
             Hit second = results.hits().get(1);
@@ -276,18 +274,14 @@ class MoreLikeThisTest {
     void leavesOutStopWordsAndWordsByTheirLength() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             String text = "apple banana cherry durian";
-            assertThat(terms(index, text, 0, OptionalInt.empty(), Set.of("apple", "Cherry")))
+            assertThat(terms(index, text, 0, null, Set.of("apple", "Cherry")))
                     .containsExactly("durian", "cherry", "banana");
-            assertThat(terms(index, text, 6, OptionalInt.empty(), Set.of()))
-                    .containsExactly("durian", "cherry", "banana");
-            assertThat(terms(index, text, 0, OptionalInt.of(5), Set.of())).containsExactly("apple");
+            assertThat(terms(index, text, 6, null, Set.of())).containsExactly("durian", "cherry", "banana");
+            assertThat(terms(index, text, 0, 5, Set.of())).containsExactly("apple");
             // The term vector's terms are left out by the same rules.
-            var options = new MoreLikeThisOptions(
-                    List.of("body"), 1, 1, OptionalInt.empty(), 25, false, 0, OptionalInt.empty(), Set.of("apple"));
+            var options = new MoreLikeThisOptions(List.of("body"), 1, 1, null, 25, false, 0, null, Set.of("apple"));
             SearchResults doc = search(index, Queries.moreLikeThis(0, options, ANALYZER));
-            assertThat(doc.moreLikeThisTerms().orElseThrow())
-                    .extracting(LikeTerm::term)
-                    .containsExactly("cherry", "banana");
+            assertThat(doc.moreLikeThisTerms()).extracting(LikeTerm::term).containsExactly("cherry", "banana");
             assertThat(doc.query()).endsWith("maxQueryTerms 25, stopWords [apple])");
         }
     }
@@ -310,42 +304,41 @@ class MoreLikeThisTest {
         assertThatThrownBy(() -> options(List.of("body", "body"), 1, 1)).hasMessageContaining("'body' is listed twice");
         assertThatThrownBy(() -> options(List.of("body"), -1, 1)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> options(List.of("body"), 1, -1)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new MoreLikeThisOptions(List.of("body"), 1, 1, OptionalInt.of(-1), 25, false))
+        assertThatThrownBy(() -> new MoreLikeThisOptions(List.of("body"), 1, 1, -1, 25, false))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new MoreLikeThisOptions(List.of("body"), 1, 1, OptionalInt.empty(), 0, false))
+        assertThatThrownBy(() -> new MoreLikeThisOptions(List.of("body"), 1, 1, null, 0, false))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new MoreLikeThisOptions(List.of("body"), 1, 1, OptionalInt.empty(), 1025, false))
+        assertThatThrownBy(() -> new MoreLikeThisOptions(List.of("body"), 1, 1, null, 1025, false))
                 .hasMessageContaining("from 1 to 1024");
-        assertThat(new MoreLikeThisOptions(List.of("body"), 0, 0, OptionalInt.of(0), 1024, false))
+        assertThat(new MoreLikeThisOptions(List.of("body"), 0, 0, 0, 1024, false))
                 .isNotNull();
-        assertThatThrownBy(() -> words(-1, OptionalInt.empty())).hasMessageContaining("minWordLen must be 0 or more");
-        assertThatThrownBy(() -> words(0, OptionalInt.of(0))).hasMessageContaining("maxWordLen must be 1 or more");
-        assertThatThrownBy(() -> words(4, OptionalInt.of(3))).hasMessageContaining("at least minWordLen (4)");
-        assertThat(words(3, OptionalInt.of(3))).isNotNull();
+        assertThatThrownBy(() -> words(-1, null)).hasMessageContaining("minWordLen must be 0 or more");
+        assertThatThrownBy(() -> words(0, 0)).hasMessageContaining("maxWordLen must be 1 or more");
+        assertThatThrownBy(() -> words(4, 3)).hasMessageContaining("at least minWordLen (4)");
+        assertThat(words(3, 3)).isNotNull();
     }
 
-    private static MoreLikeThisOptions words(int minWordLen, OptionalInt maxWordLen) {
-        return new MoreLikeThisOptions(
-                List.of("body"), 1, 1, OptionalInt.empty(), 25, false, minWordLen, maxWordLen, Set.of());
+    private static MoreLikeThisOptions words(int minWordLen, @Nullable Integer maxWordLen) {
+        return new MoreLikeThisOptions(List.of("body"), 1, 1, null, 25, false, minWordLen, maxWordLen, Set.of());
     }
 
     /** The terms that like-{@code text} chooses on body, best first. */
     private static List<String> terms(
-            ReadOnlyIndex index, String text, int minWordLen, OptionalInt maxWordLen, Set<String> stopWords)
+            ReadOnlyIndex index, String text, int minWordLen, @Nullable Integer maxWordLen, Set<String> stopWords)
             throws IOException, InvalidQueryException {
-        var options = new MoreLikeThisOptions(
-                List.of("body"), 1, 1, OptionalInt.empty(), 25, false, minWordLen, maxWordLen, stopWords);
-        return search(index, Queries.moreLikeText(text, options, ANALYZER)).moreLikeThisTerms().orElseThrow().stream()
+        var options =
+                new MoreLikeThisOptions(List.of("body"), 1, 1, null, 25, false, minWordLen, maxWordLen, stopWords);
+        return search(index, Queries.moreLikeText(text, options, ANALYZER)).moreLikeThisTerms().stream()
                 .map(LikeTerm::term)
                 .toList();
     }
 
     private static MoreLikeThisOptions options(List<String> fields, int minTermFreq, int minDocFreq) {
-        return new MoreLikeThisOptions(fields, minTermFreq, minDocFreq, OptionalInt.empty(), 25, false);
+        return new MoreLikeThisOptions(fields, minTermFreq, minDocFreq, null, 25, false);
     }
 
     private static SearchResults search(ReadOnlyIndex index, Query query) throws IOException, InvalidQueryException {
-        return index.search(query, BM25, Optional.empty(), 0, 10, true, Optional.empty(), ScanProgress.NONE);
+        return index.search(query, BM25, null, 0, 10, true, null, ScanProgress.NONE);
     }
 
     /**

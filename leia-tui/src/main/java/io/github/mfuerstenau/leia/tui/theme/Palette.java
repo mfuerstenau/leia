@@ -1,6 +1,7 @@
 package io.github.mfuerstenau.leia.tui.theme;
 
 import dev.tamboui.style.Style;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The styles of a {@link Theme}, one per role (ADR 0095), as a theme file sets them (ADR 0096), and its logo (ADR 0099). Bold, reversed and italic are
@@ -52,7 +53,7 @@ public record Palette(
         Style secondary,
         Icon logo) {
 
-    private static volatile Theme current;
+    private static volatile @Nullable Theme current;
 
     /** The palette in use; {@code dark}'s until {@link #use} says otherwise. */
     public static Palette current() {

@@ -9,9 +9,11 @@ import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.function.Function;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Rebuilding what a field of the shown document was indexed with (ADR 0029, ADR 0041): the state
@@ -23,7 +25,7 @@ public sealed interface Reconstruction {
     record Starting() implements Reconstruction {}
 
     /** @param total the terms and points the job goes through, if the backend knows */
-    record Running(long jobId, long scanned, OptionalLong total) implements Reconstruction {}
+    record Running(long jobId, long scanned, @Nullable Long total) implements Reconstruction {}
 
     record Done(ReconstructedField field) implements Reconstruction {}
 
@@ -52,8 +54,8 @@ public sealed interface Reconstruction {
         return switch (this) {
             case Starting _ -> "rebuilding…";
             case Running running
-            when running.total().isPresent() ->
-                "rebuilding… " + running.scanned() + " of " + running.total().getAsLong() + " " + unit + ", Esc stops";
+            when running.total() != null ->
+                "rebuilding… " + running.scanned() + " of " + running.total() + " " + unit + ", Esc stops";
             case Running running -> "rebuilding… " + running.scanned() + " " + unit + ", Esc stops";
             case Done done -> {
                 List<String> parts = new ArrayList<>();
@@ -95,7 +97,7 @@ public sealed interface Reconstruction {
         }
         Function<Token, String> text = token -> TextFormat.bytesText(token.term(), token.binary());
         tokens.sort(Comparator.comparingInt(Token::position)
-                .thenComparingInt(token -> token.startOffset().orElse(0))
+                .thenComparingInt(token -> Objects.requireNonNullElse(token.startOffset(), 0))
                 .thenComparing(text));
         return Optional.of(PositionedTokens.line(tokens, text, "·", true, Integer.MAX_VALUE));
     }

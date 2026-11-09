@@ -10,8 +10,7 @@ import io.github.mfuerstenau.leia.protocol.document.GetStoredFieldsScanResult;
 import io.github.mfuerstenau.leia.protocol.document.StartStoredFieldsScanParams;
 import io.github.mfuerstenau.leia.protocol.document.StoredFields;
 import java.util.List;
-import java.util.Optional;
-import java.util.OptionalLong;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@code stored_fields}: the fields the documents of the open index store values in, which the index
@@ -25,7 +24,8 @@ final class StoredFieldsTool implements McpTool<StoredFieldsTool.Arguments, Stor
     record Arguments(
             @Description("Whether to read every segment again instead of taking what leia remembers of it; false by"
                     + " default. Not needed for correctness: a segment never changes once written")
-            Optional<Boolean> ignoreCache) {}
+            @Nullable
+            Boolean ignoreCache) {}
 
     record Result(
             @Description("How many fields have a stored value in at least one document, deleted ones included")
@@ -76,10 +76,10 @@ final class StoredFieldsTool implements McpTool<StoredFieldsTool.Arguments, Stor
 
     @Override
     public Result call(Arguments arguments, Call call) throws ToolException, Jobs.Cancelled {
-        OptionalLong total = call.session().maxDoc();
+        Long total = Optionals.orNull(call.session().maxDoc());
         StoredFields stored = call.job(
                 Methods.START_STORED_FIELDS_SCAN,
-                new StartStoredFieldsScanParams(arguments.ignoreCache().orElse(false)),
+                new StartStoredFieldsScanParams(Given.isTrue(arguments.ignoreCache())),
                 Methods.GET_STORED_FIELDS_SCAN,
                 GetStoredFieldsScanResult::fields,
                 poll -> new Jobs.Progress(poll.docsScanned(), total));

@@ -9,8 +9,6 @@ import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
@@ -70,7 +68,7 @@ class Lucene9CheckTest {
         Check.CheckResult result = check().check(
                         testIndex("lucene8to9"),
                         DirectoryKind.FS,
-                        new Check.Options(OptionalInt.of(2), OptionalInt.of(1), Optional.of(List.of("_2", "_9"))),
+                        new Check.Options(2, 1, List.of("_2", "_9")),
                         _ -> {},
                         _ -> threads.add(Thread.currentThread().getName()));
 

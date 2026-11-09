@@ -2,6 +2,8 @@ package io.github.mfuerstenau.leia.runtime;
 
 import java.io.IOException;
 import java.io.Serial;
+import java.util.Objects;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Reading an index failed for a {@link Reason} that the runtime's Lucene tells apart (ADR 0070), so
@@ -27,12 +29,18 @@ public final class IndexReadException extends IOException {
 
     private final Reason reason;
 
-    public IndexReadException(Reason reason, String message, Throwable cause) {
+    public IndexReadException(Reason reason, String message, @Nullable Throwable cause) {
         super(message, cause);
         this.reason = reason;
     }
 
     public Reason reason() {
         return reason;
+    }
+
+    /** The message, which every constructor takes. */
+    @Override
+    public String getMessage() {
+        return Objects.requireNonNullElse(super.getMessage(), getClass().getSimpleName());
     }
 }

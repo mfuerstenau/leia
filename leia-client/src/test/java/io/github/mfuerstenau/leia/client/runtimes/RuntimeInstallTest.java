@@ -119,7 +119,7 @@ class RuntimeInstallTest {
         assertThat(yes()).isZero();
 
         assertThat(output())
-                .contains(repository.base() + core.mavenPath().orElseThrow())
+                .contains(repository.base() + core.mavenPath())
                 .contains("SHA-256 " + core.sha256())
                 .contains("unchanged", "Maven Central", "come from leia.jar");
     }

@@ -70,8 +70,7 @@ final class ServerBackends {
 
     /** The server {@code name}, whose Lucene is {@code lucene}, reads its index and its plain one. */
     static RealBackend readsWithTheServer(String name, String lucene) throws Exception {
-        RealBackend backend =
-                RealBackend.start(Optional.of(testFile("leia.test.runtimes")), List.of(), List.of(server(name)));
+        RealBackend backend = RealBackend.start(testFile("leia.test.runtimes"), List.of(), List.of(server(name)));
 
         ServerRuntimeInfo server = backend.call(Methods.GET_RUNTIMES, new GetRuntimesParams())
                 .servers()

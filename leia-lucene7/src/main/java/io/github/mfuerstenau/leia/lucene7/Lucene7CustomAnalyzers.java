@@ -9,6 +9,8 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.NoSuchFileException;
 import java.util.HashMap;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 import org.apache.lucene.analysis.custom.CustomAnalyzer;
@@ -69,7 +71,7 @@ final class Lucene7CustomAnalyzers {
     private static CustomAnalyzer.Builder builder(AnalyzerSpec.Custom spec) throws InvalidAnalyzerException {
         ResourceLoader classpath = new ClasspathResourceLoader(Lucene7CustomAnalyzers.class.getClassLoader());
         try {
-            return CustomAnalyzer.builder(spec.configDir()
+            return CustomAnalyzer.builder(Optional.ofNullable(spec.configDir())
                     .<ResourceLoader>map(dir -> new FilesystemResourceLoader(dir, classpath))
                     .orElse(classpath));
         } catch (IllegalArgumentException e) {
@@ -101,7 +103,8 @@ final class Lucene7CustomAnalyzers {
     }
 
     private static String message(Exception e) {
-        Throwable cause = e instanceof UncheckedIOException unchecked ? unchecked.getCause() : e;
+        Throwable cause =
+                e instanceof UncheckedIOException unchecked ? Objects.requireNonNull(unchecked.getCause()) : e;
         // The class path loader's advice on modules doesn't apply: the runtime has none of its own.
         return MODULE_ADVICE.matcher(Failures.message(cause)).replaceFirst("");
     }

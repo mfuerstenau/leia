@@ -55,7 +55,7 @@ class DocumentExporterTest {
 
     @BeforeAll
     static void open() throws Exception {
-        backend = LeiaBackend.start(Optional.empty(), List.of());
+        backend = LeiaBackend.start(null, List.of());
         demo = Path.of(System.getProperty("leia.test.index.demo"))
                 .toAbsolutePath()
                 .normalize()

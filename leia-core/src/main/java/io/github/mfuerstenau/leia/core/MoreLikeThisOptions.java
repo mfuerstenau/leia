@@ -2,10 +2,10 @@ package io.github.mfuerstenau.leia.core;
 
 import java.util.HashSet;
 import java.util.List;
-import java.util.OptionalInt;
 import java.util.Set;
 import org.apache.lucene.queries.mlt.MoreLikeThis;
 import org.apache.lucene.search.IndexSearcher;
+import org.jspecify.annotations.Nullable;
 
 /**
  * How Lucene's {@link MoreLikeThis} picks the terms of a document or a text (ADR 0013, ADR 0028).
@@ -13,23 +13,23 @@ import org.apache.lucene.search.IndexSearcher;
  * @param fields the fields to take terms from, at least one and none twice
  * @param minTermFreq terms that occur fewer times in the document are left out
  * @param minDocFreq terms that occur in fewer documents are left out
- * @param maxDocFreq terms that occur in more documents are left out; empty for no limit
+ * @param maxDocFreq terms that occur in more documents are left out; null for no limit
  * @param maxQueryTerms how many of the best terms the query has, from 1 to {@link
  *     IndexSearcher#getMaxClauseCount()}
  * @param boost whether each term is boosted by its score, relative to the weakest term's
  * @param minWordLen terms shorter than this, in UTF-16 units, are left out; 0 for no limit
- * @param maxWordLen terms longer than this, in UTF-16 units, are left out; empty for no limit
+ * @param maxWordLen terms longer than this, in UTF-16 units, are left out; null for no limit
  * @param stopWords terms that are left out, compared exactly with the analyzed terms
  */
 public record MoreLikeThisOptions(
         List<String> fields,
         int minTermFreq,
         int minDocFreq,
-        OptionalInt maxDocFreq,
+        @Nullable Integer maxDocFreq,
         int maxQueryTerms,
         boolean boost,
         int minWordLen,
-        OptionalInt maxWordLen,
+        @Nullable Integer maxWordLen,
         Set<String> stopWords) {
 
     /** @throws IllegalArgumentException for no field, a field listed twice, or a number out of range */
@@ -51,8 +51,8 @@ public record MoreLikeThisOptions(
         if (minDocFreq < 0) {
             throw new IllegalArgumentException("minDocFreq must be 0 or more, not " + minDocFreq);
         }
-        if (maxDocFreq.isPresent() && maxDocFreq.getAsInt() < 0) {
-            throw new IllegalArgumentException("maxDocFreq must be 0 or more, not " + maxDocFreq.getAsInt());
+        if (maxDocFreq != null && maxDocFreq < 0) {
+            throw new IllegalArgumentException("maxDocFreq must be 0 or more, not " + maxDocFreq);
         }
         // More clauses than this, and MoreLikeThis drops the rest without a word.
         int maxClauses = IndexSearcher.getMaxClauseCount();
@@ -63,9 +63,9 @@ public record MoreLikeThisOptions(
         if (minWordLen < 0) {
             throw new IllegalArgumentException("minWordLen must be 0 or more, not " + minWordLen);
         }
-        if (maxWordLen.isPresent() && maxWordLen.getAsInt() < Math.max(1, minWordLen)) {
-            throw new IllegalArgumentException("maxWordLen must be 1 or more and at least minWordLen (" + minWordLen
-                    + "), not " + maxWordLen.getAsInt());
+        if (maxWordLen != null && maxWordLen < Math.max(1, minWordLen)) {
+            throw new IllegalArgumentException(
+                    "maxWordLen must be 1 or more and at least minWordLen (" + minWordLen + "), not " + maxWordLen);
         }
     }
 
@@ -74,7 +74,7 @@ public record MoreLikeThisOptions(
             List<String> fields,
             int minTermFreq,
             int minDocFreq,
-            OptionalInt maxDocFreq,
+            @Nullable Integer maxDocFreq,
             int maxQueryTerms,
             boolean boost) {
         this(
@@ -85,7 +85,7 @@ public record MoreLikeThisOptions(
                 maxQueryTerms,
                 boost,
                 MoreLikeThis.DEFAULT_MIN_WORD_LENGTH,
-                OptionalInt.empty(),
+                null,
                 Set.of());
     }
 
@@ -95,7 +95,7 @@ public record MoreLikeThisOptions(
                 fields,
                 MoreLikeThis.DEFAULT_MIN_TERM_FREQ,
                 MoreLikeThis.DEFAULT_MIN_DOC_FREQ,
-                OptionalInt.empty(),
+                null,
                 MoreLikeThis.DEFAULT_MAX_QUERY_TERMS,
                 MoreLikeThis.DEFAULT_BOOST);
     }
@@ -106,7 +106,7 @@ public record MoreLikeThisOptions(
         if (minWordLen > 0 && length < minWordLen) {
             return true;
         }
-        if (maxWordLen.isPresent() && length > maxWordLen.getAsInt()) {
+        if (maxWordLen != null && length > maxWordLen) {
             return true;
         }
         return stopWords.contains(term);

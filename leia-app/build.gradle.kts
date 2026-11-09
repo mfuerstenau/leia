@@ -23,6 +23,8 @@ tasks.named<JavaCompile>(launcher.compileJavaTaskName) {
 }
 
 dependencies {
+    // @Nullable and @NullMarked (ADR 0127): annotations only.
+    compileOnly(libs.jspecify)
     // The frontends it starts, the client they share, and the backend, called in-process (ADR 0034).
     // Neither core nor Lucene is on the classpath: Lucene 10 comes from runtimes/lucene10 like every
     // other runtime (ADR 0072, ADR 0073).

@@ -16,6 +16,7 @@ import io.github.mfuerstenau.leia.runtime.MoreLikeThisSearch;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.StandardSearch;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.search.ParserChecks;
@@ -109,7 +110,11 @@ final class RuntimeQueries {
         Optional<String> zoneName = options.timeZone();
         Optional<ZoneId> timeZone =
                 zoneName.isPresent() ? Optional.of(ParserChecks.timeZone(zoneName.get())) : Optional.empty();
-        return new Search.Dates(options.dateResolution().map(RuntimeQueries::resolution), fields, locale, timeZone);
+        return new Search.Dates(
+                options.dateResolution().map(RuntimeQueries::resolution).orElse(null),
+                fields,
+                locale.orElse(null),
+                timeZone.orElse(null));
     }
 
     private static Search.DateResolution resolution(DateResolution resolution) {
@@ -164,11 +169,11 @@ final class RuntimeQueries {
                     like.fields(),
                     like.minTermFreq(),
                     like.minDocFreq(),
-                    like.maxDocFreq(),
+                    Optionals.orNull(like.maxDocFreq()),
                     like.maxQueryTerms(),
                     like.boost(),
                     like.minWordLen(),
-                    like.maxWordLen(),
+                    Optionals.orNull(like.maxWordLen()),
                     Set.copyOf(like.stopWords()));
         } catch (IllegalArgumentException e) {
             throw invalidParams(e);
@@ -247,7 +252,10 @@ final class RuntimeQueries {
         }
         DocValuesRange range = query.range().orElseThrow();
         return new DocValuesSearch.Match.Range<>(
-                range.lower().map(convert), range.upper().map(convert), range.includeLower(), range.includeUpper());
+                range.lower().map(convert).orElse(null),
+                range.upper().map(convert).orElse(null),
+                range.includeLower(),
+                range.includeUpper());
     }
 
     /** @throws RpcException {@code FIELD_NOT_FOUND} if the index has no field {@code name} */

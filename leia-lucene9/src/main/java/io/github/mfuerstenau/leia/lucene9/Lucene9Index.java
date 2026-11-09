@@ -17,6 +17,7 @@ import io.github.mfuerstenau.leia.runtime.StandardSearch;
 import io.github.mfuerstenau.leia.runtime.Terms;
 import io.github.mfuerstenau.leia.runtime.support.Failures;
 import io.github.mfuerstenau.leia.runtime.support.IndexParts;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -29,6 +30,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
@@ -91,6 +93,7 @@ import org.apache.lucene.search.TotalHits;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
+import org.jspecify.annotations.Nullable;
 
 /**
  * An index created by Lucene 8.x, read with Lucene 9.12 (ADR 0049). Lucene 10 can't read such an
@@ -187,7 +190,7 @@ final class Lucene9Index
             FieldInfos.getMergedFieldInfos(multi);
             return Optional.empty();
         } catch (IllegalArgumentException | IllegalStateException e) {
-            return Optional.of(e.getMessage());
+            return Optional.of(Failures.message(e));
         }
     }
 
@@ -370,9 +373,11 @@ final class Lucene9Index
                     part.reader().numDocs(),
                     part.reader().maxDoc(),
                     List.copyOf(versions),
-                    Optional.ofNullable(infos.getCommitLuceneVersion()).map(Object::toString),
+                    Optional.ofNullable(infos.getCommitLuceneVersion())
+                            .map(Object::toString)
+                            .orElse(null),
                     // 8 for every index this runtime opens; it says how the norms are encoded.
-                    OptionalInt.of(infos.getIndexCreatedVersionMajor()),
+                    infos.getIndexCreatedVersionMajor(),
                     Map.copyOf(commit.getUserData()),
                     segments(part.reader())));
             docBase += part.reader().maxDoc();
@@ -397,7 +402,9 @@ final class Lucene9Index
                         leaf.reader().maxDoc(),
                         leaf.reader().numDocs(),
                         // Recorded since 5.0 (ADR 0113).
-                        Optional.ofNullable(info.getId()).map(HexFormat.of()::formatHex),
+                        Optional.ofNullable(info.getId())
+                                .map(HexFormat.of()::formatHex)
+                                .orElse(null),
                         List.copyOf(new TreeSet<>(info.files()))));
             } else {
                 segments.add(new Segment(
@@ -432,8 +439,8 @@ final class Lucene9Index
                     docValuesType(info.getDocValuesType()),
                     info.getPointDimensionCount(),
                     info.getPointNumBytes(),
-                    termStats(info.name),
-                    vectorFormat(info)));
+                    termStats(info.name).orElse(null),
+                    vectorFormat(info).orElse(null)));
         }
         result.sort(Comparator.comparingInt(Field::number));
         return List.copyOf(result);
@@ -508,11 +515,13 @@ final class Lucene9Index
             boolean hasTermVector = vectors != null && vectors.terms(field.name()) != null;
             result.add(new DocumentField(
                     field.name(),
-                    norm,
+                    Optionals.orNull(norm),
                     List.copyOf(stored.getOrDefault(field.name(), List.of())),
-                    docValues(leaf.reader(), leafDoc, field),
+                    docValues(leaf.reader(), leafDoc, field).orElse(null),
                     hasTermVector,
-                    Lucene9Api.KNN ? Lucene9Knn.vector(leaf.reader(), leafDoc, field) : Optional.empty()));
+                    Lucene9Api.KNN
+                            ? Lucene9Knn.vector(leaf.reader(), leafDoc, field).orElse(null)
+                            : null));
         }
         Bits liveDocs = MultiBits.getLiveDocs(reader);
         return new IndexDocument(docId, liveDocs != null && !liveDocs.get(docId), List.copyOf(result));
@@ -593,7 +602,7 @@ final class Lucene9Index
 
     @Override
     public List<StoredDocument> storedValues(
-            int fromDoc, int toDoc, Optional<Set<String>> fields, boolean includeDeleted) throws IOException {
+            int fromDoc, int toDoc, @Nullable Set<String> fields, boolean includeDeleted) throws IOException {
         checkRange(fromDoc, toDoc);
         Lucene9Stored.Reader storedFields = Lucene9Stored.of(reader);
         Bits liveDocs = MultiBits.getLiveDocs(reader);
@@ -604,8 +613,8 @@ final class Lucene9Index
                 continue;
             }
             Document document;
-            if (fields.isPresent()) {
-                DocumentStoredFieldVisitor visitor = new DocumentStoredFieldVisitor(fields.get());
+            if (fields != null) {
+                DocumentStoredFieldVisitor visitor = new DocumentStoredFieldVisitor(fields);
                 storedFields.document(doc, visitor);
                 document = visitor.getDocument();
             } else {
@@ -619,7 +628,7 @@ final class Lucene9Index
     @Override
     public void storedValues(
             int segment,
-            Optional<Set<String>> fields,
+            @Nullable Set<String> fields,
             boolean includeDeleted,
             IntUnaryOperator next,
             Consumer<StoredDocument> sink,
@@ -640,8 +649,9 @@ final class Lucene9Index
             if (deleted && !includeDeleted) {
                 continue;
             }
-            DocumentStoredFieldVisitor visitor =
-                    fields.map(DocumentStoredFieldVisitor::new).orElseGet(DocumentStoredFieldVisitor::new);
+            DocumentStoredFieldVisitor visitor = Optional.ofNullable(fields)
+                    .map(DocumentStoredFieldVisitor::new)
+                    .orElseGet(DocumentStoredFieldVisitor::new);
             stored.document(doc, visitor);
             sink.accept(new StoredDocument(doc, deleted, storedValues(visitor.getDocument())));
         }
@@ -766,35 +776,33 @@ final class Lucene9Index
         int position = postings.nextPosition();
         BytesRef payload = postings.getPayload();
         return new Position(
-                withPositions && position >= 0 ? OptionalInt.of(position) : OptionalInt.empty(),
-                withOffsets ? OptionalInt.of(postings.startOffset()) : OptionalInt.empty(),
-                withOffsets ? OptionalInt.of(postings.endOffset()) : OptionalInt.empty(),
-                payload == null || payload.length == 0
-                        ? Optional.empty()
-                        : Optional.of(BytesRef.deepCopyOf(payload).bytes));
+                withPositions && position >= 0 ? position : null,
+                withOffsets ? postings.startOffset() : null,
+                withOffsets ? postings.endOffset() : null,
+                payload == null || payload.length == 0 ? null : BytesRef.deepCopyOf(payload).bytes);
     }
 
     @Override
-    public TermsPage terms(String field, Optional<byte[]> from, int limit) throws IOException {
+    public TermsPage terms(String field, byte @Nullable [] from, int limit) throws IOException {
         org.apache.lucene.index.Terms terms = MultiTerms.getTerms(reader, field);
         if (terms == null) {
-            return new TermsPage(List.of(), Optional.empty());
+            return new TermsPage(List.of(), null);
         }
         TermsEnum termsEnum = terms.iterator();
         BytesRef term;
-        if (from.isPresent()) {
-            term = termsEnum.seekCeil(new BytesRef(from.get())) == TermsEnum.SeekStatus.END ? null : termsEnum.term();
+        if (from != null) {
+            term = termsEnum.seekCeil(new BytesRef(from)) == TermsEnum.SeekStatus.END ? null : termsEnum.term();
         } else {
             term = termsEnum.next();
         }
         List<TermEntry> entries = new ArrayList<>();
         for (; term != null; term = termsEnum.next()) {
             if (entries.size() == limit) {
-                return new TermsPage(List.copyOf(entries), Optional.of(BytesRef.deepCopyOf(term).bytes));
+                return new TermsPage(List.copyOf(entries), BytesRef.deepCopyOf(term).bytes);
             }
             entries.add(new TermEntry(BytesRef.deepCopyOf(term).bytes, termsEnum.docFreq(), totalTermFreq(termsEnum)));
         }
-        return new TermsPage(List.copyOf(entries), Optional.empty());
+        return new TermsPage(List.copyOf(entries), null);
     }
 
     /** {@code totalTermFreq}, or {@code docFreq} for a field without frequencies, as Lucene 10 has it. */
@@ -844,11 +852,11 @@ final class Lucene9Index
             throws IOException {
         org.apache.lucene.index.Terms terms = MultiTerms.getTerms(reader, field);
         if (terms == null) {
-            return new PostingsPage(0, 0, List.of(), OptionalInt.empty());
+            return new PostingsPage(0, 0, List.of(), null);
         }
         TermsEnum termsEnum = terms.iterator();
         if (!termsEnum.seekExact(new BytesRef(text))) {
-            return new PostingsPage(0, 0, List.of(), OptionalInt.empty());
+            return new PostingsPage(0, 0, List.of(), null);
         }
         Bits liveDocs = MultiBits.getLiveDocs(reader);
         boolean withPositions = maxPositions > 0 && terms.hasPositions();
@@ -868,7 +876,8 @@ final class Lucene9Index
             }
             postings.add(new Posting(doc, freq, liveDocs != null && !liveDocs.get(doc), List.copyOf(positions)));
         }
-        return new PostingsPage(termsEnum.docFreq(), totalTermFreq(termsEnum), List.copyOf(postings), next);
+        return new PostingsPage(
+                termsEnum.docFreq(), totalTermFreq(termsEnum), List.copyOf(postings), Optionals.orNull(next));
     }
 
     /** {@inheritDoc} Deleted documents have their positions too. */
@@ -931,7 +940,7 @@ final class Lucene9Index
             parser.setAutoGeneratePhraseQueries(options.autoGeneratePhraseQueries());
             return new Lucene9Query(parser.parse(expression));
         } catch (ParseException | RuntimeException e) {
-            throw new InvalidQueryException(e.getMessage(), e);
+            throw new InvalidQueryException(Failures.message(e), e);
         } finally {
             analyzer.close();
         }
@@ -976,7 +985,7 @@ final class Lucene9Index
         try (Analyzer analyzer = Lucene9Analyzers.analyzer(spec)) {
             return new Lucene9Query(Lucene9StandardParser.parse(expression, options, points, analyzer));
         } catch (RuntimeException e) {
-            throw new InvalidQueryException(e.getMessage(), e);
+            throw new InvalidQueryException(Failures.message(e), e);
         }
     }
 
@@ -992,7 +1001,7 @@ final class Lucene9Index
      * The analyzer that a More-Like-This query analyzes with while it is built; null for any other
      * query. The caller closes it.
      */
-    static Analyzer likeAnalyzer(Query query) {
+    static @Nullable Analyzer likeAnalyzer(Query query) {
         if (!(query instanceof Lucene9MoreLikeQuery like)) {
             return null;
         }
@@ -1000,7 +1009,7 @@ final class Lucene9Index
             return Lucene9Analyzers.analyzer(like.analyzer());
         } catch (UnsupportedAnalyzerException | InvalidAnalyzerException e) {
             // MoreLikeThisSearch.like built it before.
-            throw new IllegalStateException(e.getMessage(), e);
+            throw new IllegalStateException(Failures.message(e), e);
         }
     }
 
@@ -1008,8 +1017,10 @@ final class Lucene9Index
      * The query to rewrite: a More-Like-This query is built from the searcher's reader with {@code
      * analyzer} from {@link #likeAnalyzer} first, as leia-core's {@code Searcher} builds it.
      */
-    static Query built(IndexSearcher searcher, Query query, Analyzer analyzer) throws IOException {
-        return query instanceof Lucene9MoreLikeQuery like ? like.build(searcher.getIndexReader(), analyzer) : query;
+    static Query built(IndexSearcher searcher, Query query, @Nullable Analyzer analyzer) throws IOException {
+        return query instanceof Lucene9MoreLikeQuery like
+                ? like.build(searcher.getIndexReader(), Objects.requireNonNull(analyzer))
+                : query;
     }
 
     /** {@inheritDoc} It scores with 9.12's default, BM25 with k1 1.2 and b 0.75. */
@@ -1019,7 +1030,7 @@ final class Lucene9Index
             int offset,
             int limit,
             boolean exactTotalHits,
-            Optional<List<String>> fields,
+            @Nullable List<String> fields,
             LongConsumer progress)
             throws IOException {
         return search(parsed, DEFAULT_SIMILARITY, List.of(), offset, limit, exactTotalHits, fields, progress);
@@ -1032,7 +1043,7 @@ final class Lucene9Index
             for (int i = 0; i < sortFields.length; i++) {
                 sortValues.add(
                         Lucene9Sorts.numeric(sortFields[i]) && !hasNumber(sortFields[i].getField(), scoreDoc.doc)
-                                ? new SortValue(Optional.empty(), Optional.empty())
+                                ? new SortValue(null, null)
                                 : sortValue(fieldDoc.fields[i]));
             }
         }
@@ -1052,7 +1063,7 @@ final class Lucene9Index
             int offset,
             int limit,
             boolean exactTotalHits,
-            Optional<List<String>> fields,
+            @Nullable List<String> fields,
             LongConsumer progress)
             throws IOException {
         Query query = query(parsed);
@@ -1068,7 +1079,11 @@ final class Lucene9Index
             if (query instanceof Lucene9MoreLikeQuery like) {
                 // Explained before the rewrite merges a lone clause or drops a ^1.0.
                 likeTerms = Optional.of(Lucene9LikeTerms.of(
-                        searcher.getIndexReader(), like, analyzer, built, () -> searchProgress.searched(0)));
+                        searcher.getIndexReader(),
+                        like,
+                        Objects.requireNonNull(analyzer),
+                        built,
+                        () -> searchProgress.searched(0)));
             }
             rewritten = searcher.rewrite(built);
         }
@@ -1090,7 +1105,7 @@ final class Lucene9Index
         for (ScoreDoc scoreDoc : docs.scoreDocs) {
             Map<String, List<StoredValue>> values = new LinkedHashMap<>();
             for (IndexableField field : storedFields.document(scoreDoc.doc).getFields()) {
-                if (fields.isEmpty() || fields.get().contains(field.name())) {
+                if (fields == null || fields.contains(field.name())) {
                     values.computeIfAbsent(field.name(), _ -> new ArrayList<>()).add(storedValue(field));
                 }
             }
@@ -1103,7 +1118,7 @@ final class Lucene9Index
                 docs.totalHits.relation == TotalHits.Relation.EQUAL_TO,
                 List.copyOf(hits),
                 (System.nanoTime() - start) / 1_000_000,
-                likeTerms);
+                likeTerms.orElse(null));
     }
 
     /** A searcher of the whole index that scores with {@code similarity} and asks {@code progress}. */
@@ -1130,9 +1145,9 @@ final class Lucene9Index
     /** A value of {@link FieldDoc#fields}: a number, a term, or null for a missing string. */
     private static SortValue sortValue(Object value) {
         return switch (value) {
-            case Number number -> new SortValue(Optional.of(number), Optional.empty());
-            case BytesRef term -> new SortValue(Optional.empty(), Optional.of(BytesRef.deepCopyOf(term).bytes));
-            case null, default -> new SortValue(Optional.empty(), Optional.empty());
+            case Number number -> new SortValue(number, null);
+            case BytesRef term -> new SortValue(null, BytesRef.deepCopyOf(term).bytes);
+            case null, default -> new SortValue(null, null);
         };
     }
 
@@ -1227,7 +1242,7 @@ final class Lucene9Index
         }
 
         @Override
-        public Bits getLiveDocs() {
+        public @Nullable Bits getLiveDocs() {
             return null;
         }
 
@@ -1237,12 +1252,12 @@ final class Lucene9Index
         }
 
         @Override
-        public CacheHelper getCoreCacheHelper() {
+        public @Nullable CacheHelper getCoreCacheHelper() {
             return null;
         }
 
         @Override
-        public CacheHelper getReaderCacheHelper() {
+        public @Nullable CacheHelper getReaderCacheHelper() {
             return null;
         }
     }
@@ -1330,7 +1345,7 @@ final class Lucene9Index
     /** The field {@code field}, which has vectors. */
     Field vectorField(String field) {
         return fields.stream()
-                .filter(info -> info.name().equals(field) && info.vectors().isPresent())
+                .filter(info -> info.name().equals(field) && info.vectors() != null)
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("No KNN vectors in field " + field));
     }

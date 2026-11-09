@@ -38,6 +38,7 @@ import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Starts leia, after {@link Launcher} has checked the Java version: parses the command line, loads
@@ -132,22 +133,22 @@ public final class Main {
         // after those of --jar, which win a clash of names (ADR 0024).
         RuntimesDirs runtimeFolders = new RuntimesDirs(
                 platform.runtimesDirs().stream().map(RuntimesDir::path).toList());
-        DefaultJars defaultJars = DefaultJars.find(platform.defaultJarsDir(), cli.noDefaultJars());
+        DefaultJars defaultJars = DefaultJars.find(platform.defaultJarsDir().orElse(null), cli.noDefaultJars());
         List<Path> jars = new ArrayList<>(cli.jars());
         defaultJars.loadedDir().ifPresent(jars::add);
 
-        try (LeiaLog.Opened log = LeiaLog.toFile(platform.logFile())) {
+        try (LeiaLog.Opened log = LeiaLog.toFile(platform.logFile().orElse(null))) {
             LOG.info(() -> "leia started with " + List.of(args));
             if (cli.mcp()) {
                 return runMcp(cli, platform, defaultJars, jars, mcpRoots, log, in, out, err);
             }
             // In the log, which a broken theme of the user's goes to (ADR 0096).
             Themes themes = Tui.themes(platform);
-            Optional<Theme> theme = Optional.empty();
-            if (cli.theme().isPresent()) {
-                theme = themes.find(cli.theme().get());
-                if (theme.isEmpty()) {
-                    String wanted = cli.theme().get();
+            @Nullable Theme theme = null;
+            String wanted = cli.theme();
+            if (wanted != null) {
+                Optional<Theme> found = themes.find(wanted);
+                if (found.isEmpty()) {
                     Optional<String> refused = themes.leftOut().stream()
                             .filter(left -> left.id().equals(wanted))
                             .map(Themes.LeftOut::reason)
@@ -160,6 +161,7 @@ public final class Main {
                     err.println("For more information, try '--help'.");
                     return 2;
                 }
+                theme = found.get();
             }
             refreshOwnJars(platform);
             Optional<LeiaBackend> backend = startBackend(cli, platform, defaultJars, jars, err);
@@ -180,8 +182,11 @@ public final class Main {
     private static Optional<LeiaBackend> startBackend(
             Cli cli, Platform platform, DefaultJars defaultJars, List<Path> jars, PrintStream err) {
         try {
-            return Optional.of(
-                    LeiaBackend.startWith(platform.runtimesDirs(), jars, cli.servers(), platform.cacheDir()));
+            return Optional.of(LeiaBackend.startWith(
+                    platform.runtimesDirs(),
+                    jars,
+                    cli.servers(),
+                    platform.cacheDir().orElse(null)));
         } catch (RpcException e) {
             LOG.log(Level.SEVERE, "Cannot start", e);
             err.println("leia: " + e.getMessage());
@@ -229,8 +234,8 @@ public final class Main {
                         started.call(Methods.VERSION, new VersionParams()).get();
                 McpServer server =
                         new McpServer(started, version, cli.directory(), platform.home(), mcpRoots, cli.mcpPin());
-                if (cli.indexPath().isPresent()) {
-                    String path = cli.indexPath().get();
+                String path = cli.indexPath();
+                if (path != null) {
                     try {
                         server.open(path);
                     } catch (RpcException e) {
@@ -255,7 +260,7 @@ public final class Main {
      * embeds them; into the log, as is a failure, whose runtime the backend then refuses as outdated.
      */
     private static void refreshOwnJars(Platform platform) {
-        if (platform.leiaJar().isEmpty()) {
+        if (platform.leiaJar() == null) {
             return;
         }
         // The user's folders only, and only those that exist and are writable: a system folder is
@@ -276,7 +281,7 @@ public final class Main {
     private static int printVersion(PrintStream out, PrintStream err) throws InterruptedException {
         // Not into leia.log, which would lose the last session's log; only problems show.
         LeiaLog.toStderr(Level.WARNING);
-        try (LeiaBackend backend = LeiaBackend.start(Optional.empty(), List.of())) {
+        try (LeiaBackend backend = LeiaBackend.start(null, List.of())) {
             VersionResult version =
                     backend.call(Methods.VERSION, new VersionParams()).get();
             out.println("leia " + version.version() + " (" + version.commit() + ", " + version.commitTime() + ")");
@@ -347,14 +352,17 @@ public final class Main {
      */
     private static Mirrors.Loaded mirrors(Platform platform, List<String> downloadUrls) {
         return Mirrors.resolve(
-                System.getProperty("leia.download.url"), downloadUrls, platform.mirrorFile(), platform.mirrorsFile());
+                System.getProperty("leia.download.url"),
+                downloadUrls,
+                platform.mirrorFile().orElse(null),
+                platform.mirrorsFile().orElse(null));
     }
 
     /**
      * Runs the TUI until the user quits (ADR 0034): with the runtimes' install of the window of
      * {@code D}, if leia runs from {@code leia.jar} (ADR 0080, ADR 0126).
      *
-     * @param theme the theme of {@code --theme}, among {@code themes}
+     * @param theme the theme of {@code --theme}, among {@code themes}, or null without it
      * @return the exit status: 1 if something unexpected ended it
      */
     // Separate options (ADR 0088)
@@ -365,7 +373,7 @@ public final class Main {
             RuntimesDirs runtimeFolders,
             DefaultJars defaultJars,
             Themes themes,
-            Optional<Theme> theme,
+            @Nullable Theme theme,
             LeiaBackend backend,
             LeiaLog.Opened leiaLog,
             PrintStream out,
@@ -374,11 +382,13 @@ public final class Main {
             throws Exception {
         Mirrors.Loaded mirrors = mirrors(platform, List.of());
         mirrors.problems().forEach(problem -> LOG.warning(() -> "Mirror left out: " + problem));
-        MirrorSettings mirrorSettings = new MirrorSettings(mirrors.problems(), platform.mirrorWriteFile());
-        Optional<RuntimeService> runtimes = platform.runtimesInstallDir()
+        MirrorSettings mirrorSettings = new MirrorSettings(
+                mirrors.problems(), platform.mirrorWriteFile().orElse(null));
+        RuntimeService runtimes = platform.runtimesInstallDir()
                 .map(dir -> new RuntimeService(
                         new RuntimeInstall(dir, mirrors.mirrors(), Main.class.getClassLoader(), localCaches(platform)),
-                        mirrorSettings));
+                        mirrorSettings))
+                .orElse(null);
         return Tui.run(
                 new Tui.Start(
                         platform,

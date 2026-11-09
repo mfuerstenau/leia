@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * The word sets and stem override dictionaries of a preset analyzer, read from their files as
@@ -102,7 +103,7 @@ public final class WordFiles {
 
     private static InvalidAnalyzerException unreadable(String what, Path path, Throwable e) {
         return switch (e) {
-            case UncheckedIOException unchecked -> unreadable(what, path, unchecked.getCause());
+            case UncheckedIOException unchecked -> unreadable(what, path, Objects.requireNonNull(unchecked.getCause()));
             case NoSuchFileException _ -> new InvalidAnalyzerException(what + ": no file " + path, e);
             case AccessDeniedException _ -> new InvalidAnalyzerException(what + ": cannot read " + path, e);
             case CharacterCodingException _ -> new InvalidAnalyzerException(what + ": " + path + " is not UTF-8", e);

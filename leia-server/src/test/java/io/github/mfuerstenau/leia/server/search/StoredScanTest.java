@@ -24,7 +24,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.function.Consumer;
@@ -40,6 +39,7 @@ import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.NoMergePolicy;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.store.FSDirectory;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -47,7 +47,7 @@ import org.junit.jupiter.api.io.TempDir;
 class StoredScanTest {
 
     private static final Duration LIMIT = Duration.ofSeconds(10);
-    private static final StoredFieldsCache NO_CACHE = new StoredFieldsCache(Optional.empty());
+    private static final StoredFieldsCache NO_CACHE = new StoredFieldsCache(null);
 
     @TempDir
     Path tmp;
@@ -62,7 +62,7 @@ class StoredScanTest {
         });
 
         try (OpenRuntime index = TestIndexes.open(dir)) {
-            Result result = scan(index, "red|123", Optional.empty(), false, 10);
+            Result result = scan(index, "red|123", null, false, 10);
 
             assertThat(result.hits)
                     .extracting(Hit::docId, Hit::field, Hit::valueIndex, Hit::spans)
@@ -79,7 +79,7 @@ class StoredScanTest {
         Path dir = writeIndex(tmp, doc -> doc.add(new StoredField("text", "ä😀red 字red")));
 
         try (OpenRuntime index = TestIndexes.open(dir)) {
-            Hit hit = scan(index, "red", Optional.empty(), false, 10).hits.getFirst();
+            Hit hit = scan(index, "red", null, false, 10).hits.getFirst();
 
             // ä is 2 bytes, 😀 is 4, 字 is 3.
             assertThat(hit.spans()).containsExactly(new Span(6, 9), new Span(13, 16));
@@ -96,7 +96,7 @@ class StoredScanTest {
         Path dir = writeIndex(tmp, doc -> doc.add(new StoredField("text", text)));
 
         try (OpenRuntime index = TestIndexes.open(dir)) {
-            Hit hit = scan(index, "needle", Optional.empty(), false, 10).hits.getFirst();
+            Hit hit = scan(index, "needle", null, false, 10).hits.getFirst();
 
             // 40 UTF-16 units before the match is the pair's second half: the snippet starts before it.
             int start = text.indexOf("needle");
@@ -115,10 +115,10 @@ class StoredScanTest {
         });
 
         try (OpenRuntime index = TestIndexes.open(dir)) {
-            assertThat(scan(index, "match", Optional.of(Set.of("b")), false, 10).hits)
+            assertThat(scan(index, "match", Set.of("b"), false, 10).hits)
                     .extracting(Hit::field, Hit::valueIndex)
                     .containsExactly(tuple("b", 0), tuple("b", 1));
-            assertThatThrownBy(() -> scan(index, "match", Optional.of(Set.of("missing")), false, 10))
+            assertThatThrownBy(() -> scan(index, "match", Set.of("missing"), false, 10))
                     .isInstanceOf(RpcException.class)
                     .hasMessageContaining("missing");
         }
@@ -136,11 +136,11 @@ class StoredScanTest {
         }
 
         try (OpenRuntime index = TestIndexes.open(dir)) {
-            Result live = scan(index, "match", Optional.empty(), false, 10);
+            Result live = scan(index, "match", null, false, 10);
             assertThat(live.hits).extracting(Hit::docId, Hit::deleted).containsExactly(tuple(0, false));
             assertThat(live.summary.scannedDocs()).isEqualTo(2);
 
-            assertThat(scan(index, "match", Optional.empty(), true, 10).hits)
+            assertThat(scan(index, "match", null, true, 10).hits)
                     .extracting(Hit::docId, Hit::deleted)
                     .containsExactly(tuple(0, false), tuple(1, true));
         }
@@ -156,7 +156,7 @@ class StoredScanTest {
                 doc -> doc.add(new StoredField("text", "a")));
 
         try (OpenRuntime index = TestIndexes.open(dir)) {
-            Result result = scan(index, "a", Optional.empty(), false, 2);
+            Result result = scan(index, "a", null, false, 2);
 
             assertThat(result.hits).extracting(Hit::docId).containsExactly(0, 1);
             assertThat(result.hits.getFirst().matchCount()).isEqualTo(150);
@@ -165,8 +165,7 @@ class StoredScanTest {
             assertThat(result.summary.matchedValues()).isEqualTo(3);
             assertThat(result.summary.matchedDocs()).isEqualTo(3);
             assertThat(result.summary.hitsTruncated()).isTrue();
-            assertThat(scan(index, "a", Optional.empty(), false, 3).summary.hitsTruncated())
-                    .isFalse();
+            assertThat(scan(index, "a", null, false, 3).summary.hitsTruncated()).isFalse();
         }
     }
 
@@ -184,7 +183,7 @@ class StoredScanTest {
             Summary summary = storedScan(
                     index,
                     Pattern.compile("(.*a){20}b|match"),
-                    Optional.empty(),
+                    null,
                     false,
                     10,
                     Duration.ofMillis(50),
@@ -206,7 +205,7 @@ class StoredScanTest {
             assertThatThrownBy(() -> storedScan(
                             index,
                             Pattern.compile("(.*a){20}b"),
-                            Optional.empty(),
+                            null,
                             false,
                             10,
                             Duration.ofHours(1),
@@ -236,7 +235,7 @@ class StoredScanTest {
             storedScan(
                     index,
                     Pattern.compile("y"),
-                    Optional.empty(),
+                    null,
                     false,
                     10,
                     LIMIT,
@@ -314,8 +313,8 @@ class StoredScanTest {
         Path dir = writeIndex(tmp, docs);
 
         try (OpenRuntime index = TestIndexes.open(dir)) {
-            StoredFieldsCache cache = new StoredFieldsCache(Optional.empty());
-            Optional<Set<String>> rare = Optional.of(Set.of("rare"));
+            StoredFieldsCache cache = new StoredFieldsCache(null);
+            Set<String> rare = Set.of("rare");
             Summary before = storedScan(index, cache, rare);
             // Without the cache, every document is read, those without rare too.
             assertThat(read(index, cache, rare)).hasSize(10);
@@ -324,8 +323,8 @@ class StoredScanTest {
                     index.index(), index.index().documents().orElseThrow(), cache, false, ScanProgress.NONE);
 
             assertThat(read(index, cache, rare)).containsExactly(1, 5, 9);
-            assertThat(read(index, cache, Optional.of(Set.of("text")))).hasSize(10);
-            assertThat(read(index, cache, Optional.empty())).hasSize(10);
+            assertThat(read(index, cache, Set.of("text"))).hasSize(10);
+            assertThat(read(index, cache, null)).hasSize(10);
             Summary after = storedScan(index, cache, rare);
             assertThat(after.scannedDocs()).isEqualTo(before.scannedDocs()).isEqualTo(10);
             assertThat(after.matchedDocs()).isEqualTo(before.matchedDocs()).isEqualTo(3);
@@ -333,14 +332,14 @@ class StoredScanTest {
     }
 
     /** The ids of the documents {@code startStoredScan}'s source reads of {@code fields}. */
-    private static List<Integer> read(OpenRuntime index, StoredFieldsCache cache, Optional<Set<String>> fields)
+    private static List<Integer> read(OpenRuntime index, StoredFieldsCache cache, @Nullable Set<String> fields)
             throws Exception {
         List<Integer> read = new ArrayList<>();
         RuntimeResults.storedSource(index, cache, fields, false).read(document -> read.add(document.docId()), _ -> {});
         return read;
     }
 
-    private static Summary storedScan(OpenRuntime index, StoredFieldsCache cache, Optional<Set<String>> fields)
+    private static Summary storedScan(OpenRuntime index, StoredFieldsCache cache, @Nullable Set<String> fields)
             throws Exception {
         return StoredScan.scan(
                 RuntimeResults.storedSource(index, cache, fields, false),
@@ -370,8 +369,7 @@ class StoredScanTest {
 
         try (OpenRuntime index = TestIndexes.open(dir)) {
             Pattern pattern = Pattern.compile("(.*a){20}b|match", Pattern.CASE_INSENSITIVE);
-            DocFilter live = storedScanMatches(
-                    index, pattern, Optional.empty(), false, Duration.ofMillis(50), ScanProgress.NONE);
+            DocFilter live = storedScanMatches(index, pattern, null, false, Duration.ofMillis(50), ScanProgress.NONE);
 
             assertThat(live.matchCount()).isEqualTo(2);
             assertThat(live.contains(0)).isTrue();
@@ -380,14 +378,14 @@ class StoredScanTest {
             assertThat(live.rewrittenQuery()).isEqualTo(live.query());
             assertThat(live.timedOutValues()).hasValue(1);
 
-            DocFilter all = storedScanMatches(
-                    index, Pattern.compile("match"), Optional.of(Set.of("text")), true, LIMIT, ScanProgress.NONE);
+            DocFilter all =
+                    storedScanMatches(index, Pattern.compile("match"), Set.of("text"), true, LIMIT, ScanProgress.NONE);
             assertThat(all.matchCount()).isEqualTo(3);
             assertThat(all.contains(1)).isTrue();
             assertThat(all.query()).isEqualTo("/match/");
             assertThat(all.timedOutValues()).hasValue(0);
-            assertThatThrownBy(() -> storedScanMatches(
-                            index, pattern, Optional.of(Set.of("missing")), false, LIMIT, ScanProgress.NONE))
+            assertThatThrownBy(
+                            () -> storedScanMatches(index, pattern, Set.of("missing"), false, LIMIT, ScanProgress.NONE))
                     .isInstanceOf(RpcException.class);
         }
     }
@@ -404,7 +402,7 @@ class StoredScanTest {
                 doc -> doc.add(new StoredField("text", "yes")));
 
         try (OpenRuntime index = TestIndexes.open(tmp)) {
-            assertThat(scan(index, "yes", Optional.empty(), false, 10).hits)
+            assertThat(scan(index, "yes", null, false, 10).hits)
                     .extracting(Hit::docId)
                     .containsExactly(3);
         }
@@ -424,7 +422,7 @@ class StoredScanTest {
     private record Result(List<Hit> hits, List<Long> matched, Summary summary) {}
 
     private static Result scan(
-            OpenRuntime index, String pattern, Optional<Set<String>> fields, boolean includeDeleted, int maxHits)
+            OpenRuntime index, String pattern, @Nullable Set<String> fields, boolean includeDeleted, int maxHits)
             throws Exception {
         List<Hit> hits = new ArrayList<>();
         List<Long> matched = new ArrayList<>();
@@ -482,7 +480,7 @@ class StoredScanTest {
     private static Summary storedScan(
             OpenRuntime index,
             Pattern pattern,
-            Optional<Set<String>> fields,
+            @Nullable Set<String> fields,
             boolean includeDeleted,
             int maxHits,
             Duration limit,
@@ -502,7 +500,7 @@ class StoredScanTest {
     private static DocFilter storedScanMatches(
             OpenRuntime index,
             Pattern pattern,
-            Optional<Set<String>> fields,
+            @Nullable Set<String> fields,
             boolean includeDeleted,
             Duration limit,
             ScanProgress progress)

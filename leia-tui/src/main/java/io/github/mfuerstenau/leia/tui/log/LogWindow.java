@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.logging.Level;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The log window (ADR 0087), opened with {@code L} on any screen: the records of a {@link
@@ -77,12 +78,12 @@ public final class LogWindow {
     private int rows = 1;
 
     /** What the last copy did, until the next key. */
-    private Optional<String> message = Optional.empty();
+    private @Nullable String message;
 
     /** The serial and filter that {@link #shown} and {@link #rowsShown} were built for. */
     private long cachedSerial = -1;
 
-    private Level cachedFilter;
+    private @Nullable Level cachedFilter;
     private List<LogBuffer.Entry> shown = List.of();
     private List<Row> rowsShown = List.of();
 
@@ -119,7 +120,7 @@ public final class LogWindow {
     }
 
     public Event handleKey(KeyEvent key) {
-        message = Optional.empty();
+        message = null;
         switch (key.code()) {
             case ESCAPE -> {
                 return new Close();
@@ -172,14 +173,14 @@ public final class LogWindow {
     private Event copy() {
         List<LogBuffer.Entry> entries = entries();
         if (entries.isEmpty()) {
-            message = Optional.of("Nothing to copy.");
+            message = "Nothing to copy.";
             return new Nothing();
         }
         String text = copyText(entries);
         int length = TextFormat.utf8Length(text);
         String caveat = length > Osc52.LARGE_COPY ? "; terminals may drop copies this large" : "";
-        message = Optional.of("Copied " + TextFormat.count(entries.size(), "record") + ", " + TextFormat.size(length)
-                + " (OSC 52)" + caveat + ".");
+        message = "Copied " + TextFormat.count(entries.size(), "record") + ", " + TextFormat.size(length) + " (OSC 52)"
+                + caveat + ".";
         return new Copy(text);
     }
 
@@ -188,12 +189,13 @@ public final class LogWindow {
         StringBuilder text = new StringBuilder();
         for (LogBuffer.Entry entry : entries) {
             text.append(head(entry, entry.logger())).append(entry.message()).append('\n');
-            entry.trace().ifPresent(trace -> {
+            String trace = entry.trace();
+            if (trace != null) {
                 text.append(trace);
                 if (!trace.endsWith("\n")) {
                     text.append('\n');
                 }
-            });
+            }
         }
         return text.toString();
     }
@@ -231,7 +233,10 @@ public final class LogWindow {
             Style style = style(entry.level());
             String logger = entry.logger().substring(entry.logger().lastIndexOf('.') + 1);
             List<String> lines = new ArrayList<>(entry.message().lines().toList());
-            entry.trace().ifPresent(trace -> lines.addAll(trace.lines().toList()));
+            String trace = entry.trace();
+            if (trace != null) {
+                lines.addAll(trace.lines().toList());
+            }
             String head = head(entry, logger);
             for (int i = 0; i < Math.max(lines.size(), 1); i++) {
                 String line = i < lines.size() ? lines.get(i).replace("\t", INDENT) : "";
@@ -291,8 +296,9 @@ public final class LogWindow {
             return;
         }
         List<Line> footer = new ArrayList<>();
-        message.ifPresent(text ->
-                footer.add(Line.from(Span.styled(" " + text, Palette.current().muted()))));
+        Optional.ofNullable(message)
+                .ifPresent(text -> footer.add(
+                        Line.from(Span.styled(" " + text, Palette.current().muted()))));
         footer.addAll(KeyLegend.lines(KEYS, inner.width()));
         int footerCap = Math.max(inner.height() / 3, 1);
         int footerHeight = Math.min(footer.size(), footerCap);

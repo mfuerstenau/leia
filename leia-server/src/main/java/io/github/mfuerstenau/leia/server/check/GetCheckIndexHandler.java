@@ -40,6 +40,6 @@ public final class GetCheckIndexHandler implements MethodHandler<GetCheckIndexPa
         // Polled first: once the job is done, every line is in the log.
         Jobs.Poll<CheckIndexResult> poll = jobs.poll(params.jobId(), CheckIndexResult.class);
         CheckLog.Snapshot snapshot = log.from(params.fromLine());
-        return new GetCheckIndexResult(snapshot.lineCount(), snapshot.lines(), poll.result());
+        return new GetCheckIndexResult(snapshot.lineCount(), snapshot.lines(), poll.outcome());
     }
 }

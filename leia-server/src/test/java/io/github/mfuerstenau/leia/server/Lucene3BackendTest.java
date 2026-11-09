@@ -69,6 +69,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.stream.Stream;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -213,7 +214,7 @@ class Lucene3BackendTest {
     void checksTheIndexInAJob() throws Exception {
         open(Path.of(PATH));
         // The level is Lucene 10's; Lucene 3.6 has one.
-        Check check = check(new StartCheckIndexParams(OptionalInt.of(3)));
+        Check check = check(new StartCheckIndexParams(3));
         assertThat(check.lines())
                 .contains("Checking " + PATH, "Checking with Lucene 3.6.2, which has no levels")
                 .anyMatch(line -> line.contains("No problems were detected"));
@@ -508,31 +509,38 @@ class Lucene3BackendTest {
         assertThat(check.lines()).contains("Checking with Lucene 3.6.2, which has no levels");
     }
 
-    private static Analyzer preset(String className, Optional<WordSet> stopwords) {
+    private static Analyzer preset(String className, @Nullable WordSet stopwords) {
         return analyzer(
-                Optional.empty(),
-                Optional.of(new PresetAnalyzer(
+                null,
+                new PresetAnalyzer(
                         className,
-                        stopwords,
+                        Optional.ofNullable(stopwords),
                         Optional.empty(),
                         OptionalInt.empty(),
                         Optional.empty(),
                         Optional.empty(),
                         Optional.empty(),
                         Optional.empty(),
-                        Optional.empty())),
-                Optional.empty(),
-                Optional.empty(),
+                        Optional.empty()),
+                null,
+                null,
                 List.of());
     }
 
     private static Analyzer analyzer(
-            Optional<StandardAnalyzer> standard,
-            Optional<PresetAnalyzer> preset,
-            Optional<CustomAnalyzer> custom,
-            Optional<Shingles> shingles,
+            @Nullable StandardAnalyzer standard,
+            @Nullable PresetAnalyzer preset,
+            @Nullable CustomAnalyzer custom,
+            @Nullable Shingles shingles,
             List<FieldAnalyzer> fields) {
-        return new Analyzer(standard, preset, custom, shingles, Optional.empty(), fields, List.of());
+        return new Analyzer(
+                Optional.ofNullable(standard),
+                Optional.ofNullable(preset),
+                Optional.ofNullable(custom),
+                Optional.ofNullable(shingles),
+                Optional.empty(),
+                fields,
+                List.of());
     }
 
     private long hits(SearchQuery query) throws Exception {
@@ -544,13 +552,13 @@ class Lucene3BackendTest {
     @Test
     void searchesWithTheAnalyzersOf36() throws Exception {
         open(Path.of(PATH));
-        Analyzer whitespace = preset("org.apache.lucene.analysis.core.WhitespaceAnalyzer", Optional.empty());
+        Analyzer whitespace = preset("org.apache.lucene.analysis.core.WhitespaceAnalyzer", null);
         assertThat(hits(classic("Alpha", whitespace))).isZero();
         assertThat(hits(classic("alpha", whitespace))).isEqualTo(6);
         assertThat(hits(classic("Alpha", RealBackend.STANDARD))).isEqualTo(6);
         Analyzer noAlpha = preset(
                 "org.apache.lucene.analysis.standard.StandardAnalyzer",
-                Optional.of(new WordSet(Optional.of(List.of("alpha")), Optional.empty())));
+                new WordSet(Optional.of(List.of("alpha")), Optional.empty()));
         assertThat(hits(classic("alpha", noAlpha))).isZero();
         Analyzer limited = new Analyzer(
                 Optional.of(new StandardAnalyzer()),
@@ -558,14 +566,13 @@ class Lucene3BackendTest {
                 Optional.empty(),
                 Optional.empty(),
                 Optional.of(new LimitTokenCount(1, false)),
-                List.of(new FieldAnalyzer(
-                        "id", preset("org.apache.lucene.analysis.core.KeywordAnalyzer", Optional.empty()))),
+                List.of(new FieldAnalyzer("id", preset("org.apache.lucene.analysis.core.KeywordAnalyzer", null))),
                 List.of());
         assertThat(hits(classic("\"gamma nothing\" id:7", limited))).isEqualTo(2);
 
         RpcException english = backend.fails(
                 Methods.START_SEARCH,
-                params(classic("alpha", preset("org.apache.lucene.analysis.en.EnglishAnalyzer", Optional.empty()))),
+                params(classic("alpha", preset("org.apache.lucene.analysis.en.EnglishAnalyzer", null))),
                 ErrorCode.NOT_SUPPORTED);
         assertThat(english.getMessage()).contains("Lucene 3.6.2", "EnglishAnalyzer", "WhitespaceAnalyzer");
         backend.fails(
@@ -573,14 +580,14 @@ class Lucene3BackendTest {
                 params(classic(
                         "alpha",
                         analyzer(
-                                Optional.empty(),
-                                Optional.empty(),
-                                Optional.of(new CustomAnalyzer(
+                                null,
+                                null,
+                                new CustomAnalyzer(
                                         List.of(),
                                         new AnalysisComponent("whitespace", Map.of()),
                                         List.of(),
-                                        Optional.empty())),
-                                Optional.empty(),
+                                        Optional.empty()),
+                                null,
                                 List.of()))),
                 ErrorCode.NOT_SUPPORTED);
         backend.fails(
@@ -588,10 +595,10 @@ class Lucene3BackendTest {
                 params(classic(
                         "alpha",
                         analyzer(
-                                Optional.of(new StandardAnalyzer()),
-                                Optional.empty(),
-                                Optional.empty(),
-                                Optional.of(new Shingles(2, 2, " ", true, false, "_")),
+                                new StandardAnalyzer(),
+                                null,
+                                null,
+                                new Shingles(2, 2, " ", true, false, "_"),
                                 List.of()))),
                 ErrorCode.NOT_SUPPORTED);
     }

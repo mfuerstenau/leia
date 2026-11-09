@@ -8,16 +8,19 @@ import io.github.mfuerstenau.leia.protocol.analysis.AutoStopWords;
 import io.github.mfuerstenau.leia.protocol.analysis.FieldStopWords;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAutoStopWordsResult;
 import io.github.mfuerstenau.leia.protocol.analysis.StartAutoStopWordsParams;
+import io.github.mfuerstenau.leia.tui.Optionals;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.Form;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The popup that finds auto stop words (ADR 0039): the terms of fields in more documents than a
@@ -65,7 +68,7 @@ public final class AutoStopWordsForm {
 
     private final List<String> fields;
     private final List<Boolean> chosen;
-    private final Optional<String> unsupported;
+    private final @Nullable String unsupported;
 
     private boolean percent = true;
     private int percentValue = DEFAULT_PERCENT;
@@ -77,36 +80,37 @@ public final class AutoStopWordsForm {
     /** Whether a search is asked for or runs, and its job once it started. */
     private boolean running;
 
-    private OptionalLong jobId = OptionalLong.empty();
+    private @Nullable Long jobId;
     private long scanned;
 
     /** The words of the analysis screen, found here or before. */
-    private Optional<AutoStopWords> found;
+    private @Nullable AutoStopWords found;
 
-    /** The field whose words are listed; empty for none. */
-    private Optional<String> listed = Optional.empty();
+    /** The field whose words are listed; null for none. */
+    private @Nullable String listed;
 
-    private String message;
+    private @Nullable String message;
 
     /**
      * @param fields the indexed fields of the open index
-     * @param unsupported why the open index can't run the search, such as {@link #NO_INDEX}; empty if
+     * @param unsupported why the open index can't run the search, such as {@link #NO_INDEX}; null if
      *     it can
      * @param found the words that the analysis screen has
      */
-    public AutoStopWordsForm(List<String> fields, Optional<String> unsupported, Optional<AutoStopWords> found) {
+    public AutoStopWordsForm(List<String> fields, @Nullable String unsupported, @Nullable AutoStopWords found) {
         this.fields = List.copyOf(fields);
         this.chosen = new ArrayList<>(Collections.nCopies(fields.size(), false));
         this.unsupported = unsupported;
         this.found = found;
         // The fields of the words found before, unless that was every field.
-        found.filter(words -> words.fields().size() < this.fields.size())
-                .ifPresent(words -> words.fields().forEach(field -> {
-                    int index = this.fields.indexOf(field.field());
-                    if (index >= 0) {
-                        chosen.set(index, true);
-                    }
-                }));
+        if (found != null && found.fields().size() < this.fields.size()) {
+            found.fields().forEach(field -> {
+                int index = this.fields.indexOf(field.field());
+                if (index >= 0) {
+                    chosen.set(index, true);
+                }
+            });
+        }
     }
 
     /** Whether a search is asked for or runs. */
@@ -116,7 +120,7 @@ public final class AutoStopWordsForm {
 
     /** The running job; empty before it started. */
     public OptionalLong jobId() {
-        return jobId;
+        return Optionals.optionalLong(jobId);
     }
 
     /** The params that Enter starts the search with; empty without a reader. */
@@ -135,7 +139,7 @@ public final class AutoStopWordsForm {
     /** The job of the search has started. */
     public void started(long jobId) {
         if (running) {
-            this.jobId = OptionalLong.of(jobId);
+            this.jobId = jobId;
         }
     }
 
@@ -144,8 +148,8 @@ public final class AutoStopWordsForm {
         scanned = result.termsScanned();
         if (result.stopWords().isPresent()) {
             running = false;
-            jobId = OptionalLong.empty();
-            found = result.stopWords();
+            jobId = null;
+            found = result.stopWords().orElse(null);
             message = null;
         }
     }
@@ -153,12 +157,12 @@ public final class AutoStopWordsForm {
     /** The search failed, or was stopped. */
     public void failed(String error) {
         running = false;
-        jobId = OptionalLong.empty();
+        jobId = null;
         message = error;
     }
 
     /** The index changed, and the backend stopped the job; the words are the screen's. */
-    public void indexChanged(Optional<AutoStopWords> words) {
+    public void indexChanged(@Nullable AutoStopWords words) {
         if (running) {
             failed("Stopped: the index changed.");
         }
@@ -201,8 +205,8 @@ public final class AutoStopWordsForm {
         if (!running) {
             return new Event.Close();
         }
-        if (jobId.isPresent()) {
-            long job = jobId.getAsLong();
+        if (jobId != null) {
+            long job = jobId;
             failed("Stopped.");
             return new Event.Cancel(job);
         }
@@ -213,8 +217,8 @@ public final class AutoStopWordsForm {
         if (running) {
             return new Event.None();
         }
-        if (unsupported.isPresent()) {
-            message = "Auto stop words: " + unsupported.get();
+        if (unsupported != null) {
+            message = "Auto stop words: " + unsupported;
             return new Event.None();
         }
         running = true;
@@ -235,13 +239,13 @@ public final class AutoStopWordsForm {
             case 'a' -> Collections.fill(chosen, true);
             case 'n' -> Collections.fill(chosen, false);
             case 'v' -> {
-                Optional<String> field = selectedField();
-                listed = field.equals(listed) ? Optional.empty() : field;
+                String field = selectedField().orElse(null);
+                listed = Objects.equals(field, listed) ? null : field;
             }
             case 'd' -> {
-                if (!running && found.isPresent()) {
-                    found = Optional.empty();
-                    listed = Optional.empty();
+                if (!running && found != null) {
+                    found = null;
+                    listed = null;
                     return new Event.Clear();
                 }
             }
@@ -304,7 +308,7 @@ public final class AutoStopWordsForm {
                 selectedLine = lines.size();
             }
             lines.add(Form.row(TextFormat.escapeControl(field), fieldValue(i), selected == i + 2));
-            if (listed.equals(Optional.of(field)) && found.isPresent()) {
+            if (field.equals(listed) && found != null) {
                 lines.addAll(wordLines(field));
             }
         }
@@ -324,7 +328,7 @@ public final class AutoStopWordsForm {
     /** Whether field {@code i} is chosen, and how many stop words were found in it. */
     private String fieldValue(int i) {
         String field = fields.get(i);
-        String words = found.isPresent() && hasField(field) ? "   " + count(field) : "";
+        String words = found != null && hasField(field) ? "   " + count(field) : "";
         return (Boolean.TRUE.equals(chosen.get(i)) ? "[x]" : "[ ]") + words;
     }
 
@@ -346,18 +350,22 @@ public final class AutoStopWordsForm {
         if (running) {
             return Line.from("Finding the stop words: " + scanned + " terms scanned");
         }
-        if (found.isPresent()) {
-            return Line.from("Found: more than " + found.get().maxDocFreq() + " documents");
+        if (found != null) {
+            return Line.from("Found: more than " + found.maxDocFreq() + " documents");
         }
         return Line.styled("A term in more documents than this is a stop word of its field.", Form.muted());
     }
 
     private boolean hasField(String field) {
-        return found.get().fields().stream().anyMatch(words -> words.field().equals(field));
+        return found != null
+                && found.fields().stream().anyMatch(words -> words.field().equals(field));
     }
 
     private List<String> words(String field) {
-        return found.get().fields().stream()
+        if (found == null) {
+            return List.of();
+        }
+        return found.fields().stream()
                 .filter(words -> words.field().equals(field))
                 .findFirst()
                 .map(FieldStopWords::words)

@@ -129,6 +129,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -139,10 +140,10 @@ class AppTest {
             new VersionResult("leia-server", "1", "abc", "t", new JavaRuntime("25", "v", "/h"));
 
     private static App app() {
-        return app(Optional.empty());
+        return app(null);
     }
 
-    private static App app(Optional<Path> home) {
+    private static App app(@Nullable Path home) {
         return new App(VERSION, home, History.inMemory(), DirectoryImpl.FS);
     }
 
@@ -389,14 +390,15 @@ class AppTest {
         App app = searching("q");
         assertThat(app.searchProgress(searchId, page(2, 0))).isEmpty();
 
-        Action.LoadDocument open = loadWithMatches(app.handleKey(key(KeyCode.ENTER)), 2);
+        Action.LoadDocument open =
+                loadWithMatches(app.handleKey(key(KeyCode.ENTER)).orElseThrow(), 2);
         app.documentLoaded(document(2));
         assertThat(wide(app)).contains("2 Documents", "[ ] hits").doesNotContain("[ ] term docs");
 
-        Action.LoadDocument next = loadWithMatches(app.handleKey(key(']')), 0);
+        Action.LoadDocument next = loadWithMatches(app.handleKey(key(']')).orElseThrow(), 0);
         app.documentLoaded(document(0));
         assertThat(app.handleKey(key(']'))).isEmpty();
-        Action.LoadDocument back = loadWithMatches(app.handleKey(key('[')), 2);
+        Action.LoadDocument back = loadWithMatches(app.handleKey(key('[')).orElseThrow(), 2);
         assertThat(List.of(open, next, back))
                 .allSatisfy(load -> assertThat(load.cancel()).isEmpty());
     }
@@ -406,8 +408,9 @@ class AppTest {
         App app = searching("q");
         app.searchProgress(searchId, page(2, 0));
 
-        Action.LoadDocument open = loadWithMatches(app.handleKey(key(KeyCode.ENTER)), 2);
-        Documents.MatchesStart matches = open.matches().orElseThrow();
+        Action.LoadDocument open =
+                loadWithMatches(app.handleKey(key(KeyCode.ENTER)).orElseThrow(), 2);
+        Documents.MatchesStart matches = open.matches();
         assertThat(matches.params().field()).isEmpty();
         app.documentLoaded(document(2));
         assertThat(app.documentMatchesStarted(matches.matchesId(), 4)).isEmpty();
@@ -427,10 +430,9 @@ class AppTest {
 
         // The next hit's matches still run when → steps on to a document that isn't a hit: they
         // stay for when it comes back, but a new hit cancels their job.
-        Action.LoadDocument next = loadWithMatches(app.handleKey(key(']')), 0);
+        Action.LoadDocument next = loadWithMatches(app.handleKey(key(']')).orElseThrow(), 0);
         app.documentLoaded(document(0));
-        assertThat(app.documentMatchesStarted(next.matches().orElseThrow().matchesId(), 5))
-                .isEmpty();
+        assertThat(app.documentMatchesStarted(next.matches().matchesId(), 5)).isEmpty();
         assertThat(app.handleKey(key(KeyCode.RIGHT))).isEqualTo(load(1));
         app.documentLoaded(document(1));
         assertThat(wide(app)).doesNotContain("matches");
@@ -440,13 +442,12 @@ class AppTest {
     }
 
     /** A load of {@code docId} that finds the matches of the search in it. */
-    private static Action.LoadDocument loadWithMatches(Optional<Action> action, int docId) {
-        assertThat(action).containsInstanceOf(Action.LoadDocument.class);
-        Action.LoadDocument load = (Action.LoadDocument) action.orElseThrow();
+    private static Action.LoadDocument loadWithMatches(Action action, int docId) {
+        assertThat(action).isInstanceOf(Action.LoadDocument.class);
+        Action.LoadDocument load = (Action.LoadDocument) action;
         assertThat(load.docId()).isEqualTo(docId);
-        assertThat(load.matches())
-                .hasValueSatisfying(
-                        matches -> assertThat(matches.params().docId()).isEqualTo(docId));
+        assertThat(load.matches()).isNotNull();
+        assertThat(load.matches().params().docId()).isEqualTo(docId);
         return load;
     }
 
@@ -633,7 +634,7 @@ class AppTest {
 
     @Test
     void opensWithTheDirectoryChosenLast() {
-        App app = new App(VERSION, Optional.empty(), History.inMemory(), DirectoryImpl.NIO);
+        App app = new App(VERSION, null, History.inMemory(), DirectoryImpl.NIO);
         app.handleKey(key('o'));
         typed(app, "/data/idx");
 
@@ -651,31 +652,15 @@ class AppTest {
 
     @Test
     void theAboutScreenNamesTheLoadedRuntimesAndWhyTheOthersAreNot() {
-        App app = app().withRuntimeFolders(new RuntimesDirs(Optional.of(Path.of("/opt/leia/runtimes"))));
+        App app = app().withRuntimeFolders(RuntimesDirs.of(Path.of("/opt/leia/runtimes")));
         app.runtimesLoaded(new GetRuntimesResult(
                 List.of(
+                        new RuntimeFolder("lucene10", List.of(9, 10), RuntimeState.LOADED, "10.5.2", null),
+                        new RuntimeFolder("lucene9", List.of(8), RuntimeState.MISSING, null, null),
                         new RuntimeFolder(
-                                "lucene10",
-                                List.of(9, 10),
-                                RuntimeState.LOADED,
-                                Optional.of("10.5.2"),
-                                Optional.empty()),
-                        new RuntimeFolder(
-                                "lucene9", List.of(8), RuntimeState.MISSING, Optional.empty(), Optional.empty()),
-                        new RuntimeFolder(
-                                "lucene7",
-                                List.of(6, 7),
-                                RuntimeState.INCOMPLETE,
-                                Optional.empty(),
-                                Optional.of("lucene-core-7.7.3.jar")),
-                        new RuntimeFolder(
-                                "lucene5",
-                                List.of(4, 5),
-                                RuntimeState.REFUSED,
-                                Optional.empty(),
-                                Optional.of("too new")),
-                        new RuntimeFolder(
-                                "lucene3", List.of(2, 3), RuntimeState.LOADED, Optional.of("3.6.2"), Optional.empty())),
+                                "lucene7", List.of(6, 7), RuntimeState.INCOMPLETE, null, "lucene-core-7.7.3.jar"),
+                        new RuntimeFolder("lucene5", List.of(4, 5), RuntimeState.REFUSED, null, "too new"),
+                        new RuntimeFolder("lucene3", List.of(2, 3), RuntimeState.LOADED, "3.6.2", null)),
                 List.of(new ServerRuntimeInfo(
                         "/opt/elasticsearch", Optional.of("Elasticsearch 8.15.3"), "9.11.1", List.of(8, 9)))));
 
@@ -709,30 +694,18 @@ class AppTest {
     private static GetRuntimesResult everyState() {
         return new GetRuntimesResult(
                 List.of(
+                        new RuntimeFolder("lucene10", List.of(9, 10), RuntimeState.RESTART, null, null),
+                        new RuntimeFolder("lucene9", List.of(8), RuntimeState.MISSING, null, null),
                         new RuntimeFolder(
-                                "lucene10", List.of(9, 10), RuntimeState.RESTART, Optional.empty(), Optional.empty()),
-                        new RuntimeFolder(
-                                "lucene9", List.of(8), RuntimeState.MISSING, Optional.empty(), Optional.empty()),
-                        new RuntimeFolder(
-                                "lucene7",
-                                List.of(6, 7),
-                                RuntimeState.INCOMPLETE,
-                                Optional.empty(),
-                                Optional.of("lucene-core-7.7.3.jar")),
-                        new RuntimeFolder(
-                                "lucene5",
-                                List.of(4, 5),
-                                RuntimeState.REFUSED,
-                                Optional.empty(),
-                                Optional.of("too new")),
-                        new RuntimeFolder(
-                                "lucene3", List.of(2, 3), RuntimeState.LOADED, Optional.of("3.6.2"), Optional.empty())),
+                                "lucene7", List.of(6, 7), RuntimeState.INCOMPLETE, null, "lucene-core-7.7.3.jar"),
+                        new RuntimeFolder("lucene5", List.of(4, 5), RuntimeState.REFUSED, null, "too new"),
+                        new RuntimeFolder("lucene3", List.of(2, 3), RuntimeState.LOADED, "3.6.2", null)),
                 List.of());
     }
 
     @Test
     void theAboutScreenSaysWhenARuntimeNeedsARestart() {
-        App app = app().withRuntimeFolders(new RuntimesDirs(Optional.of(Path.of("/opt/leia/runtimes"))));
+        App app = app().withRuntimeFolders(RuntimesDirs.of(Path.of("/opt/leia/runtimes")));
         app.runtimesLoaded(everyState());
 
         assertThat(TestScreens.render(app::render, 200, 30))
@@ -742,7 +715,7 @@ class AppTest {
 
     @Test
     void dOnTheStartScreenPlansOnlyTheMissingAndIncompleteRuntimes() {
-        App app = app().withRuntimeFolders(new RuntimesDirs(Optional.of(Path.of("/opt/leia/runtimes"))));
+        App app = app().withRuntimeFolders(RuntimesDirs.of(Path.of("/opt/leia/runtimes")));
         app.runtimesLoaded(everyState());
 
         Optional<Action> action = app.handleKey(key('D'));
@@ -767,7 +740,7 @@ class AppTest {
     }
 
     private static App appWithLog(LogBuffer log) {
-        return app().withLog(log, Optional.of(Path.of("/state/leia/leia.log")));
+        return app().withLog(log, Path.of("/state/leia/leia.log"));
     }
 
     private static void log(LogBuffer log, Level level, String message) {
@@ -926,7 +899,7 @@ class AppTest {
 
     @Test
     void dOnTheAnalysisTabIsTheAnalysisTabs() {
-        App app = app().withRuntimeFolders(new RuntimesDirs(Optional.of(Path.of("/opt/leia/runtimes"))));
+        App app = app().withRuntimeFolders(RuntimesDirs.of(Path.of("/opt/leia/runtimes")));
         app.handleKey(key('6'));
 
         Optional<Action> action = app.handleKey(key('D'));
@@ -938,7 +911,7 @@ class AppTest {
 
     @Test
     void theNewRuntimesAreLoadedOnceInstalledAndTheAboutScreenFollows() {
-        App app = app().withRuntimeFolders(new RuntimesDirs(Optional.of(Path.of("/opt/leia/runtimes"))));
+        App app = app().withRuntimeFolders(RuntimesDirs.of(Path.of("/opt/leia/runtimes")));
         app.runtimesLoaded(everyState());
         app.handleKey(key('D'));
 
@@ -947,8 +920,7 @@ class AppTest {
 
         app.runtimesReloaded(new LoadRuntimesResult(
                 List.of("lucene9"),
-                List.of(new RuntimeFolder(
-                        "lucene9", List.of(8), RuntimeState.LOADED, Optional.of("9.12.3"), Optional.empty()))));
+                List.of(new RuntimeFolder("lucene9", List.of(8), RuntimeState.LOADED, "9.12.3", null))));
         app.handleKey(key(KeyCode.ESCAPE));
 
         assertThat(TestScreens.render(app::render, 200, 30)).contains("Runtimes: Lucene 9.12.3 (8)");
@@ -959,10 +931,8 @@ class AppTest {
         App app = app();
         app.runtimesLoaded(new GetRuntimesResult(
                 List.of(
-                        new RuntimeFolder(
-                                "lucene10", List.of(9, 10), RuntimeState.MISSING, Optional.empty(), Optional.empty()),
-                        new RuntimeFolder(
-                                "lucene9", List.of(8), RuntimeState.MISSING, Optional.empty(), Optional.empty())),
+                        new RuntimeFolder("lucene10", List.of(9, 10), RuntimeState.MISSING, null, null),
+                        new RuntimeFolder("lucene9", List.of(8), RuntimeState.MISSING, null, null)),
                 List.of()));
 
         assertThat(TestScreens.render(app::render, 200, 30))
@@ -1071,7 +1041,7 @@ class AppTest {
 
     @Test
     void expandsTheHomeDirectoryOnSubmit() {
-        App app = app(Optional.of(Path.of("/home/me")));
+        App app = app(Path.of("/home/me"));
         app.handleKey(key('o'));
         typed(app, "~/idx");
 
@@ -1518,7 +1488,7 @@ class AppTest {
     @Test
     void anIndexOpenedAgainIsAddedToTheHistory() {
         History history = History.inMemory();
-        App app = new App(VERSION, Optional.empty(), history, DirectoryImpl.FS);
+        App app = new App(VERSION, null, history, DirectoryImpl.FS);
 
         app.opened(stats("/data/a"), List.of());
         openedWithoutReader(app);
@@ -1981,11 +1951,7 @@ class AppTest {
         app.termsLoaded(loadTerms("body", null), termPage("text"));
         app.postingsLoaded(
                 loadPostings("body", "text"),
-                new GetPostingsResult(
-                        1,
-                        1,
-                        List.of(new Posting(1, false, OptionalInt.empty(), Optional.empty())),
-                        OptionalInt.empty()));
+                new GetPostingsResult(1, 1, List.of(new Posting(1, false, null, null)), OptionalInt.empty()));
         assertThat(legend(app)).contains("body (/ seeks)", "Postings (1)");
 
         // Back to the document, which fetches nothing, and whose ] steps along id/1's postings.
@@ -2032,7 +1998,7 @@ class AppTest {
         Action.StartSearch term = (Action.StartSearch) goTo(app, 's').orElseThrow();
         app.searchStarted(term.searchId(), 1);
         app.searchProgress(term.searchId(), page(0, 2));
-        assertThat(docId(app.handleKey(key(KeyCode.ENTER)))).isEqualTo(0);
+        assertThat(docId(app.handleKey(key(KeyCode.ENTER)).orElseThrow())).isEqualTo(0);
         app.documentLoaded(document(0));
 
         // m searches for documents like it, whose job still runs.
@@ -2043,7 +2009,7 @@ class AppTest {
         // Back to the document, which cancels the search like it; ] steps along id:1's hits.
         assertThat(app.handleKey(key(KeyCode.BACKSPACE))).hasValue(new Action.CancelSearch(List.of(2L)));
         assertThat(legend(app)).contains("Document ", "[ ] hits");
-        assertThat(docId(app.handleKey(key(']')))).isEqualTo(2);
+        assertThat(docId(app.handleKey(key(']')).orElseThrow())).isEqualTo(2);
         app.documentLoaded(document(2));
 
         // Back to the search of id:1, on the hit ] stepped to.
@@ -2054,8 +2020,8 @@ class AppTest {
         assertThat(explain.params().docId()).isEqualTo(2);
     }
 
-    private static int docId(Optional<Action> load) {
-        return ((Action.LoadDocument) load.orElseThrow()).docId();
+    private static int docId(Action load) {
+        return ((Action.LoadDocument) load).docId();
     }
 
     @Test
@@ -2336,11 +2302,11 @@ class AppTest {
     }
 
     private static Action.LoadTerms loadTerms(String field, String from) {
-        return new Action.LoadTerms(field, Optional.ofNullable(from).map(AppTest::text), false);
+        return new Action.LoadTerms(field, from == null ? null : text(from), false);
     }
 
     private static Action.LoadPostings loadPostings(String field, String term) {
-        return new Action.LoadPostings(field, text(term), 0, false, Optional.empty());
+        return new Action.LoadPostings(field, text(term), 0, false, null);
     }
 
     private static GetTermsResult termPage(String... terms) {
@@ -2356,9 +2322,7 @@ class AppTest {
         return new GetPostingsResult(
                 2,
                 2,
-                List.of(
-                        new Posting(0, false, OptionalInt.empty(), Optional.empty()),
-                        new Posting(2, false, OptionalInt.empty(), Optional.empty())),
+                List.of(new Posting(0, false, null, null), new Posting(2, false, null, null)),
                 OptionalInt.empty());
     }
 
@@ -2451,7 +2415,7 @@ class AppTest {
     }
 
     private static Optional<Action> load(int docId) {
-        return Optional.of(new Action.LoadDocument(docId, List.of(), Optional.empty(), Optional.empty()));
+        return Optional.of(new Action.LoadDocument(docId, List.of(), null, null));
     }
 
     private static GetIndexStatsResult withDocs(GetIndexStatsResult stats, int maxDoc, IndexField... fields) {
@@ -2696,8 +2660,7 @@ class AppTest {
         assertThat(TestScreens.render(app::render, 260, 20)).contains("E export", "g go to");
 
         // Another document stops it.
-        assertThat(app.handleKey(key(KeyCode.RIGHT)))
-                .hasValue(new Action.LoadDocument(1, List.of(7L), Optional.empty(), Optional.empty()));
+        assertThat(app.handleKey(key(KeyCode.RIGHT))).hasValue(new Action.LoadDocument(1, List.of(7L), null, null));
         assertThat(app.polls()).isEmpty();
         app.documentLoaded(document(1));
 
@@ -2756,14 +2719,13 @@ class AppTest {
         app.handleKey(key('1'));
 
         assertThat(app.startFilter("red", filterParams(false), 0))
-                .hasValue(new Action.StartFilter(1, filterParams(false), OptionalLong.empty(), OptionalLong.empty()));
+                .hasValue(new Action.StartFilter(1, filterParams(false), null, null));
         assertThat(render(app)).contains("2 Documents");
         assertThat(app.filterStarted(1, 4)).isEmpty();
         assertThat(app.polls()).containsExactly(new Poll.Filter(1, 4));
         assertThat(render(app)).contains("Esc stop filter", "filter red: finding matches… 0%");
         // Esc stops building it.
-        assertThat(app.handleKey(key(KeyCode.ESCAPE)))
-                .hasValue(new Action.ClearFilter(OptionalLong.of(4), OptionalLong.empty()));
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.ClearFilter(4L, null));
         assertThat(app.polls()).isEmpty();
 
         app.startFilter("red", filterParams(false), 2);
@@ -2773,7 +2735,7 @@ class AppTest {
         assertThat(app.filterProgress(2, built(5, 2, 3)))
                 .hasValue(new Action.StepFilter(2, params, FilterStep.NEAREST));
         assertThat(app.loadingDocuments()).isTrue();
-        assertThat(app.filterStepped(2, params, FilterStep.NEAREST, Optional.of(new FilterMatch(2, 1))))
+        assertThat(app.filterStepped(2, params, FilterStep.NEAREST, new FilterMatch(2, 1)))
                 .isEqualTo(load(2));
         app.documentLoaded(document(2));
         assertThat(app.loadingDocuments()).isFalse();
@@ -2781,8 +2743,7 @@ class AppTest {
 
         // The terms screen reads the postings through it.
         assertThat(app.handleKey(key('3'))).hasValue(loadTerms("id", null));
-        Action.LoadPostings marked =
-                new Action.LoadPostings("id", text("1"), 0, false, Optional.of(new PostingsFilter(5, false)));
+        Action.LoadPostings marked = new Action.LoadPostings("id", text("1"), 0, false, new PostingsFilter(5, false));
         assertThat(app.termsLoaded(loadTerms("id", null), termPage("1", "2"))).hasValue(marked);
         app.postingsLoaded(marked, postingsOf());
         assertThat(render(app)).contains("b filter only");
@@ -2791,14 +2752,13 @@ class AppTest {
         app.handleKey(key(KeyCode.ENTER));
         app.handleKey(key(KeyCode.ENTER));
         assertThat(app.handleKey(key(KeyCode.ENTER)))
-                .hasValue(new Action.LoadDocument(
-                        0, List.of(), Optional.of(new Documents.Locate(2, 5)), Optional.empty()));
+                .hasValue(new Action.LoadDocument(0, List.of(), new Documents.Locate(2, 5), null));
         StepFilterParams located = new StepFilterParams(5, 0, true);
-        app.filterLocated(2, located, Optional.of(new FilterMatch(2, 1)));
+        app.filterLocated(2, located, new FilterMatch(2, 1));
         app.documentLoaded(document(0));
         assertThat(render(app)).contains("filter red: not a match, 2 in all");
 
-        assertThat(app.handleKey(key('b'))).hasValue(new Action.ClearFilter(OptionalLong.empty(), OptionalLong.of(5)));
+        assertThat(app.handleKey(key('b'))).hasValue(new Action.ClearFilter(null, 5L));
         // The terms screen shows all postings again.
         app.handleKey(key('3'));
         assertThat(render(app)).doesNotContain("b filter only");
@@ -2809,9 +2769,8 @@ class AppTest {
         App app = appShowingADocument();
         app.startFilter("red", filterParams(false), 0);
 
-        assertThat(app.handleKey(key('b')))
-                .hasValue(new Action.ClearFilter(OptionalLong.empty(), OptionalLong.empty()));
-        assertThat(app.filterStarted(1, 4)).hasValue(new Action.ClearFilter(OptionalLong.of(4), OptionalLong.empty()));
+        assertThat(app.handleKey(key('b'))).hasValue(new Action.ClearFilter(null, null));
+        assertThat(app.filterStarted(1, 4)).hasValue(new Action.ClearFilter(4L, null));
         // Nor does what the job finds count.
         assertThat(app.filterProgress(1, built(4, 2, 3))).isEmpty();
         app.filterFailed(1, "too late");
@@ -2826,7 +2785,7 @@ class AppTest {
         Optional<Action> step = app.filterProgress(1, built(5, 2, 3));
         StepFilterParams params = new StepFilterParams(5, 1, true);
         assertThat(step).hasValue(new Action.StepFilter(1, params, FilterStep.NEAREST));
-        assertThat(app.filterStepped(1, params, FilterStep.NEAREST, Optional.of(new FilterMatch(1, 0))))
+        assertThat(app.filterStepped(1, params, FilterStep.NEAREST, new FilterMatch(1, 0)))
                 .isEqualTo(load(1));
         app.documentLoaded(document(1));
         assertThat(app.rebuildFilter()).isEmpty();
@@ -2835,8 +2794,7 @@ class AppTest {
                 .isEqualTo(load(1));
 
         assertThat(render(app)).contains("Reopened: segments_1; rebuildi…");
-        assertThat(app.rebuildFilter())
-                .hasValue(new Action.StartFilter(2, filterParams(false), OptionalLong.empty(), OptionalLong.empty()));
+        assertThat(app.rebuildFilter()).hasValue(new Action.StartFilter(2, filterParams(false), null, null));
         // A poll of the old job, which the reopen stopped, changes nothing.
         assertThat(app.filterProgress(1, built(5, 2, 3))).isEmpty();
         app.filterStarted(2, 9);
@@ -2872,9 +2830,9 @@ class AppTest {
     }
 
     /** Starts the export that {@code action} asks for against {@code calls}, as the session does. */
-    private static ExportJob started(App app, Optional<Action> action, FakeExportCalls calls) {
-        assertThat(action).containsInstanceOf(Action.StartDocumentExport.class);
-        Action.StartDocumentExport start = (Action.StartDocumentExport) action.get();
+    private static ExportJob started(App app, Action action, FakeExportCalls calls) {
+        assertThat(action).isInstanceOf(Action.StartDocumentExport.class);
+        Action.StartDocumentExport start = (Action.StartDocumentExport) action;
         ExportJob job = new DocumentExporter(calls, Duration.ofMillis(1)).start(start.request());
         app.documentExportStarted(start.exportId(), job);
         return job;
@@ -2921,7 +2879,7 @@ class AppTest {
         assertThat(render(app)).contains("Exporting…");
         FakeExportCalls calls = new FakeExportCalls(document(0));
         calls.reconstruct = FakeExportCalls.running(1024, 3000);
-        ExportJob job = started(app, start, calls);
+        ExportJob job = started(app, start.orElseThrow(), calls);
         awaitExport(job, snapshot -> snapshot.scanned() == 1024);
 
         // The prompt closes once the rebuild runs, and the tab line follows it.
@@ -2951,7 +2909,7 @@ class AppTest {
         assertThat(render(app)).contains("Tab terms and points: off");
 
         FakeExportCalls calls = new FakeExportCalls(document(0));
-        ExportJob job = started(app, app.handleKey(ctrl('y')), calls);
+        ExportJob job = started(app, app.handleKey(ctrl('y')).orElseThrow(), calls);
 
         Optional<Action> copy = app.documentExportDone(1, ended(job));
         assertThat(copy).containsInstanceOf(Action.Copy.class);
@@ -2971,7 +2929,7 @@ class AppTest {
         app.handleKey(key(KeyCode.TAB));
         FakeExportCalls failing = new FakeExportCalls(document(0));
         failing.document = CompletableFuture.failedFuture(new IllegalStateException("Cannot read doc 0: gone"));
-        ExportJob job = started(app, app.handleKey(key(KeyCode.ENTER)), failing);
+        ExportJob job = started(app, app.handleKey(key(KeyCode.ENTER)).orElseThrow(), failing);
         assertThat(app.documentExportDone(1, ended(job))).isEmpty();
         assertThat(render(app)).contains("Cannot read doc 0: gone");
         assertThat(app.handleKey(key(KeyCode.ESCAPE))).isEmpty();
@@ -2980,7 +2938,7 @@ class AppTest {
         // With them, Esc stops the rebuild, and its job.
         app.handleKey(key('E'));
         FakeExportCalls calls = new FakeExportCalls(document(0));
-        ExportJob rebuilding = started(app, app.handleKey(key(KeyCode.ENTER)), calls);
+        ExportJob rebuilding = started(app, app.handleKey(key(KeyCode.ENTER)).orElseThrow(), calls);
         awaitExport(rebuilding, snapshot -> snapshot.state() == ExportJob.State.REBUILDING);
         app.tick();
         assertThat(app.handleKey(key(KeyCode.ESCAPE))).isEmpty();
@@ -2991,7 +2949,8 @@ class AppTest {
 
         // A failure once the prompt has closed is a notice.
         app.handleKey(key('E'));
-        ExportJob third = started(app, app.handleKey(key(KeyCode.ENTER)), new FakeExportCalls(document(0)));
+        ExportJob third =
+                started(app, app.handleKey(key(KeyCode.ENTER)).orElseThrow(), new FakeExportCalls(document(0)));
         awaitExport(third, snapshot -> snapshot.state() == ExportJob.State.REBUILDING);
         app.tick();
         third.cancel();
@@ -3012,7 +2971,7 @@ class AppTest {
 
         assertThat(wide(app)).contains("Reopened: segments_1; export stopped").doesNotContain("Export document");
         FakeExportCalls calls = new FakeExportCalls(document(0));
-        ExportJob late = started(app, start, calls);
+        ExportJob late = started(app, start.orElseThrow(), calls);
         assertThat(ended(late).state()).isEqualTo(ExportJob.State.CANCELLED);
         // The next export is a new one.
         app.handleKey(key('E'));
@@ -3024,8 +2983,8 @@ class AppTest {
     }
 
     /** The threads of a check on a Lucene that has them: all the processors, the JVM's being the server's. */
-    private static OptionalInt processors() {
-        return OptionalInt.of(Runtime.getRuntime().availableProcessors());
+    private static int processors() {
+        return Runtime.getRuntime().availableProcessors();
     }
 
     @Test
@@ -3037,8 +2996,7 @@ class AppTest {
         assertThat(screen).contains("Lucene's CheckIndex", "⏎ check all   Space mark   a mark all");
 
         app.handleKey(key('l'));
-        assertThat(app.handleKey(key(KeyCode.ENTER)))
-                .hasValue(new Action.StartCheck(1, OptionalInt.of(2), processors(), Optional.empty()));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.StartCheck(1, 2, processors(), null));
         assertThat(app.checking()).isTrue();
         assertThat(app.polls()).isEmpty();
         assertThat(app.checkStarted(1, 5)).isEmpty();
@@ -3075,10 +3033,7 @@ class AppTest {
         app.handleKey(key(' '));
         assertThat(app.handleKey(key(KeyCode.ENTER)))
                 .hasValue(new Action.StartCheck(
-                        1,
-                        OptionalInt.of(1),
-                        processors(),
-                        Optional.of(List.of(new CheckTarget("/data/idx", Optional.of(List.of("_1")))))));
+                        1, 1, processors(), List.of(new CheckTarget("/data/idx", Optional.of(List.of("_1"))))));
         app.checkStarted(1, 5);
         app.handleKey(key(KeyCode.ESCAPE));
 
@@ -3098,8 +3053,7 @@ class AppTest {
     void escBeforeTheCheckStartsStopsItAndItsJobIsCancelledOnceItStarts() {
         App app = appWithFields();
         app.handleKey(key('7'));
-        assertThat(app.handleKey(key(KeyCode.ENTER)))
-                .hasValue(new Action.StartCheck(1, OptionalInt.of(1), processors(), Optional.empty()));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.StartCheck(1, 1, processors(), null));
         assertThat(app.handleKey(key(KeyCode.ESCAPE))).isEmpty();
         assertThat(app.checking()).isFalse();
         assertThat(app.checkStarted(1, 8)).hasValue(new Action.CancelCheck(8));
@@ -3116,8 +3070,7 @@ class AppTest {
         app.handleKey(key('1'));
         assertThat(render(app)).contains("only the commits (4) and check (7) work");
         app.handleKey(key('7'));
-        assertThat(app.handleKey(key(KeyCode.ENTER)))
-                .hasValue(new Action.StartCheck(1, OptionalInt.of(1), processors(), Optional.empty()));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.StartCheck(1, 1, processors(), null));
         app.checkStarted(1, 1);
 
         // Opening the path again keeps the screen, with a new check.
@@ -3232,7 +3185,7 @@ class AppTest {
     void xOpensTheJarsPopupFromAnyScreenAndAddsJars() {
         Path home = Path.of("/home/me");
         Path dir = home.resolve(".config/leia/jars");
-        App app = app(Optional.of(home)).withDefaultJars(new DefaultJars(Optional.of(dir), DefaultJars.State.LOADED));
+        App app = app(home).withDefaultJars(new DefaultJars(dir, DefaultJars.State.LOADED));
         assertThat(render(app)).contains("X jars", "X to add");
         assertThat(app.handleKey(key('6'))).hasValue(new Action.LoadAnalysisComponents());
         app.componentsLoaded(COMPONENTS);

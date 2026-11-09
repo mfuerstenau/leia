@@ -42,6 +42,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import org.jspecify.annotations.Nullable;
 
 /** Term queries on an index of the runtimes' writers (ADR 0058), with a {@code body} field. */
 final class RuntimeSearches {
@@ -57,13 +58,14 @@ final class RuntimeSearches {
      */
     static void searchesATerm(RealBackend backend, int maxDoc, String text, boolean exact) throws Exception {
         BytesValue term = new BytesValue(text, false);
-        List<Integer> live = backend
-                .call(Methods.GET_POSTINGS, new GetPostingsParams("body", term, 0, maxDoc, Optional.empty()))
-                .postings()
-                .stream()
-                .filter(posting -> !posting.deleted())
-                .map(Posting::docId)
-                .toList();
+        List<Integer> live =
+                backend
+                        .call(Methods.GET_POSTINGS, new GetPostingsParams("body", term, 0, maxDoc, null))
+                        .postings()
+                        .stream()
+                        .filter(posting -> !posting.deleted())
+                        .map(Posting::docId)
+                        .toList();
         assertThat(live).isNotEmpty();
 
         SearchResults results = backend.search(term("body", term), maxDoc);
@@ -99,8 +101,8 @@ final class RuntimeSearches {
     static void refusesTheQueriesOf912(RealBackend backend) {
         List<SearchQuery> queries = List.of(
                 RealBackend.standard("alpha", QueryOperator.OR, List.of()),
-                RealBackend.moreLikeThis(OptionalInt.of(0), Optional.empty()),
-                RealBackend.moreLikeThis(OptionalInt.empty(), Optional.of("alpha")),
+                RealBackend.moreLikeThis(0, null),
+                RealBackend.moreLikeThis(null, "alpha"),
                 RealBackend.docValues(new DocValuesQuery(
                         "dv_num",
                         Optional.of(DocValuesNumber.LONG),
@@ -153,7 +155,7 @@ final class RuntimeSearches {
                 ErrorCode.INVALID_QUERY);
         assertThat(syntax).hasMessage("Invalid query: Cannot parse 'body:(': Encountered \"<EOF>\" at column 6.");
 
-        SearchQuery byDoc = RealBackend.moreLikeThis(OptionalInt.of(0), Optional.empty());
+        SearchQuery byDoc = RealBackend.moreLikeThis(0, null);
         assertThat(searchFilterAndExplain(backend, byDoc)).startsWith(0);
         SearchResults results = backend.search(byDoc, 10);
         assertThat(results.query())
@@ -161,7 +163,7 @@ final class RuntimeSearches {
         assertThat(results.moreLikeThisTerms().orElseThrow().getFirst())
                 .extracting(LikeTerm::term, LikeTerm::tf, LikeTerm::docFreq)
                 .containsExactly("gamma", 2, 1);
-        SearchQuery byText = RealBackend.moreLikeThis(OptionalInt.empty(), Optional.of("gamma"));
+        SearchQuery byText = RealBackend.moreLikeThis(null, "gamma");
         assertThat(searchFilterAndExplain(backend, byText)).containsExactly(0);
         assertThat(backend.search(byText, 10).moreLikeThisTerms().orElseThrow())
                 .extracting(LikeTerm::term)
@@ -170,32 +172,39 @@ final class RuntimeSearches {
                 .isEmpty();
 
         // Queries that the 400 of document 4, which 4.x lacks, doesn't change.
-        Optional<DocValuesNumber> longs = Optional.of(DocValuesNumber.LONG);
-        assertThat(searchFilterAndExplain(
-                        backend,
-                        docValues("dv_num", longs, Optional.of(List.of(text("5"), text("6"))), Optional.empty())))
+        DocValuesNumber longs = DocValuesNumber.LONG;
+        assertThat(searchFilterAndExplain(backend, docValues("dv_num", longs, List.of(text("5"), text("6")), null)))
                 .containsExactlyInAnyOrder(4, 5);
         assertThat(searchFilterAndExplain(
                         backend,
                         docValues(
                                 "dv_num",
-                                Optional.of(DocValuesNumber.SORTABLE_DOUBLE),
-                                Optional.empty(),
-                                Optional.of(new DocValuesRange(
-                                        Optional.of(text("0")), Optional.of(text("1")), true, true)))))
+                                DocValuesNumber.SORTABLE_DOUBLE,
+                                null,
+                                new DocValuesRange(Optional.of(text("0")), Optional.of(text("1")), true, true))))
                 // As sortable bits, a small long is a tiny positive double.
+                .containsExactlyInAnyOrder(0, 3, 4, 5, 6);
+        // Raw doubles take the bits as they are: an open bound and an exclusive one.
+        assertThat(searchFilterAndExplain(
+                        backend,
+                        docValues(
+                                "dv_num",
+                                DocValuesNumber.DOUBLE,
+                                null,
+                                new DocValuesRange(Optional.empty(), Optional.of(text("1")), true, false))))
                 .containsExactlyInAnyOrder(0, 3, 4, 5, 6);
         assertThat(searchFilterAndExplain(
                         backend,
                         docValues(
-                                "dv_sorted_num",
-                                longs,
-                                Optional.of(List.of(text("-5"), text("-7"))),
-                                Optional.empty())))
-                .containsExactlyInAnyOrder(4, 6);
+                                "dv_num",
+                                DocValuesNumber.DOUBLE,
+                                null,
+                                new DocValuesRange(Optional.of(text("0")), Optional.empty(), false, true))))
+                .containsExactlyInAnyOrder(0, 3, 4, 5, 6);
         assertThat(searchFilterAndExplain(
-                        backend,
-                        docValues("dv_sorted", Optional.empty(), Optional.of(List.of(text("s2"))), Optional.empty())))
+                        backend, docValues("dv_sorted_num", longs, List.of(text("-5"), text("-7")), null)))
+                .containsExactlyInAnyOrder(4, 6);
+        assertThat(searchFilterAndExplain(backend, docValues("dv_sorted", null, List.of(text("s2")), null)))
                 .containsExactly(4);
         assertThat(searchFilterAndExplain(
                         backend,
@@ -211,17 +220,27 @@ final class RuntimeSearches {
                         backend,
                         docValues(
                                 "dv_bin",
-                                Optional.empty(),
-                                Optional.empty(),
-                                Optional.of(new DocValuesRange(
+                                null,
+                                null,
+                                new DocValuesRange(
                                         Optional.of(new BytesValue("6235", true)),
                                         Optional.of(text("b7")),
                                         true,
-                                        false)))))
+                                        false))))
                 .containsExactlyInAnyOrder(4, 5);
+        // Only a lower bound.
+        assertThat(searchFilterAndExplain(
+                        backend,
+                        docValues(
+                                "dv_bin",
+                                null,
+                                null,
+                                new DocValuesRange(
+                                        Optional.of(new BytesValue("6235", true)), Optional.empty(), true, true))))
+                .containsExactlyInAnyOrder(4, 5, 6);
         RpcException binary = backend.fails(
                 Methods.START_SEARCH,
-                params(docValues("dv_bin", longs, Optional.of(List.of(text("1"))), Optional.empty()), 10),
+                params(docValues("dv_bin", longs, List.of(text("1")), null), 10),
                 ErrorCode.INVALID_PARAMS);
         assertThat(binary)
                 .hasMessage("Invalid params: the field 'dv_bin' has BINARY doc values, which hold bytes, not numbers");
@@ -241,10 +260,15 @@ final class RuntimeSearches {
 
     private static SearchQuery docValues(
             String field,
-            Optional<DocValuesNumber> number,
-            Optional<List<BytesValue>> values,
-            Optional<DocValuesRange> range) {
-        return RealBackend.docValues(new DocValuesQuery(field, number, values, range, Optional.empty()));
+            @Nullable DocValuesNumber number,
+            @Nullable List<BytesValue> values,
+            @Nullable DocValuesRange range) {
+        return RealBackend.docValues(new DocValuesQuery(
+                field,
+                Optional.ofNullable(number),
+                Optional.ofNullable(values),
+                Optional.ofNullable(range),
+                Optional.empty()));
     }
 
     private static BytesValue text(String text) {
@@ -277,28 +301,18 @@ final class RuntimeSearches {
                 List.of());
         assertThat(parsed(backend, "\"alpha document gamma\"", shingles)).isEqualTo("body:alpha_document");
         WordSet documents = new WordSet(Optional.of(List.of("documents")), Optional.empty());
-        assertThat(parsed(backend, "documents", preset(ENGLISH, Optional.empty(), Optional.empty(), Optional.empty())))
+        assertThat(parsed(backend, "documents", preset(ENGLISH, null, null, null)))
                 .isEqualTo("body:document");
-        assertThat(parsed(
-                        backend,
-                        "documents",
-                        preset(ENGLISH, Optional.of(documents), Optional.empty(), Optional.empty())))
+        assertThat(parsed(backend, "documents", preset(ENGLISH, documents, null, null)))
                 .isEqualTo("body:documents");
         StemDictionary gamma = new StemDictionary(Optional.of(Map.of("alpha", "gamma")), Optional.empty());
-        assertThat(parsed(
-                        backend,
-                        "alpha",
-                        preset(
-                                "org.apache.lucene.analysis.nl.DutchAnalyzer",
-                                Optional.empty(),
-                                Optional.of(gamma),
-                                Optional.empty())))
+        assertThat(parsed(backend, "alpha", preset("org.apache.lucene.analysis.nl.DutchAnalyzer", null, gamma, null)))
                 .isEqualTo("body:gamma");
         Analyzer collation = preset(
                 "org.apache.lucene.collation.CollationKeyAnalyzer",
-                Optional.empty(),
-                Optional.empty(),
-                Optional.of(new Collation("de", Optional.of(CollationStrength.PRIMARY), Optional.empty())));
+                null,
+                null,
+                new Collation("de", Optional.of(CollationStrength.PRIMARY), Optional.empty()));
         assertThat(parsed(backend, "Alpha", collation)).isEqualTo(parsed(backend, "alpha", collation));
 
         RpcException romanian = backend.fails(
@@ -356,11 +370,7 @@ final class RuntimeSearches {
                 params(
                         classic(
                                 "alpha",
-                                preset(
-                                        "org.apache.lucene.analysis.core.KeywordAnalyzer",
-                                        Optional.of(documents),
-                                        Optional.empty(),
-                                        Optional.empty())),
+                                preset("org.apache.lucene.analysis.core.KeywordAnalyzer", documents, null, null)),
                         10),
                 ErrorCode.INVALID_ANALYZER);
         assertThat(exclusions).hasMessage("Invalid analyzer: KeywordAnalyzer takes no stem exclusions");
@@ -398,18 +408,18 @@ final class RuntimeSearches {
     /** A preset with these stem exclusions, stem overrides and collation, and no other options. */
     private static Analyzer preset(
             String className,
-            Optional<WordSet> stemExclusion,
-            Optional<StemDictionary> stemOverride,
-            Optional<Collation> collation) {
+            @Nullable WordSet stemExclusion,
+            @Nullable StemDictionary stemOverride,
+            @Nullable Collation collation) {
         return analyzer(new PresetAnalyzer(
                 className,
                 Optional.empty(),
-                stemExclusion,
+                Optional.ofNullable(stemExclusion),
                 OptionalInt.empty(),
-                stemOverride,
+                Optional.ofNullable(stemOverride),
                 Optional.empty(),
                 Optional.empty(),
-                collation,
+                Optional.ofNullable(collation),
                 Optional.empty()));
     }
 
@@ -419,14 +429,12 @@ final class RuntimeSearches {
      */
     static void searchesWithTheAnalyzersOfAnOldRuntime(RealBackend backend, String lucene, Path tmp) throws Exception {
         Path file = Files.writeString(tmp.resolve("stopwords.txt"), "\n  alpha  \n");
-        assertThat(backend.search(classic("alpha document", preset(file, Optional.empty())), 10)
+        assertThat(backend.search(classic("alpha document", preset(file, null)), 10)
                         .query())
                 .isEqualTo("body:document");
         Path none = tmp.resolve("none.txt");
         RpcException unreadable = backend.fails(
-                Methods.START_SEARCH,
-                params(classic("alpha", preset(none, Optional.empty())), 10),
-                ErrorCode.INVALID_ANALYZER);
+                Methods.START_SEARCH, params(classic("alpha", preset(none, null)), 10), ErrorCode.INVALID_ANALYZER);
         assertThat(unreadable).hasMessage("Invalid analyzer: stop words: no file " + none);
         String notSupported = "Not supported with Lucene " + lucene + ": ";
         RpcException exclusions = backend.fails(
@@ -434,9 +442,7 @@ final class RuntimeSearches {
                 params(
                         classic(
                                 "alpha",
-                                preset(
-                                        file,
-                                        Optional.of(new WordSet(Optional.of(List.of("documents")), Optional.empty())))),
+                                preset(file, new WordSet(Optional.of(List.of("documents")), Optional.empty()))),
                         10),
                 ErrorCode.NOT_SUPPORTED);
         assertThat(exclusions)
@@ -480,13 +486,13 @@ final class RuntimeSearches {
     }
 
     /** {@code StandardAnalyzer} with the stop words of {@code file}, and these stem exclusions. */
-    private static Analyzer preset(Path file, Optional<WordSet> stemExclusion) {
+    private static Analyzer preset(Path file, @Nullable WordSet stemExclusion) {
         return new Analyzer(
                 Optional.empty(),
                 Optional.of(new PresetAnalyzer(
                         "org.apache.lucene.analysis.standard.StandardAnalyzer",
                         Optional.of(new WordSet(Optional.empty(), Optional.of(file.toString()))),
-                        stemExclusion,
+                        Optional.ofNullable(stemExclusion),
                         OptionalInt.empty(),
                         Optional.empty(),
                         Optional.empty(),

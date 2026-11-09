@@ -20,6 +20,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The open-index prompt: a one-line path editor with directory completion and the recent paths,
@@ -43,13 +44,13 @@ public final class PathPrompt {
     public record Cancel() implements Event {}
 
     private final LineInput input;
-    private final Optional<Path> home;
+    private final @Nullable Path home;
 
     /** The drop-down of the directories that the last Tab found, if it found more than one; else null. */
-    private CompletionList list;
+    private @Nullable CompletionList list;
 
     /** Why the last open failed, or null. */
-    private String error;
+    private @Nullable String error;
 
     /** Set while the path is being opened. */
     private boolean busy;
@@ -61,7 +62,7 @@ public final class PathPrompt {
      * While Up and Down step through {@link #recent}: the input before the first Up, and the
      * position among the recent paths other than that input. Null otherwise.
      */
-    private Browsing browsing;
+    private @Nullable Browsing browsing;
 
     /** The {@code Directory} to open with; Ctrl+D cycles it. */
     private DirectoryImpl directory = DirectoryImpl.FS;
@@ -72,7 +73,7 @@ public final class PathPrompt {
     private record Browsing(String typed, int position) {}
 
     /** {@code home} is the directory that {@code ~} stands for. */
-    public PathPrompt(String input, Optional<Path> home) {
+    public PathPrompt(String input, @Nullable Path home) {
         this.input = new LineInput(input);
         this.home = home;
     }
@@ -181,10 +182,14 @@ public final class PathPrompt {
 
     /** What a key does while the list is open; empty if the input handles it. */
     private Optional<Event> handleListKey(KeyEvent key) {
+        CompletionList open = list;
+        if (open == null) {
+            return Optional.empty();
+        }
         switch (key.code()) {
-            case UP, DOWN, PAGE_UP, PAGE_DOWN -> list.move(key);
+            case UP, DOWN, PAGE_UP, PAGE_DOWN -> open.move(key);
             case ENTER, TAB -> {
-                input.set(list.chosen());
+                input.set(open.chosen());
                 list = null;
                 error = null;
                 browsing = null;
@@ -231,10 +236,10 @@ public final class PathPrompt {
      */
     private void browse(boolean older) {
         String typed = browsing == null ? input.text() : browsing.typed();
-        Integer position = browsing == null ? null : browsing.position();
+        @Nullable Integer position = browsing == null ? null : browsing.position();
         List<String> entries =
                 recent.stream().filter(path -> !path.equals(typed)).toList();
-        Integer next = next(older, position, entries.size());
+        @Nullable Integer next = next(older, position, entries.size());
         if (position != null || next != null) {
             String text = next == null ? typed : entries.get(next);
             if (!text.equals(input.text())) {
@@ -247,7 +252,7 @@ public final class PathPrompt {
     }
 
     /** The position after {@code position} in {@code size} entries, or before it; null for the input. */
-    private static Integer next(boolean older, Integer position, int size) {
+    private static @Nullable Integer next(boolean older, @Nullable Integer position, int size) {
         if (!older) {
             return position == null || position == 0 ? null : position - 1;
         }

@@ -5,6 +5,7 @@ import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.IndexReadException;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.support.Failures;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -101,9 +102,7 @@ final class Lucene9Commits implements Commits {
             }
             Map<String, CommitFile> files = new TreeMap<>();
             for (String file : infos.files(true)) {
-                files.put(
-                        file,
-                        new CommitFile(file, Optional.ofNullable(segmentOfFile.get(file)), size(directory, file)));
+                files.put(file, new CommitFile(file, segmentOfFile.get(file), Optionals.orNull(size(directory, file))));
             }
             List<Segment> segments = new ArrayList<>();
             int docBase = 0;
@@ -173,25 +172,25 @@ final class Lucene9Commits implements Commits {
                 info.maxDoc(),
                 docBase,
                 segment.getDelCount(),
-                generation(segment.getDelGen()),
+                Optionals.orNull(generation(segment.getDelGen())),
                 version(segment),
                 info.getUseCompoundFile(),
-                size,
+                Optionals.orNull(size),
                 new TreeMap<>(info.getDiagnostics()),
                 new TreeMap<>(info.getAttributes()),
-                Optional.of(StringHelper.idToString(info.getId())),
-                Optional.of(codec.getName()),
-                Optional.of(formats(codec)),
+                StringHelper.idToString(info.getId()),
+                codec.getName(),
+                formats(codec),
                 fieldFormats,
-                fieldInfosError,
-                generation(segment.getFieldInfosGen()),
-                generation(segment.getDocValuesGen()),
+                fieldInfosError.orElse(null),
+                Optionals.orNull(generation(segment.getFieldInfosGen())),
+                Optionals.orNull(generation(segment.getDocValuesGen())),
                 // Since 7.4.
                 segment.getSoftDelCount(),
                 // Since 7.0: the oldest version of the segments it was merged from.
-                Optional.ofNullable(info.getMinVersion()).map(Object::toString),
+                Optional.ofNullable(info.getMinVersion()).map(Object::toString).orElse(null),
                 // Since 6.2.
-                Optional.ofNullable(info.getIndexSort()).map(Object::toString),
+                Optional.ofNullable(info.getIndexSort()).map(Object::toString).orElse(null),
                 // Since 9.9; false for a segment written before, and on a Lucene before 9.9 (ADR 0091).
                 Lucene9Api.HAS_BLOCKS && info.getHasBlocks());
     }
@@ -221,20 +220,23 @@ final class Lucene9Commits implements Commits {
             formats.add(new FieldFormats(
                     field.name,
                     format(
-                            field,
-                            field.getIndexOptions() != IndexOptions.NONE,
-                            PerFieldPostingsFormat.PER_FIELD_FORMAT_KEY,
-                            codec.postingsFormat()),
+                                    field,
+                                    field.getIndexOptions() != IndexOptions.NONE,
+                                    PerFieldPostingsFormat.PER_FIELD_FORMAT_KEY,
+                                    codec.postingsFormat())
+                            .orElse(null),
                     format(
-                            field,
-                            field.getDocValuesType() != DocValuesType.NONE,
-                            PerFieldDocValuesFormat.PER_FIELD_FORMAT_KEY,
-                            codec.docValuesFormat()),
+                                    field,
+                                    field.getDocValuesType() != DocValuesType.NONE,
+                                    PerFieldDocValuesFormat.PER_FIELD_FORMAT_KEY,
+                                    codec.docValuesFormat())
+                            .orElse(null),
                     format(
-                            field,
-                            field.getVectorDimension() != 0,
-                            PerFieldKnnVectorsFormat.PER_FIELD_FORMAT_KEY,
-                            codec.knnVectorsFormat())));
+                                    field,
+                                    field.getVectorDimension() != 0,
+                                    PerFieldKnnVectorsFormat.PER_FIELD_FORMAT_KEY,
+                                    codec.knnVectorsFormat())
+                            .orElse(null)));
         }
         formats.sort(Comparator.comparing(FieldFormats::field));
         return List.copyOf(formats);
@@ -256,10 +258,8 @@ final class Lucene9Commits implements Commits {
                 formatName(codec.storedFieldsFormat()),
                 formatName(codec.termVectorsFormat()),
                 formatName(codec.normsFormat()),
-                Optional.of(formatName(codec.pointsFormat())),
-                codec.knnVectorsFormat() == KnnVectorsFormat.EMPTY
-                        ? Optional.empty()
-                        : Optional.of(formatName(codec.knnVectorsFormat())),
+                formatName(codec.pointsFormat()),
+                codec.knnVectorsFormat() == KnnVectorsFormat.EMPTY ? null : formatName(codec.knnVectorsFormat()),
                 formatName(codec.fieldInfosFormat()),
                 formatName(codec.segmentInfoFormat()),
                 formatName(codec.liveDocsFormat()),

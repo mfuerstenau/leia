@@ -8,6 +8,24 @@ Goal: the quality gate passes on new code. The fix of 2026-10-18 (`88ea82a`, `8b
 
 The lane is done: on new code the gate passes, and the accepted rules are whitelisted in the repository (ADR 0088).
 
+## Optional only as a return type
+
+Goal: every module follows the rule in `AGENTS.md`, "Code conventions". `Optional*` is not used as a method parameter or field type, record components included. Optional inputs are overloads or JSpecify's `@Nullable`, with the exception of `leia-protocol`'s records (hard rule 3). `leia-client`, `leia-app`, `leia-tui`, `leia-mcp`, `leia-runtime`, `leia-server`, `leia-protocol`, `leia-core` and the runtime adapters `leia-lucene3`, `leia-lucene5`, `leia-lucene7`, `leia-lucene9` and `leia-lucene10` are done (ADR 0127). `runtime.support.Optionals` (`orNull`, `optionalInt`, `optionalLong`, `optionalDouble`) converts at the boundaries. `leia-client` set the pattern:
+- records keep their components, now `@Nullable`, and their accessors become nullable;
+- `OptionalInt` and `OptionalLong` become `Integer` and `Long`;
+- `Optional` stays as a return type and for locals;
+- JSpecify is a `compileOnlyApi` dependency.
+
+Each module is one task, its callers included. The counts are from a regex scan of 2026-11-09 (parameters, fields and components, main + tests) and are approximate. Watch the AssertJ pitfalls: `isEmpty()` and `contains(x)` still compile on a `String` or `List` but mean something else; use `isNull()` and `isEqualTo(x)`.
+
+The lane is done (ADR 0127).
+
+## Null checking with Error Prone and NullAway
+
+Goal: `@Nullable` (ADR 0127) is checked by the build, not only documentation. NullAway runs in the build (Error Prone, from `leia.java-conventions`) and checks the `@NullMarked` packages of every module, `leia-protocol` and the old runtimes included.
+
+The lane is done (ADR 0127, ADR 0128).
+
 ## Lucene 2 to 10 (ADR 0044)
 
 Goal: every index from Lucene 2.1 to 10 opens in one leia, each read by a relocated Lucene that can read it, with the features of that Lucene and the rest switched off. The spike did Lucene 2.x and 3.x on Lucene 3.6.2 (`leia-lucene3`). Each Lucene major reads its own indexes and those of the major before it, so four runtimes besides Lucene 10 are needed; all four are done.

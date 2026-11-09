@@ -61,7 +61,7 @@ class CheckIndexHandlersTest {
         Path dir = writeIndex(tmp.resolve("index"));
         currentIndex.replace(TestIndexes.open(dir));
 
-        long jobId = start.handle(new StartCheckIndexParams(OptionalInt.of(2))).jobId();
+        long jobId = start.handle(new StartCheckIndexParams(2)).jobId();
         List<String> lines = new ArrayList<>();
         CheckIndexResult result = awaitDone(jobId, lines);
 
@@ -125,7 +125,7 @@ class CheckIndexHandlersTest {
     @Test
     void cancellingStopsTheCheck() throws Exception {
         currentIndex.replace(TestIndexes.open(writeIndex(tmp.resolve("index"))));
-        long jobId = start.handle(new StartCheckIndexParams(OptionalInt.of(3))).jobId();
+        long jobId = start.handle(new StartCheckIndexParams(3)).jobId();
 
         jobs.cancel(jobId);
 
@@ -142,7 +142,7 @@ class CheckIndexHandlersTest {
     void rejectsALevelOutOfRange(int level) throws Exception {
         currentIndex.replace(TestIndexes.open(writeIndex(tmp.resolve("index"))));
 
-        assertFails(() -> start.handle(new StartCheckIndexParams(OptionalInt.of(level))), ErrorCode.INVALID_PARAMS);
+        assertFails(() -> start.handle(new StartCheckIndexParams(level)), ErrorCode.INVALID_PARAMS);
     }
 
     private static StartCheckIndexParams only(CheckTarget... targets) {

@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -22,8 +21,7 @@ class ThemeFileTest {
 
     @Test
     void aMissingFileIsNoTheme() {
-        assertThat(new ThemeFile(Optional.of(dir.resolve("theme"))).load(THEMES))
-                .isEmpty();
+        assertThat(new ThemeFile(dir.resolve("theme")).load(THEMES)).isEmpty();
         assertThat(ThemeFile.none().load(THEMES)).isEmpty();
     }
 
@@ -32,13 +30,13 @@ class ThemeFileTest {
         Path file = dir.resolve("theme");
         Files.writeString(file, "solarized\n");
 
-        assertThat(new ThemeFile(Optional.of(file)).load(THEMES)).isEmpty();
+        assertThat(new ThemeFile(file).load(THEMES)).isEmpty();
     }
 
     @Test
     void savesAndLoadsTheTheme() throws Exception {
         Path file = dir.resolve("leia").resolve("theme");
-        ThemeFile themeFile = new ThemeFile(Optional.of(file));
+        ThemeFile themeFile = new ThemeFile(file);
 
         themeFile.save(NORD);
 
@@ -55,7 +53,7 @@ class ThemeFileTest {
         Files.createDirectories(system.getParent());
         Files.writeString(system, "light\n");
         Path user = dir.resolve("home/leia/theme");
-        ThemeFile themeFile = new ThemeFile(Optional.of(system), Optional.of(user));
+        ThemeFile themeFile = new ThemeFile(system, user);
 
         assertThat(themeFile.load(THEMES)).hasValue(LIGHT);
         themeFile.save(NORD);
@@ -68,7 +66,7 @@ class ThemeFileTest {
     void aFailedWriteIsIgnored() throws Exception {
         Path notADir = dir.resolve("file");
         Files.writeString(notADir, "");
-        ThemeFile themeFile = new ThemeFile(Optional.of(notADir.resolve("theme")));
+        ThemeFile themeFile = new ThemeFile(notADir.resolve("theme"));
 
         themeFile.save(LIGHT);
 
@@ -79,15 +77,15 @@ class ThemeFileTest {
     @Test
     void resolvesTheOptionThenNoColorThenTheFileThenDark() {
         Path file = dir.resolve("theme");
-        ThemeFile themeFile = new ThemeFile(Optional.of(file));
+        ThemeFile themeFile = new ThemeFile(file);
 
-        assertThat(themeFile.resolve(Optional.empty(), null, THEMES)).isEqualTo(DARK);
+        assertThat(themeFile.resolve(null, null, THEMES)).isEqualTo(DARK);
         themeFile.save(LIGHT);
-        assertThat(themeFile.resolve(Optional.empty(), null, THEMES)).isEqualTo(LIGHT);
+        assertThat(themeFile.resolve(null, null, THEMES)).isEqualTo(LIGHT);
         // NO_COLOR counts only when it is set and not empty (no-color.org).
-        assertThat(themeFile.resolve(Optional.empty(), "", THEMES)).isEqualTo(LIGHT);
-        assertThat(themeFile.resolve(Optional.empty(), "1", THEMES)).isEqualTo(MONO);
-        assertThat(themeFile.resolve(Optional.of(NORD), "1", THEMES)).isEqualTo(NORD);
+        assertThat(themeFile.resolve(null, "", THEMES)).isEqualTo(LIGHT);
+        assertThat(themeFile.resolve(null, "1", THEMES)).isEqualTo(MONO);
+        assertThat(themeFile.resolve(NORD, "1", THEMES)).isEqualTo(NORD);
     }
 
     @Test
@@ -96,16 +94,16 @@ class ThemeFileTest {
         try (var nord = Themes.class.getResourceAsStream("nord.theme")) {
             Files.copy(nord, themesDir.resolve("solar.theme"));
         }
-        Themes themes = THEMES.withUserDir(Optional.of(themesDir));
+        Themes themes = THEMES.withUserDir(themesDir);
         Theme solar = themes.find("solar").orElseThrow();
-        ThemeFile themeFile = new ThemeFile(Optional.of(dir.resolve("theme")));
+        ThemeFile themeFile = new ThemeFile(dir.resolve("theme"));
 
         themeFile.save(solar);
 
         assertThat(themeFile.load(themes)).hasValue(solar);
         // Without the user's folder, the theme it names is gone, and dark is the one to start with.
         assertThat(themeFile.load(THEMES)).isEmpty();
-        assertThat(themeFile.resolve(Optional.empty(), null, THEMES)).isEqualTo(DARK);
+        assertThat(themeFile.resolve(null, null, THEMES)).isEqualTo(DARK);
     }
 
     @Test
@@ -118,9 +116,9 @@ class ThemeFileTest {
         Files.writeString(
                 themesDir.resolve("mono.theme"),
                 mono.replace("logo          = gazelle-mono", "logo          = gazelle"));
-        Themes themes = THEMES.withUserDir(Optional.of(themesDir));
+        Themes themes = THEMES.withUserDir(themesDir);
 
-        Theme chosen = ThemeFile.none().resolve(Optional.empty(), "1", themes);
+        Theme chosen = ThemeFile.none().resolve(null, "1", themes);
 
         assertThat(chosen.id()).isEqualTo("mono");
         assertThat(chosen.palette().logo()).isEqualTo(DARK.palette().logo());

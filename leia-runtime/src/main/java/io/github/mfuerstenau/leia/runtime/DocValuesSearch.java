@@ -1,7 +1,7 @@
 package io.github.mfuerstenau.leia.runtime;
 
 import java.util.List;
-import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Queries over the doc values of one field, as leia-core's {@code DocValuesQueries} builds them on
@@ -77,7 +77,7 @@ public interface DocValuesSearch {
         }
 
         /** Values from {@code lower} to {@code upper}; an absent bound is open. */
-        record Range<T>(Optional<T> lower, Optional<T> upper, boolean includeLower, boolean includeUpper)
+        record Range<T>(@Nullable T lower, @Nullable T upper, boolean includeLower, boolean includeUpper)
                 implements Match<T> {}
     }
 }

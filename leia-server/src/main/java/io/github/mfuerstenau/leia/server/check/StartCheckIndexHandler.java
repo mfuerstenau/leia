@@ -9,6 +9,7 @@ import io.github.mfuerstenau.leia.protocol.check.StartCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import io.github.mfuerstenau.leia.runtime.Check;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
@@ -24,7 +25,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalInt;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@code startCheckIndex}: checks the indexes of the {@link CurrentIndex}, with or without a reader,
@@ -65,8 +66,8 @@ public final class StartCheckIndexHandler implements MethodHandler<StartCheckInd
                     + ", not " + params.threads().getAsInt());
         }
         List<IndexDirectories.IndexDirectory> all = directories.all();
-        List<Chosen> chosen = choose(all, params.only());
-        Check.Options options = new Check.Options(OptionalInt.of(level), params.threads(), Optional.empty());
+        List<Chosen> chosen = choose(all, params.only().orElse(null));
+        Check.Options options = new Check.Options(level, Optionals.orNull(params.threads()), null);
         // The current index owns it (ADR 0088)
         @SuppressWarnings("java:S2095")
         Path path = currentIndex.opened().path();
@@ -84,23 +85,24 @@ public final class StartCheckIndexHandler implements MethodHandler<StartCheckInd
         return new RpcException(ErrorCode.INVALID_PARAMS, "Invalid params: " + message);
     }
 
-    /** An index directory to check, and the segments of it to check; empty for all. */
-    private record Chosen(IndexDirectories.IndexDirectory dir, Optional<List<String>> segments) {}
+    /** An index directory to check, and the segments of it to check; {@code null} for all. */
+    private record Chosen(
+            IndexDirectories.IndexDirectory dir, @Nullable List<String> segments) {}
 
     /**
-     * The directories of {@code only}, or all of them if it is absent, in the order of {@code all}
+     * The directories of {@code only}, or all of them if it is {@code null}, in the order of {@code all}
      * (ADR 0093).
      *
      * @throws RpcException {@code INVALID_PARAMS} for a path that isn't one of {@code all} or is named
      *     twice, an empty list of segments, or a segment named twice
      */
-    private static List<Chosen> choose(List<IndexDirectories.IndexDirectory> all, Optional<List<CheckTarget>> only)
+    private static List<Chosen> choose(List<IndexDirectories.IndexDirectory> all, @Nullable List<CheckTarget> only)
             throws RpcException {
-        if (only.isEmpty()) {
-            return all.stream().map(dir -> new Chosen(dir, Optional.empty())).toList();
+        if (only == null) {
+            return all.stream().map(dir -> new Chosen(dir, null)).toList();
         }
         Map<Path, CheckTarget> requested = new HashMap<>();
-        for (CheckTarget target : only.get()) {
+        for (CheckTarget target : only) {
             Path path = Path.of(target.path()).normalize();
             if (all.stream().noneMatch(dir -> dir.path().normalize().equals(path))) {
                 throw invalid("no index " + target.path() + " in the open path");
@@ -122,7 +124,7 @@ public final class StartCheckIndexHandler implements MethodHandler<StartCheckInd
         for (IndexDirectories.IndexDirectory dir : all) {
             CheckTarget target = requested.get(dir.path().normalize());
             if (target != null) {
-                chosen.add(new Chosen(dir, target.segments()));
+                chosen.add(new Chosen(dir, target.segments().orElse(null)));
             }
         }
         return List.copyOf(chosen);
@@ -139,7 +141,7 @@ public final class StartCheckIndexHandler implements MethodHandler<StartCheckInd
         List<io.github.mfuerstenau.leia.protocol.check.IndexCheck> checks = new ArrayList<>();
         for (int i = 0; i < chosen.size(); i++) {
             IndexDirectories.IndexDirectory target = chosen.get(i).dir();
-            Optional<List<String>> segments = chosen.get(i).segments();
+            Optional<List<String>> segments = Optional.ofNullable(chosen.get(i).segments());
             log.add(
                     chosen.size() == 1
                             ? "Checking " + target.path()
@@ -152,8 +154,8 @@ public final class StartCheckIndexHandler implements MethodHandler<StartCheckInd
                             boolean threads = check.map(Check::hasThreads).orElse(false);
                             log.add("Checking with Lucene " + runtime.luceneVersion()
                                     + (levels ? "" : ", which has no levels")
-                                    + (threads && options.threads().isPresent()
-                                            ? ", " + options.threads().getAsInt() + " threads"
+                                    + (threads && options.threads() != null
+                                            ? ", " + options.threads() + " threads"
                                             : "")
                                     + segments.map(names -> ", segments " + String.join(" ", names))
                                             .orElse(""));
@@ -161,7 +163,7 @@ public final class StartCheckIndexHandler implements MethodHandler<StartCheckInd
                                     runtime,
                                     target.path(),
                                     target.kind(),
-                                    new Check.Options(options.level(), options.threads(), segments),
+                                    new Check.Options(options.level(), options.threads(), segments.orElse(null)),
                                     target.skipped(),
                                     log::add,
                                     progress);

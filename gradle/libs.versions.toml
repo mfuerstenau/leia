@@ -35,6 +35,10 @@ assertj = "3.27.7"
 palantirJavaFormat = "2.102.0"
 spotless = "8.10.3"
 shadow = "9.6.1"
+# Error Prone runs NullAway alone, from leia.java-conventions (ADR 0127, the NullAway lane)
+errorprone = "2.52.0"
+nullaway = "0.14.3"
+errorpronePlugin = "5.2.0"
 # Pinned: an upgrade is a change of its own (ADR 0034)
 tamboui = "0.5.0"
 
@@ -85,6 +89,8 @@ dagger = { module = "com.google.dagger:dagger", version.ref = "dagger" }
 dagger-compiler = { module = "com.google.dagger:dagger-compiler", version.ref = "dagger" }
 roaringbitmap = { module = "org.roaringbitmap:RoaringBitmap", version.ref = "roaringbitmap" }
 jspecify = { module = "org.jspecify:jspecify", version.ref = "jspecify" }
+errorprone-core = { module = "com.google.errorprone:error_prone_core", version.ref = "errorprone" }
+nullaway = { module = "com.uber.nullaway:nullaway", version.ref = "nullaway" }
 jackson-bom = { module = "tools.jackson:jackson-bom", version.ref = "jackson" }
 jackson-databind = { module = "tools.jackson.core:jackson-databind" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
@@ -100,3 +106,4 @@ tamboui-panama-backend = { module = "dev.tamboui:tamboui-panama-backend" }
 # Gradle plugins used as libraries by build-logic
 spotless-gradle-plugin = { module = "com.diffplug.spotless:spotless-plugin-gradle", version.ref = "spotless" }
 shadow-gradle-plugin = { module = "com.gradleup.shadow:shadow-gradle-plugin", version.ref = "shadow" }
+errorprone-gradle-plugin = { module = "net.ltgt.gradle:gradle-errorprone-plugin", version.ref = "errorpronePlugin" }

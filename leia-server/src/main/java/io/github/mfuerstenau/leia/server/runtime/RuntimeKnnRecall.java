@@ -10,6 +10,7 @@ import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
 import io.github.mfuerstenau.leia.runtime.Knn;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Search;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import io.github.mfuerstenau.leia.server.job.ScanProgress;
@@ -20,9 +21,8 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.OptionalDouble;
-import java.util.OptionalInt;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The recall check of approximate KNN search (ADR 0086): for each target, the approximate top k
@@ -33,12 +33,12 @@ import java.util.OptionalInt;
 public final class RuntimeKnnRecall {
 
     /** No stored fields are read for the hits. */
-    private static final Optional<List<String>> NO_FIELDS = Optional.of(List.of());
+    private static final List<String> NO_FIELDS = List.of();
 
     private RuntimeKnnRecall() {}
 
     /** A target: a document's vector, or the query's own. */
-    private record Target(OptionalInt docId, RuntimeIndex.Vector vector) {}
+    private record Target(@Nullable Integer docId, RuntimeIndex.Vector vector) {}
 
     /** One target's outcome. */
     private record Checked(KnnRecallTarget target, List<Double> drifts) {}
@@ -60,9 +60,11 @@ public final class RuntimeKnnRecall {
             targets = null;
         } else {
             KnnChecks.check(query, format.dimension());
-            targets = List.of(new Target(query.docId(), RuntimeResults.knnTarget(open, knn, query, format)));
+            targets = List.of(
+                    new Target(Optionals.orNull(query.docId()), RuntimeResults.knnTarget(open, knn, query, format)));
         }
-        Optional<Search.ParsedQuery> filter = RuntimeResults.knnFilter(open, search, query);
+        Search.ParsedQuery filter =
+                RuntimeResults.knnFilter(open, search, query).orElse(null);
         int k = query.k().getAsInt();
         String description = "recall check of field " + field + ", k " + k
                 + params.sample().stream()
@@ -108,7 +110,7 @@ public final class RuntimeKnnRecall {
     private static List<Target> sampled(Knn knn, String field, int n) throws IOException {
         List<Target> targets = new ArrayList<>();
         for (int docId : knn.sample(field, n)) {
-            knn.vector(docId, field).ifPresent(vector -> targets.add(new Target(OptionalInt.of(docId), vector)));
+            knn.vector(docId, field).ifPresent(vector -> targets.add(new Target(docId, vector)));
         }
         return targets;
     }
@@ -120,7 +122,7 @@ public final class RuntimeKnnRecall {
             Knn knn,
             String field,
             int k,
-            Optional<Search.ParsedQuery> filter,
+            Search.@Nullable ParsedQuery filter,
             List<Target> targets,
             boolean leaveOutTarget,
             ScanProgress progress)
@@ -167,13 +169,13 @@ public final class RuntimeKnnRecall {
             Knn knn,
             String field,
             int k,
-            Optional<Search.ParsedQuery> filter,
+            Search.@Nullable ParsedQuery filter,
             Target target,
             boolean leaveOutTarget,
             java.util.function.LongConsumer progress)
             throws IOException {
         int asked = leaveOutTarget ? k + 1 : k;
-        OptionalInt self = leaveOutTarget ? target.docId() : OptionalInt.empty();
+        Integer self = leaveOutTarget ? target.docId() : null;
         List<Search.Hit> approximate = top(
                 search.search(
                                 knn.approximate(field, target.vector(), asked, filter),
@@ -204,13 +206,14 @@ public final class RuntimeKnnRecall {
             }
         }
         double recall = exact.isEmpty() ? 1 : (double) (exact.size() - missed.size()) / exact.size();
-        return new Checked(new KnnRecallTarget(target.docId(), recall, List.copyOf(missed)), drifts);
+        return new Checked(
+                new KnnRecallTarget(Optionals.optionalInt(target.docId()), recall, List.copyOf(missed)), drifts);
     }
 
     /** The first {@code k} of {@code hits}, without the document {@code self}. */
-    private static List<Search.Hit> top(List<Search.Hit> hits, OptionalInt self, int k) {
+    private static List<Search.Hit> top(List<Search.Hit> hits, @Nullable Integer self, int k) {
         return hits.stream()
-                .filter(hit -> self.isEmpty() || hit.docId() != self.getAsInt())
+                .filter(hit -> self == null || hit.docId() != self)
                 .limit(k)
                 .toList();
     }

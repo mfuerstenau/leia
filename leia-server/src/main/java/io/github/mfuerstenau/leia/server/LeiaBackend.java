@@ -24,6 +24,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The server's methods, called in-process by the UI (ADR 0034): Every {@link #call} runs on one
@@ -66,43 +67,44 @@ public final class LeiaBackend implements AutoCloseable {
      * @throws RpcException {@code INVALID_JAR} if the jars can't be loaded, or bring a runtime that
      *     leia refuses (ADR 0044); nothing is started then
      */
-    public static LeiaBackend start(Optional<Path> runtimesDir, List<Path> jars) throws RpcException {
+    public static LeiaBackend start(@Nullable Path runtimesDir, List<Path> jars) throws RpcException {
         return start(runtimesDir, jars, List.of());
     }
 
     /**
-     * As {@link #start(Optional, List)}, and loads the runtimes of the Elasticsearch and OpenSearch
+     * As {@link #start(Path, List)}, and loads the runtimes of the Elasticsearch and OpenSearch
      * installations at {@code servers} after those of {@code runtimesDir}, whose adapters they use
      * (ADR 0090).
      *
      * @param servers each an installation's home or its {@code lib/}
      * @throws RpcException {@code INVALID_JAR} also if a server can't be loaded
      */
-    public static LeiaBackend start(Optional<Path> runtimesDir, List<Path> jars, List<Path> servers)
+    public static LeiaBackend start(@Nullable Path runtimesDir, List<Path> jars, List<Path> servers)
             throws RpcException {
-        return start(runtimesDir, jars, servers, Optional.empty());
+        return start(runtimesDir, jars, servers, null);
     }
 
     /**
-     * As {@link #start(Optional, List, List)}, and keeps the cache of the stored fields on disk below
+     * As {@link #start(Path, List, List)}, and keeps the cache of the stored fields on disk below
      * {@code cacheDir} too (ADR 0113).
      *
-     * @param cacheDir leia's cache folder, such as {@code ~/.cache/leia}; empty to cache in memory only
+     * @param cacheDir leia's cache folder, such as {@code ~/.cache/leia}; {@code null} to cache in memory only
      */
     public static LeiaBackend start(
-            Optional<Path> runtimesDir, List<Path> jars, List<Path> servers, Optional<Path> cacheDir)
+            @Nullable Path runtimesDir, List<Path> jars, List<Path> servers, @Nullable Path cacheDir)
             throws RpcException {
-        return startWith(runtimesDir.map(RuntimesDir::user).stream().toList(), jars, servers, cacheDir);
+        return startWith(
+                runtimesDir == null ? List.of() : List.of(RuntimesDir.user(runtimesDir)), jars, servers, cacheDir);
     }
 
     /**
-     * As {@link #start(Optional, List, List, Optional)}, with the runtimes looked up one at a time in
+     * As {@link #start(Path, List, List, Path)}, with the runtimes looked up one at a time in
      * {@code runtimesDirs}, in order (ADR 0122).
      *
      * @param runtimesDirs the runtimes folders, user's first; empty if leia has none
      */
     public static LeiaBackend startWith(
-            List<RuntimesDir> runtimesDirs, List<Path> jars, List<Path> servers, Optional<Path> cacheDir)
+            List<RuntimesDir> runtimesDirs, List<Path> jars, List<Path> servers, @Nullable Path cacheDir)
             throws RpcException {
         // Lucene 10's folder first: the jars link against its Lucene (ADR 0065).
         if (!runtimesDirs.isEmpty()) {

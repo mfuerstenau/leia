@@ -11,6 +11,7 @@ import io.github.mfuerstenau.leia.protocol.document.GetStoredValueResult;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import java.util.OptionalInt;
+import org.jspecify.annotations.Nullable;
 
 /** {@code get_field_value}: a stored value whole, a slice at a time (ADR 0100). */
 final class GetFieldValueTool implements McpTool<GetFieldValueTool.Arguments, GetFieldValueTool.Result> {
@@ -26,14 +27,17 @@ final class GetFieldValueTool implements McpTool<GetFieldValueTool.Arguments, Ge
 
             @Description("Which of the document's stored values in the field, from 0, as get_document lists them; 0"
                     + " by default")
-            OptionalInt index,
+            @Nullable
+            Integer index,
 
             @Description("Where the slice starts, in characters: the nextOffset of the last slice; 0 by default")
-            OptionalInt offset,
+            @Nullable
+            Integer offset,
 
             @Description(
                     "The most characters of the slice, up to " + MAX_LENGTH + "; " + DEFAULT_LENGTH + " by default")
-            OptionalInt length) {}
+            @Nullable
+            Integer length) {}
 
     record Result(
             String field,
@@ -49,8 +53,8 @@ final class GetFieldValueTool implements McpTool<GetFieldValueTool.Arguments, Ge
             @Description("The length of the whole value in characters")
             int totalLength,
 
-            @Description("Where the next slice starts; absent at the end of the value")
-            OptionalInt nextOffset) {}
+            @Description("Where the next slice starts; absent at the end of the value") @Nullable
+            Integer nextOffset) {}
 
     @Override
     public String name() {
@@ -92,6 +96,6 @@ final class GetFieldValueTool implements McpTool<GetFieldValueTool.Arguments, Ge
                 stored.value(),
                 slice.offset(),
                 slice.totalLength(),
-                end < slice.totalLength() ? OptionalInt.of(end) : OptionalInt.empty());
+                end < slice.totalLength() ? end : null);
     }
 }

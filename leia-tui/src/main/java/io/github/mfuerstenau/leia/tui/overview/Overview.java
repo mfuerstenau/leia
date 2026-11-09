@@ -33,6 +33,7 @@ import io.github.mfuerstenau.leia.protocol.index.TermStats;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
 import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
+import io.github.mfuerstenau.leia.tui.Optionals;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
@@ -51,6 +52,7 @@ import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The overview screen: what {@code getIndexStats} reports about the open index, with a scrollable
@@ -176,7 +178,7 @@ public final class Overview {
     private final Map<String, FieldScan> scans = new HashMap<>();
 
     /** The scan of the stored fields; none until one is started (ADR 0113). */
-    private Optional<StoredFieldsState> storedFields = Optional.empty();
+    private @Nullable StoredFieldsState storedFields;
 
     /** The stored fields by name, once the scan is done. */
     private Map<String, StoredField> stored = Map.of();
@@ -238,7 +240,7 @@ public final class Overview {
         fieldRows = order.stream()
                 .map(index -> {
                     IndexField field = stats.fields().get(index);
-                    return fieldCells(field, scans.get(field.name()), total, storedCell(field));
+                    return fieldCells(field, scans.get(field.name()), Optionals.orNull(total), storedCell(field));
                 })
                 .toList();
         columnWidths = new int[COLUMNS.size()];
@@ -290,7 +292,7 @@ public final class Overview {
 
     /** The Stored cell of {@code field}: {@code ?} before the scan, {@code -} if it stores no value. */
     private String storedCell(IndexField field) {
-        return switch (storedFields.orElse(null)) {
+        return switch (storedFields) {
             case null -> "?";
             case StoredFieldsState.Running _ -> "…";
             case StoredFieldsState.Failed _ -> "failed";
@@ -303,22 +305,21 @@ public final class Overview {
 
     /** The scan of the stored fields, if one was started (ADR 0113). */
     public Optional<StoredFieldsState> storedFields() {
-        return storedFields;
+        return Optional.ofNullable(storedFields);
     }
 
-    /** Sets or, with an empty {@code state}, forgets the scan of the stored fields. */
-    public void setStoredFields(Optional<StoredFieldsState> state) {
+    /** Sets or, with a null {@code state}, forgets the scan of the stored fields. */
+    public void setStoredFields(@Nullable StoredFieldsState state) {
         storedFields = state;
-        stored = state.filter(StoredFieldsState.Done.class::isInstance)
-                .map(done -> ((StoredFieldsState.Done) done)
-                        .fields().fields().stream().collect(Collectors.toMap(StoredField::name, field -> field)))
-                .orElse(Map.of());
+        stored = state instanceof StoredFieldsState.Done done
+                ? done.fields().fields().stream().collect(Collectors.toMap(StoredField::name, field -> field))
+                : Map.of();
         formatRows();
     }
 
     /** Whether the stored fields are being scanned. */
     public boolean scanningStoredFields() {
-        return storedFields.orElse(null) instanceof StoredFieldsState.Running;
+        return storedFields instanceof StoredFieldsState.Running;
     }
 
     private <T> Comparator<T> directed(Comparator<T> comparator) {
@@ -418,9 +419,13 @@ public final class Overview {
         return Optional.ofNullable(scans.get(field));
     }
 
-    /** Sets or, with an empty {@code scan}, forgets the term scan of {@code field}. */
-    public void setScan(String field, Optional<FieldScan> scan) {
-        scan.ifPresentOrElse(s -> scans.put(field, s), () -> scans.remove(field));
+    /** Sets or, with a null {@code scan}, forgets the term scan of {@code field}. */
+    public void setScan(String field, @Nullable FieldScan scan) {
+        if (scan != null) {
+            scans.put(field, scan);
+        } else {
+            scans.remove(field);
+        }
         formatRows();
     }
 
@@ -596,7 +601,7 @@ public final class Overview {
         int count = stats.fields().size();
         OptionalLong total = totalTerms();
         String counts = total.isPresent() ? count + ", " + total.getAsLong() + " terms" : Integer.toString(count);
-        String scanned = switch (storedFields.orElse(null)) {
+        String scanned = switch (storedFields) {
             case null -> "";
             case StoredFieldsState.Running running ->
                 ", stored fields " + running.docsScanned() + "/" + stats.maxDoc() + " docs…";
@@ -826,7 +831,8 @@ public final class Overview {
     }
 
     /** The cells of a field's row. {@code totalTerms} is the number of terms of all fields, once known. */
-    private static String[] fieldCells(IndexField field, FieldScan scan, OptionalLong totalTerms, String stored) {
+    private static String[] fieldCells(
+            IndexField field, @Nullable FieldScan scan, @Nullable Long totalTerms, String stored) {
         String points = field.pointDimensionCount() == 0
                 ? "-"
                 : field.pointDimensionCount() + "×" + field.pointNumBytes() + "B";
@@ -850,11 +856,10 @@ public final class Overview {
                 case FieldScan.Failed _ -> "failed";
             };
             // The share of all terms, as Luke shows it.
-            if (totalTerms.isEmpty()) {
+            if (totalTerms == null) {
                 share = "?";
-            } else if (scan instanceof FieldScan.Done done && totalTerms.getAsLong() > 0) {
-                share = String.format(
-                        Locale.ROOT, "%.2f", (double) done.terms().uniqueTerms() / totalTerms.getAsLong() * 100.0);
+            } else if (scan instanceof FieldScan.Done done && totalTerms > 0) {
+                share = String.format(Locale.ROOT, "%.2f", (double) done.terms().uniqueTerms() / totalTerms * 100.0);
             } else {
                 share = "0.00";
             }

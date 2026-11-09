@@ -1,6 +1,7 @@
 package io.github.mfuerstenau.leia.core;
 
 import java.io.Serial;
+import java.util.Objects;
 
 /** Opening an index failed for an expected {@link Reason}, described by the message. */
 public final class IndexOpenException extends Exception {
@@ -33,6 +34,12 @@ public final class IndexOpenException extends Exception {
     IndexOpenException(Reason reason, String message, Throwable cause) {
         super(message, cause);
         this.reason = reason;
+    }
+
+    /** The message, which every constructor takes. */
+    @Override
+    public String getMessage() {
+        return Objects.requireNonNullElse(super.getMessage(), getClass().getSimpleName());
     }
 
     public Reason reason() {

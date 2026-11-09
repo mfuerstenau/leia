@@ -10,6 +10,7 @@ import io.github.mfuerstenau.leia.protocol.points.PointValue;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A point field's BKD tree on the terms screen (ADR 0041): a row per segment, and below an expanded
@@ -25,39 +26,44 @@ final class PointTree {
         /** The child positions from the segment's root; empty for the root. */
         final List<Integer> path;
 
-        /** The segment's name, for a root. */
-        final Optional<String> name;
+        /** The segment's name, for a root; null for the others. */
+        final @Nullable String name;
 
         final PointValue min;
         final PointValue max;
         final long size;
 
-        /** Whether the cell is a leaf; empty until the server says, which it does for children. */
-        Optional<Boolean> leaf;
+        /** Whether the cell is a leaf; null until the server says, which it does for children. */
+        @Nullable
+        Boolean leaf;
 
         /** The children once fetched; null before. */
+        @Nullable
         List<Node> children;
 
         /** The points of a leaf once fetched; null before. */
+        @Nullable
         List<LeafPoint> points;
 
         boolean pointsCut;
         boolean expanded;
         boolean loading;
-        Optional<String> error = Optional.empty();
 
-        Node(int segment, List<Integer> path, Optional<String> name, PointCell cell) {
-            this(segment, path, name, cell.min(), cell.max(), cell.size(), Optional.of(cell.leaf()));
+        @Nullable
+        String error;
+
+        Node(int segment, List<Integer> path, @Nullable String name, PointCell cell) {
+            this(segment, path, name, cell.min(), cell.max(), cell.size(), cell.leaf());
         }
 
         Node(
                 int segment,
                 List<Integer> path,
-                Optional<String> name,
+                @Nullable String name,
                 PointValue min,
                 PointValue max,
                 long size,
-                Optional<Boolean> leaf) {
+                @Nullable Boolean leaf) {
             this.segment = segment;
             this.path = List.copyOf(path);
             this.name = name;
@@ -74,8 +80,8 @@ final class PointTree {
         /** Takes the cell's children, or its points if it is a leaf. */
         void loaded(GetPointCellResult result) {
             loading = false;
-            error = Optional.empty();
-            leaf = Optional.of(result.cell().leaf());
+            error = null;
+            leaf = result.cell().leaf();
             if (result.cell().leaf()) {
                 points = List.copyOf(result.points());
                 pointsCut = result.pointsCut();
@@ -85,8 +91,7 @@ final class PointTree {
             for (int i = 0; i < result.children().size(); i++) {
                 List<Integer> childPath = new ArrayList<>(path);
                 childPath.add(i);
-                nodes.add(new Node(
-                        segment, childPath, Optional.empty(), result.children().get(i)));
+                nodes.add(new Node(segment, childPath, null, result.children().get(i)));
             }
             children = List.copyOf(nodes);
             expanded = true;
@@ -99,9 +104,9 @@ final class PointTree {
     final String field;
 
     /** The tree; null if it could not be fetched. */
-    final GetPointTreeResult tree;
+    final @Nullable GetPointTreeResult tree;
 
-    final Optional<String> error;
+    final @Nullable String error;
 
     final List<Node> segments;
 
@@ -111,6 +116,7 @@ final class PointTree {
     final TableState table = new TableState();
 
     /** The leaf whose points are shown; null before one is opened. */
+    @Nullable
     Node leaf;
 
     int pointSelected;
@@ -120,7 +126,7 @@ final class PointTree {
         this.serial = serial;
         this.field = field;
         this.tree = tree;
-        this.error = Optional.empty();
+        this.error = null;
         this.segments = tree.segments().stream().map(PointTree::root).toList();
     }
 
@@ -128,7 +134,7 @@ final class PointTree {
         this.serial = serial;
         this.field = field;
         this.tree = null;
-        this.error = Optional.of(error);
+        this.error = error;
         this.segments = List.of();
     }
 
@@ -136,11 +142,11 @@ final class PointTree {
         return new Node(
                 segment.segment(),
                 List.of(),
-                segment.name(),
+                segment.name().orElse(null),
                 segment.min(),
                 segment.max(),
                 segment.size(),
-                Optional.empty());
+                null);
     }
 
     /** The rows shown: the segments, each followed by its cells as far as it is expanded. */
@@ -179,8 +185,10 @@ final class PointTree {
 
     /** The selected point of the shown leaf. */
     Optional<LeafPoint> selectedPoint() {
-        return leaf != null && pointSelected < leaf.points.size()
-                ? Optional.of(leaf.points.get(pointSelected))
+        Node shown = leaf;
+        List<LeafPoint> points = shown == null ? null : shown.points;
+        return points != null && pointSelected < points.size()
+                ? Optional.of(points.get(pointSelected))
                 : Optional.empty();
     }
 

@@ -12,7 +12,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
-import java.util.OptionalLong;
 import org.junit.jupiter.api.Test;
 
 /** The tests of {@code reconstruct.rs}, ported. */
@@ -78,13 +77,13 @@ class ReconstructionTest {
 
     @Test
     void summarizesTheState() {
-        Reconstruction running = new Reconstruction.Running(4, 1024, OptionalLong.of(80000));
+        Reconstruction running = new Reconstruction.Running(4, 1024, 80000L);
         assertThat(running.summary(true, false)).isEqualTo("rebuilding… 1024 of 80000 terms, Esc stops");
         assertThat(running.summary(false, true)).isEqualTo("rebuilding… 1024 of 80000 points, Esc stops");
         assertThat(running.summary(true, true)).isEqualTo("rebuilding… 1024 of 80000 terms and points, Esc stops");
         assertThat(running.job()).hasValue(4);
         assertThat(running.active()).isTrue();
-        assertThat(new Reconstruction.Running(4, 7, OptionalLong.empty()).summary(true, false))
+        assertThat(new Reconstruction.Running(4, 7, null).summary(true, false))
                 .isEqualTo("rebuilding… 7 terms, Esc stops");
         assertThat(new Reconstruction.Starting().summary(true, false)).isEqualTo("rebuilding…");
 

@@ -11,6 +11,7 @@ import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
 import java.util.ArrayList;
 import java.util.List;
+import org.jspecify.annotations.Nullable;
 
 /** The lines about the Java and the runtimes in use, which the start screen and the about window share. */
 public final class RuntimeLines {
@@ -27,7 +28,7 @@ public final class RuntimeLines {
      * The loaded runtimes, the missing ones with where to put them, the incomplete and refused ones
      * with why (ADR 0072, ADR 0073), and an empty line after them; none until they are known.
      */
-    public static List<Line> runtimes(GetRuntimesResult runtimes, RuntimesDirs runtimeFolders) {
+    public static List<Line> runtimes(@Nullable GetRuntimesResult runtimes, RuntimesDirs runtimeFolders) {
         if (runtimes == null) {
             return List.of();
         }

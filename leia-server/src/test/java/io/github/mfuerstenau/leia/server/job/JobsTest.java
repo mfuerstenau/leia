@@ -6,7 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.server.RpcException;
 import java.time.Duration;
-import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -26,7 +25,7 @@ class JobsTest {
             return "done";
         });
 
-        assertThat(awaitDone(id)).isEqualTo(new Jobs.Poll<>(7, Optional.of("done")));
+        assertThat(awaitDone(id)).isEqualTo(new Jobs.Poll<>(7, "done"));
         assertFails(() -> jobs.poll(id, String.class), ErrorCode.JOB_NOT_FOUND);
     }
 
@@ -39,7 +38,7 @@ class JobsTest {
         assertThat(jobs.attachment(id, String.class, StringBuilder.class)).isSameAs(attachment);
         assertFails(() -> jobs.attachment(id, String.class, Integer.class), ErrorCode.JOB_NOT_FOUND);
         assertFails(() -> jobs.attachment(id, Integer.class, StringBuilder.class), ErrorCode.JOB_NOT_FOUND);
-        assertThat(jobs.poll(id, String.class).result()).contains("done");
+        assertThat(jobs.poll(id, String.class).result()).isEqualTo("done");
         assertFails(() -> jobs.attachment(id, String.class, StringBuilder.class), ErrorCode.JOB_NOT_FOUND);
     }
 
@@ -62,9 +61,9 @@ class JobsTest {
         });
 
         assertThat(reported.await(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)).isTrue();
-        assertThat(jobs.poll(id, String.class)).isEqualTo(new Jobs.Poll<String>(42, Optional.empty()));
+        assertThat(jobs.poll(id, String.class)).isEqualTo(new Jobs.Poll<String>(42, null));
         release.countDown();
-        assertThat(awaitDone(id).result()).contains("done");
+        assertThat(awaitDone(id).result()).isEqualTo("done");
     }
 
     @Test
@@ -100,7 +99,7 @@ class JobsTest {
 
         assertFails(() -> jobs.poll(id + 1, String.class), ErrorCode.JOB_NOT_FOUND);
         assertFails(() -> jobs.poll(id, Integer.class), ErrorCode.JOB_NOT_FOUND);
-        assertThat(awaitDone(id).result()).contains("done");
+        assertThat(awaitDone(id).result()).isEqualTo("done");
     }
 
     @Test
@@ -161,7 +160,7 @@ class JobsTest {
         long deadline = System.nanoTime() + TIMEOUT.toNanos();
         while (System.nanoTime() < deadline) {
             Jobs.Poll<String> poll = jobs.poll(id, String.class);
-            if (poll.result().isPresent()) {
+            if (poll.result() != null) {
                 return poll;
             }
             Thread.sleep(5);

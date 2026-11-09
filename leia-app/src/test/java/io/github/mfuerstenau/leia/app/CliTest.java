@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import java.nio.file.Path;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -26,11 +25,11 @@ class CliTest {
                         false,
                         DirectoryImpl.FS,
                         false,
-                        Optional.empty(),
+                        null,
                         false,
                         java.util.List.of(),
                         java.util.List.of(),
-                        Optional.empty(),
+                        null,
                         false,
                         java.util.List.of(),
                         false));
@@ -41,10 +40,10 @@ class CliTest {
         assertThat(Cli.parse("--mcp", "--directory", "nio", "--jar", "icu", "/data/index"))
                 .satisfies(cli -> {
                     assertThat(cli.mcp()).isTrue();
-                    assertThat(cli.indexPath()).hasValue("/data/index");
+                    assertThat(cli.indexPath()).isEqualTo("/data/index");
                     assertThat(cli.directory()).isEqualTo(DirectoryImpl.NIO);
                 });
-        assertThat(Cli.parse("--mcp").indexPath()).isEmpty();
+        assertThat(Cli.parse("--mcp").indexPath()).isNull();
         assertThat(Cli.parse().mcp()).isFalse();
     }
 
@@ -75,7 +74,7 @@ class CliTest {
         assertThat(cli.noDefaultJars()).isTrue();
         assertThat(cli.directory()).isEqualTo(DirectoryImpl.NIO);
         assertThat(cli.noReader()).isTrue();
-        assertThat(cli.indexPath()).hasValue("/data/index");
+        assertThat(cli.indexPath()).isEqualTo("/data/index");
         assertThat(cli.help()).isFalse();
         assertThat(cli.version()).isFalse();
     }
@@ -112,10 +111,10 @@ class CliTest {
 
     @Test
     void parsesTheTheme() throws Exception {
-        assertThat(Cli.parse("--theme", "nord").theme()).hasValue("nord");
+        assertThat(Cli.parse("--theme", "nord").theme()).isEqualTo("nord");
         // A theme of the user's own is known only once Main reads their folder (ADR 0096).
-        assertThat(Cli.parse("--theme=solar", "/data/index").theme()).hasValue("solar");
-        assertThat(Cli.parse().theme()).isEmpty();
+        assertThat(Cli.parse("--theme=solar", "/data/index").theme()).isEqualTo("solar");
+        assertThat(Cli.parse().theme()).isNull();
     }
 
     @Test
@@ -147,8 +146,8 @@ class CliTest {
 
     @Test
     void takesAnIndexPathThatLooksLikeAnOptionAfterTheSeparator() throws Exception {
-        assertThat(Cli.parse("--no-reader", "--", "--odd").indexPath()).hasValue("--odd");
-        assertThat(Cli.parse("-").indexPath()).hasValue("-");
+        assertThat(Cli.parse("--no-reader", "--", "--odd").indexPath()).isEqualTo("--odd");
+        assertThat(Cli.parse("-").indexPath()).isEqualTo("-");
     }
 
     @ParameterizedTest

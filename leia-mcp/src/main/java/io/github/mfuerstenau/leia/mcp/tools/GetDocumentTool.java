@@ -24,10 +24,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
-import java.util.OptionalLong;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.jspecify.annotations.Nullable;
 
 /** {@code get_document}: what a document holds, field by field, with long values cut (ADR 0100). */
 final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDocumentTool.Result> {
@@ -46,15 +46,18 @@ final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDoc
 
             @Description("The fields to show, in the index's order; by default every field the document has"
                     + " something in")
-            Optional<List<String>> fields,
+            @Nullable
+            List<String> fields,
 
             @Description("The longest value shown whole, in characters, up to " + MAX_VALUE_LENGTH + "; "
                     + DEFAULT_VALUE_LENGTH + " by default. get_field_value has a longer one whole")
-            OptionalInt maxValueLength,
+            @Nullable
+            Integer maxValueLength,
 
             @Description("Whether to show the components of KNN vectors; otherwise only their dimension; false by"
                     + " default")
-            Optional<Boolean> withVectors) {}
+            @Nullable
+            Boolean withVectors) {}
 
     record Result(
             int docId,
@@ -67,33 +70,34 @@ final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDoc
     record Field(
             String name,
 
-            @Description("The document's norm; absent without norms")
-            OptionalLong norm,
+            @Description("The document's norm; absent without norms") @Nullable
+            Long norm,
 
-            @Description("The stored values, in the order they were added; absent if none are stored")
-            Optional<List<Value>> stored,
+            @Description("The stored values, in the order they were added; absent if none are stored") @Nullable
+            List<Value> stored,
 
-            @Description("The document's doc values; absent if it has none in the field")
-            Optional<DocValues> docValues,
+            @Description("The document's doc values; absent if it has none in the field") @Nullable
+            DocValues docValues,
 
-            @Description("Present, and true, only if the document has a term vector in the field")
-            Optional<Boolean> hasTermVector,
+            @Description("Present, and true, only if the document has a term vector in the field") @Nullable
+            Boolean hasTermVector,
 
-            @Description("The document's KNN vector; absent if it has none in the field")
-            Optional<Vector> vector) {}
+            @Description("The document's KNN vector; absent if it has none in the field") @Nullable
+            Vector vector) {}
 
     record Value(
-            @Description("STRING if absent") Optional<StoredType> type,
+            @Description("STRING if absent") @Nullable StoredType type,
 
             @Description("The value; numbers in decimal; binary values as text if they are UTF-8, else in hex")
             String value,
 
-            @Description("Present, and true, only if value is in hex")
-            Optional<Boolean> binary,
+            @Description("Present, and true, only if value is in hex") @Nullable
+            Boolean binary,
 
             @Description("Present if value is cut: the length of the whole value in characters; get_field_value"
                     + " has the rest")
-            OptionalLong fullLength) {}
+            @Nullable
+            Long fullLength) {}
 
     record DocValues(
             DocValuesType type,
@@ -102,35 +106,38 @@ final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDoc
             @Description("The raw numbers of a NUMERIC or SORTED_NUMERIC field, in decimal as strings (a JSON number"
                     + " loses digits beyond 2^53), at most " + MAX_DOC_VALUES
                     + "; absent for the other types, and with asStored")
-            Optional<List<String>> numbers,
+            @Nullable
+            List<String> numbers,
 
             @Description("Present if the numbers are the field's stored values in this encoding (a double's bits,"
                     + " say); numbers is then left out, and the stored values are the numbers")
-            Optional<DocValuesNumber> asStored,
+            @Nullable
+            DocValuesNumber asStored,
 
             @Description("The values of a BINARY, SORTED or SORTED_SET field, at most " + MAX_DOC_VALUES
                     + "; absent for the other types")
-            Optional<List<Bytes>> values) {}
+            @Nullable
+            List<Bytes> values) {}
 
     record Bytes(
             @Description("The bytes as text if they are UTF-8, else in hex")
             String value,
 
-            @Description("Present, and true, only if value is in hex")
-            Optional<Boolean> binary,
+            @Description("Present, and true, only if value is in hex") @Nullable
+            Boolean binary,
 
-            @Description("Present if value is cut: the length of the whole value in characters")
-            OptionalInt fullLength) {}
+            @Description("Present if value is cut: the length of the whole value in characters") @Nullable
+            Integer fullLength) {}
 
     record Vector(
             VectorEncoding encoding,
             int dimension,
 
-            @Description("The components of a FLOAT32 vector, with withVectors")
-            Optional<List<Float>> floats,
+            @Description("The components of a FLOAT32 vector, with withVectors") @Nullable
+            List<Float> floats,
 
-            @Description("The components of a BYTE vector, signed, with withVectors")
-            Optional<List<Byte>> bytes) {}
+            @Description("The components of a BYTE vector, signed, with withVectors") @Nullable
+            List<Byte> bytes) {}
 
     @Override
     public String name() {
@@ -158,18 +165,18 @@ final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDoc
     public Result call(Arguments arguments, Call call) throws ToolException, Jobs.Cancelled {
         int maxLength =
                 Slices.bounded("maxValueLength", arguments.maxValueLength(), DEFAULT_VALUE_LENGTH, 1, MAX_VALUE_LENGTH);
-        boolean withVectors = arguments.withVectors().orElse(false);
+        boolean withVectors = Given.isTrue(arguments.withVectors());
         GetDocumentResult document = call.call(Methods.GET_DOCUMENT, new GetDocumentParams(arguments.docId()));
         List<DocumentField> fields = document.fields();
-        if (arguments.fields().isPresent()) {
+        List<String> names = arguments.fields();
+        if (names != null) {
             Set<String> known = fields.stream().map(DocumentField::name).collect(Collectors.toSet());
-            List<String> unknown = arguments.fields().get().stream()
-                    .filter(name -> !known.contains(name))
-                    .toList();
+            List<String> unknown =
+                    names.stream().filter(name -> !known.contains(name)).toList();
             if (!unknown.isEmpty()) {
                 throw ToolError.invalid("The index has no field " + String.join(", ", unknown));
             }
-            Set<String> asked = Set.copyOf(arguments.fields().get());
+            Set<String> asked = Set.copyOf(names);
             fields = fields.stream()
                     .filter(field -> asked.contains(field.name()))
                     .toList();
@@ -201,11 +208,13 @@ final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDoc
             }
             shown.add(new Field(
                     field.name(),
-                    field.norm(),
+                    Optionals.orNull(field.norm()),
                     Absent.nonEmpty(stored),
-                    field.docValues().map(docValues -> docValues(docValues, field.stored(), maxLength)),
+                    field.docValues()
+                            .map(docValues -> docValues(docValues, field.stored(), maxLength))
+                            .orElse(null),
                     Absent.flag(field.hasTermVector()),
-                    field.vector().map(vector -> vector(vector, withVectors))));
+                    field.vector().map(vector -> vector(vector, withVectors)).orElse(null)));
         }
         return new Result(document.docId(), document.deleted(), shown);
     }
@@ -222,35 +231,35 @@ final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDoc
     private static Value value(StoredValue value, long totalLength, int maxLength) {
         String text = value.value();
         if (totalLength <= maxLength) {
-            return new Value(Absent.type(value.type()), text, Absent.flag(value.binary()), OptionalLong.empty());
+            return new Value(Absent.type(value.type()), text, Absent.flag(value.binary()), null);
         }
         return new Value(
                 Absent.type(value.type()),
                 Slices.head(text, value.binary(), maxLength),
                 Absent.flag(value.binary()),
-                OptionalLong.of(totalLength));
+                totalLength);
     }
 
     private static DocValues docValues(
             io.github.mfuerstenau.leia.protocol.document.DocValues docValues, List<StoredValue> stored, int maxLength) {
         Function<BytesValue, Bytes> bytes = value -> value.value().length() <= maxLength
-                ? new Bytes(value.value(), Absent.flag(value.binary()), OptionalInt.empty())
+                ? new Bytes(value.value(), Absent.flag(value.binary()), null)
                 : new Bytes(
                         Slices.head(value.value(), value.binary(), maxLength),
                         Absent.flag(value.binary()),
-                        OptionalInt.of(value.value().length()));
+                        value.value().length());
         Optional<DocValuesNumber> asStored =
                 DocValuesNumbers.inferFromStored(docValues.type(), docValues.numbers(), stored);
         return new DocValues(
                 docValues.type(),
                 docValues.numbers().size() + docValues.values().size(),
                 asStored.isPresent()
-                        ? Optional.empty()
+                        ? null
                         : Absent.nonEmpty(docValues.numbers().stream()
                                 .limit(MAX_DOC_VALUES)
                                 .map(String::valueOf)
                                 .toList()),
-                asStored,
+                asStored.orElse(null),
                 Absent.nonEmpty(docValues.values().stream()
                         .limit(MAX_DOC_VALUES)
                         .map(bytes)
@@ -262,7 +271,7 @@ final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDoc
         return new Vector(
                 vector.encoding(),
                 vector.dimension(),
-                withVectors && floats ? Optional.of(vector.floats()) : Optional.empty(),
-                withVectors && !floats ? Optional.of(vector.bytes()) : Optional.empty());
+                withVectors && floats ? vector.floats() : null,
+                withVectors && !floats ? vector.bytes() : null);
     }
 }

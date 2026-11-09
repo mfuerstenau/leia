@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.regex.Pattern;
+import org.jspecify.annotations.Nullable;
 
 /** The More-Like-This popup: a draft of the {@link LikeSettings}, applied with Enter once a field is chosen. */
 public final class LikeForm {
@@ -52,7 +53,7 @@ public final class LikeForm {
     private boolean noField;
 
     /** The stop words, while they are typed; null otherwise. */
-    private LineInput editing;
+    private @Nullable LineInput editing;
 
     public LikeForm(LikeSettings settings) {
         this.draft = settings.copy();
@@ -122,10 +123,16 @@ public final class LikeForm {
         switch (key.code()) {
             case ESCAPE -> editing = null;
             case ENTER -> {
-                draft.stopWords = LikeSettings.splitStopWords(editing.text());
+                if (editing != null) {
+                    draft.stopWords = LikeSettings.splitStopWords(editing.text());
+                }
                 editing = null;
             }
-            default -> editing.handleKey(key, LineInput::wordStart);
+            default -> {
+                if (editing != null) {
+                    editing.handleKey(key, LineInput::wordStart);
+                }
+            }
         }
     }
 

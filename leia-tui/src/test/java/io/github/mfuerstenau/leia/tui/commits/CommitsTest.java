@@ -18,11 +18,13 @@ import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.commits.Segment;
 import io.github.mfuerstenau.leia.protocol.commits.UnreadableCommit;
+import io.github.mfuerstenau.leia.tui.Optionals;
 import io.github.mfuerstenau.leia.tui.TestScreens;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 /** The tests of {@code commits.rs}, ported, and what the asynchronous calls add. */
@@ -62,7 +64,7 @@ class CommitsTest {
                                 Optional.of("Lucene99HnswVectorsFormat")),
                         new FieldFormats("id", Optional.of("FST50"), Optional.empty(), Optional.empty()),
                         new FieldFormats("stored", Optional.empty(), Optional.empty(), Optional.empty())),
-                Optional.empty());
+                null);
     }
 
     private static Segment segment(
@@ -71,7 +73,7 @@ class CommitsTest {
             int maxDoc,
             long size,
             List<FieldFormats> fieldFormats,
-            Optional<String> fieldInfosError) {
+            @Nullable String fieldInfosError) {
         return segment(name, docBase, maxDoc, size, fieldFormats, fieldInfosError, "10.5.2");
     }
 
@@ -81,7 +83,7 @@ class CommitsTest {
             int maxDoc,
             long size,
             List<FieldFormats> fieldFormats,
-            Optional<String> fieldInfosError,
+            @Nullable String fieldInfosError,
             String luceneVersion) {
         return new Segment(
                 name,
@@ -109,7 +111,7 @@ class CommitsTest {
                         "Lucene90LiveDocsFormat",
                         "Lucene90CompoundFormat")),
                 fieldFormats,
-                fieldInfosError,
+                Optional.ofNullable(fieldInfosError),
                 name.equals("_0"),
                 false,
                 Optional.empty(),
@@ -118,8 +120,8 @@ class CommitsTest {
                 Map.of());
     }
 
-    private static CommitFile file(String name, String segment, OptionalLong size) {
-        return new CommitFile(name, Optional.ofNullable(segment), size);
+    private static CommitFile file(String name, @Nullable String segment, @Nullable Long size) {
+        return new CommitFile(name, Optional.ofNullable(segment), Optionals.optionalLong(size));
     }
 
     private static GetCommitResult details(long generation, boolean current) {
@@ -127,10 +129,10 @@ class CommitsTest {
                 commit(generation, current),
                 List.of(segment("_0", 0, 400), segment("_1", 400, 100)),
                 List.of(
-                        file("_0.cfs", "_0", OptionalLong.of(1024)),
-                        file("_0.si", "_0", OptionalLong.of(1024)),
-                        file("_1.fdt", "_1", OptionalLong.empty()),
-                        file("segments_" + generation, null, OptionalLong.of(300))));
+                        file("_0.cfs", "_0", 1024L),
+                        file("_0.si", "_0", 1024L),
+                        file("_1.fdt", "_1", null),
+                        file("segments_" + generation, null, 300L)));
     }
 
     private static GetCommitsResult list(Commit... commits) {
@@ -324,7 +326,7 @@ class CommitsTest {
 
     /** The first lines of the details of a segment that Lucene {@code version} wrote. */
     private static List<String> segmentHead(String version) {
-        Segment segment = segment("_0", 0, 400, 2048, List.of(), Optional.empty(), version);
+        Segment segment = segment("_0", 0, 400, 2048, List.of(), null, version);
         GetCommitResult details = new GetCommitResult(commit(4, true), List.of(segment), List.of());
         return Commits.segmentLines(segment, details, 80).stream()
                 .map(Line::rawContent)
@@ -411,10 +413,10 @@ class CommitsTest {
                 commit(4, true),
                 List.of(segment("_0", 0, 400), segment("_2", 400, 100)),
                 List.of(
-                        file("_0.cfe", "_0", OptionalLong.of(842)),
-                        file("_2_Lucene99HnswVectorsFormat_0.vemf", "_2", OptionalLong.of(1234)),
-                        file("_2.si", "_2", OptionalLong.of(400)),
-                        file("segments_4", null, OptionalLong.of(300))));
+                        file("_0.cfe", "_0", 842L),
+                        file("_2_Lucene99HnswVectorsFormat_0.vemf", "_2", 1234L),
+                        file("_2.si", "_2", 400L),
+                        file("segments_4", null, 300L)));
     }
 
     private static List<String> rows(List<Line> lines) {
@@ -469,7 +471,7 @@ class CommitsTest {
         List<FieldFormats> fields = List.of("author", "body", "category", "published", "tags", "title", "url").stream()
                 .map(name -> new FieldFormats(name, Optional.of("Lucene104"), Optional.empty(), Optional.empty()))
                 .toList();
-        Segment segment = segment("_0", 0, 1, 2048, fields, Optional.empty());
+        Segment segment = segment("_0", 0, 1, 2048, fields, null);
         GetCommitResult details = new GetCommitResult(commit(4, true), List.of(segment), List.of());
         List<String> lines = Commits.segmentLines(segment, details, 24).stream()
                 .map(Line::rawContent)
@@ -503,7 +505,7 @@ class CommitsTest {
                 1,
                 2048,
                 List.of(new FieldFormats("stored", Optional.empty(), Optional.empty(), Optional.empty())),
-                Optional.empty());
+                null);
         GetCommitResult details = new GetCommitResult(commit(4, true), List.of(segment), List.of());
         assertThat(Commits.segmentLines(segment, details, 80))
                 .extracting(Line::rawContent)
@@ -512,7 +514,7 @@ class CommitsTest {
 
     @Test
     void theSegmentDetailsSayWhyTheFieldInfosCouldNotBeRead() {
-        Segment segment = segment("_0", 0, 1, 2048, List.of(), Optional.of("Corrupt index, missing file: _0.fnm"));
+        Segment segment = segment("_0", 0, 1, 2048, List.of(), "Corrupt index, missing file: _0.fnm");
         GetCommitResult details = new GetCommitResult(commit(4, true), List.of(segment), List.of());
         List<Line> lines = Commits.segmentLines(segment, details, 80);
         Line error = lines.get(lines.indexOf(Line.styled("Field formats", Style.EMPTY.bold())) + 1);

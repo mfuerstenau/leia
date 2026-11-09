@@ -5,7 +5,6 @@ import io.github.mfuerstenau.leia.runtime.Rebuild;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import java.io.IOException;
 import java.util.List;
-import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.function.LongConsumer;
 
@@ -20,12 +19,12 @@ final class Lucene10Rebuild implements Rebuild {
 
     @Override
     public OptionalLong count(int docId, List<String> fields) throws IOException {
-        return index.reconstructCount(docId, Optional.of(fields));
+        return index.reconstructCount(docId, fields);
     }
 
     @Override
     public List<RebuiltField> rebuild(int docId, List<String> fields, LongConsumer progress) throws IOException {
-        return index.reconstruct(docId, Optional.of(fields), progress::accept).stream()
+        return index.reconstruct(docId, fields, progress::accept).stream()
                 .map(field -> new RebuiltField(
                         field.field(),
                         RuntimeIndex.IndexOptions.valueOf(field.indexOptions().name()),

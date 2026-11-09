@@ -23,7 +23,7 @@ class FieldFlagsTest {
     @Test
     void aFieldWithNothingOfTheDocumentIsEmpty() {
         assertThat(FieldFlags.isEmpty(NOTHING)).isTrue();
-        assertThat(FieldFlags.of(Optional.empty(), NOTHING)).isEqualTo("--------");
+        assertThat(FieldFlags.of(null, NOTHING)).isEqualTo("--------");
     }
 
     @Test
@@ -54,7 +54,7 @@ class FieldFlagsTest {
                         Optional.of(new KnnVector(VectorEncoding.FLOAT32, List.of(1f), List.of()))));
 
         assertThat(fields).noneMatch(FieldFlags::isEmpty);
-        assertThat(fields.stream().map(field -> FieldFlags.of(Optional.empty(), field)))
+        assertThat(fields.stream().map(field -> FieldFlags.of(null, field)))
                 .containsExactly("-N------", "---S----", "-----D--", "----V---", "-------K");
     }
 }

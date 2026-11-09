@@ -20,7 +20,6 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
@@ -128,7 +127,7 @@ class LeiaBackendTest {
     void startsWithTheServersMethods() throws Exception {
         Path index = writeIndex(tmp.resolve("index"), 3);
 
-        try (LeiaBackend backend = LeiaBackend.start(Optional.empty(), List.of())) {
+        try (LeiaBackend backend = LeiaBackend.start(null, List.of())) {
             VersionResult version = await(backend.call(Methods.VERSION, new VersionParams()));
             assertThat(version.java().version()).isEqualTo(Runtime.version().toString());
 
@@ -147,7 +146,7 @@ class LeiaBackendTest {
     void failsToStartWithAPathThatIsNoJar() throws Exception {
         Path notAJar = Files.writeString(tmp.resolve("notes.txt"), "no jar");
 
-        assertThatThrownBy(() -> LeiaBackend.start(Optional.empty(), List.of(notAJar)))
+        assertThatThrownBy(() -> LeiaBackend.start(null, List.of(notAJar)))
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_JAR));
     }

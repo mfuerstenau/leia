@@ -15,7 +15,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import org.apache.lucene.analysis.Analyzer;
@@ -32,6 +31,7 @@ import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.similarities.Similarity;
 import org.apache.lucene.store.FSDirectory;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -62,7 +62,7 @@ class HighlightsTest {
     @Test
     void marksTheMatchesInPassagesFromThePostings() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            Hit hit = only(search(index, "post:fox", SPEC, Optional.empty()));
+            Hit hit = only(search(index, "post:fox", SPEC, null));
 
             assertThat(hit.highlights()).hasSize(1);
             FieldHighlight post = hit.highlights().getFirst();
@@ -84,9 +84,8 @@ class HighlightsTest {
     @Test
     void aWildcardIsHighlightedByAnalysis() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            FieldHighlight post = only(search(index, "post:fo*", SPEC, Optional.empty()))
-                    .highlights()
-                    .getFirst();
+            FieldHighlight post =
+                    only(search(index, "post:fo*", SPEC, null)).highlights().getFirst();
 
             assertThat(post.offsetSource()).isEqualTo(OffsetSource.ANALYSIS);
             assertThat(post.passages()).flatExtracting(HighlightsTest::marked).containsExactly("fox", "fox");
@@ -96,7 +95,7 @@ class HighlightsTest {
     @Test
     void aPhraseMarksOnlyItsOwnTerms() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            FieldHighlight post = only(search(index, "post:\"quick brown\"", SPEC, Optional.empty()))
+            FieldHighlight post = only(search(index, "post:\"quick brown\"", SPEC, null))
                     .highlights()
                     .getFirst();
 
@@ -108,21 +107,18 @@ class HighlightsTest {
     @Test
     void termVectorsGiveOffsetsAndAreAnalyzedWithoutThem() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            FieldHighlight vectors = only(search(index, "vectors:cat", SPEC, Optional.empty()))
-                    .highlights()
-                    .getFirst();
+            FieldHighlight vectors =
+                    only(search(index, "vectors:cat", SPEC, null)).highlights().getFirst();
             assertThat(vectors.offsetSource()).isEqualTo(OffsetSource.TERM_VECTORS);
             assertThat(marked(vectors.passages().getFirst())).containsExactly("cat");
 
-            FieldHighlight without = only(search(index, "bare:cow", SPEC, Optional.empty()))
-                    .highlights()
-                    .getFirst();
+            FieldHighlight without =
+                    only(search(index, "bare:cow", SPEC, null)).highlights().getFirst();
             assertThat(without.offsetSource()).isEqualTo(OffsetSource.ANALYSIS);
             assertThat(marked(without.passages().getFirst())).containsExactly("cow");
 
-            FieldHighlight plain = only(search(index, "plain:owl", SPEC, Optional.empty()))
-                    .highlights()
-                    .getFirst();
+            FieldHighlight plain =
+                    only(search(index, "plain:owl", SPEC, null)).highlights().getFirst();
             assertThat(plain.offsetSource()).isEqualTo(OffsetSource.ANALYSIS);
         }
     }
@@ -130,10 +126,10 @@ class HighlightsTest {
     @Test
     void otherFieldsAreHighlightedOnlyWithoutRequiringAFieldMatch() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            Hit required = only(search(index, "post:fox", SPEC, Optional.empty()));
+            Hit required = only(search(index, "post:fox", SPEC, null));
             assertThat(required.highlights()).extracting(FieldHighlight::field).containsExactly("post");
 
-            Hit any = only(search(index, "post:fox", new HighlightSpec(3, false, ANALYZER), Optional.empty()));
+            Hit any = only(search(index, "post:fox", new HighlightSpec(3, false, ANALYZER), null));
             assertThat(any.highlights()).extracting(FieldHighlight::field).containsExactly("post", "plain");
             assertThat(marked(any.highlights().get(1).passages().getFirst())).containsExactly("fox");
         }
@@ -142,8 +138,7 @@ class HighlightsTest {
     @Test
     void anyFieldsTermsAreHighlightedWhereTheWholeQueryDoesNotMatch() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            Hit hit = only(
-                    search(index, "+plain:owl +post:quick*", new HighlightSpec(3, false, ANALYZER), Optional.empty()));
+            Hit hit = only(search(index, "+plain:owl +post:quick*", new HighlightSpec(3, false, ANALYZER), null));
 
             // Neither field alone matches both clauses.
             assertThat(hit.highlights()).extracting(FieldHighlight::field).containsExactly("post", "plain");
@@ -155,9 +150,8 @@ class HighlightsTest {
     @Test
     void passagesNameTheirValueAmongAllStoredValues() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            FieldHighlight tags = only(search(index, "tags:beta", SPEC, Optional.empty()))
-                    .highlights()
-                    .getFirst();
+            FieldHighlight tags =
+                    only(search(index, "tags:beta", SPEC, null)).highlights().getFirst();
 
             // Value 1 is a stored int, which the highlighter doesn't read.
             assertThat(tags.passages()).hasSize(1);
@@ -170,7 +164,7 @@ class HighlightsTest {
     @Test
     void offsetsAreUtf8Bytes() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            Passage passage = only(search(index, "post:grüße", SPEC, Optional.empty()))
+            Passage passage = only(search(index, "post:grüße", SPEC, null))
                     .highlights()
                     .getFirst()
                     .passages()
@@ -188,7 +182,7 @@ class HighlightsTest {
     @Test
     void aLongPassageIsCutAroundItsFirstMatch() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            Passage passage = only(search(index, "post:lynx", SPEC, Optional.of(Set.of("post"))))
+            Passage passage = only(search(index, "post:lynx", SPEC, Set.of("post")))
                     .highlights()
                     .getFirst()
                     .passages()
@@ -208,8 +202,7 @@ class HighlightsTest {
     @Test
     void onlyTheFieldsAskedForAreHighlighted() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            Hit hit = only(
-                    search(index, "post:fox", new HighlightSpec(3, false, ANALYZER), Optional.of(Set.of("plain"))));
+            Hit hit = only(search(index, "post:fox", new HighlightSpec(3, false, ANALYZER), Set.of("plain")));
 
             assertThat(hit.highlights()).extracting(FieldHighlight::field).containsExactly("plain");
         }
@@ -218,8 +211,8 @@ class HighlightsTest {
     @Test
     void withoutASpecHitsHaveNoHighlights() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            SearchResults results = index.search(
-                    classic("post:fox"), BM25, Optional.empty(), 0, 10, false, Optional.empty(), ScanProgress.NONE);
+            SearchResults results =
+                    index.search(classic("post:fox"), BM25, null, 0, 10, false, null, ScanProgress.NONE);
 
             assertThat(results.hits())
                     .allSatisfy(hit -> assertThat(hit.highlights()).isEmpty());
@@ -230,7 +223,7 @@ class HighlightsTest {
     void marksEveryMatchInAField() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             FieldMatches highlight =
-                    only(index.highlight(classic("tags:goose"), SPEC, 1, Optional.of("tags"), 100, ScanProgress.NONE));
+                    only(index.highlight(classic("tags:goose"), SPEC, 1, "tags", 100, ScanProgress.NONE));
 
             // TextField has no offsets in its postings.
             assertThat(highlight.offsetSource()).isEqualTo(OffsetSource.ANALYSIS);
@@ -245,8 +238,7 @@ class HighlightsTest {
     @Test
     void keepsTheFirstSpansAndCountsTheRest() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            FieldMatches highlight =
-                    only(index.highlight(classic("post:word"), SPEC, 2, Optional.of("post"), 3, ScanProgress.NONE));
+            FieldMatches highlight = only(index.highlight(classic("post:word"), SPEC, 2, "post", 3, ScanProgress.NONE));
 
             assertThat(highlight.values()).hasSize(1);
             assertThat(highlight.values().getFirst().matchCount()).isEqualTo(400);
@@ -259,16 +251,14 @@ class HighlightsTest {
     void aFieldWithoutMatchesHasNoValues() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             FieldMatches highlight =
-                    only(index.highlight(classic("post:fox"), SPEC, 1, Optional.of("tags"), 100, ScanProgress.NONE));
+                    only(index.highlight(classic("post:fox"), SPEC, 1, "tags", 100, ScanProgress.NONE));
 
             assertThat(highlight.field()).isEqualTo("tags");
             assertThat(highlight.values()).isEmpty();
             assertThat(highlight.offsetSource()).isEqualTo(OffsetSource.NONE);
-            assertThatThrownBy(() ->
-                            index.highlight(classic("post:fox"), SPEC, 99, Optional.of("post"), 100, ScanProgress.NONE))
+            assertThatThrownBy(() -> index.highlight(classic("post:fox"), SPEC, 99, "post", 100, ScanProgress.NONE))
                     .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> index.highlight(
-                            classic("post:fox"), SPEC, 0, Optional.of("nothing"), 100, ScanProgress.NONE))
+            assertThatThrownBy(() -> index.highlight(classic("post:fox"), SPEC, 0, "nothing", 100, ScanProgress.NONE))
                     .isInstanceOf(IllegalArgumentException.class);
         }
     }
@@ -276,8 +266,8 @@ class HighlightsTest {
     @Test
     void marksEveryMatchInEachFieldWithText() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            DocumentHighlight highlight = index.highlight(
-                    classic("post:fox OR vectors:cat"), SPEC, 0, Optional.empty(), 100, ScanProgress.NONE);
+            DocumentHighlight highlight =
+                    index.highlight(classic("post:fox OR vectors:cat"), SPEC, 0, null, 100, ScanProgress.NONE);
 
             // Every stored field with text, in stored order, with matches or not.
             assertThat(highlight.fields())
@@ -301,12 +291,7 @@ class HighlightsTest {
     void withoutAFieldMatchEachFieldMarksTheQuerysTerms() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             DocumentHighlight highlight = index.highlight(
-                    classic("post:fox"),
-                    new HighlightSpec(3, false, ANALYZER),
-                    0,
-                    Optional.empty(),
-                    100,
-                    ScanProgress.NONE);
+                    classic("post:fox"), new HighlightSpec(3, false, ANALYZER), 0, null, 100, ScanProgress.NONE);
 
             FieldMatches plain = highlight.fields().get(4);
             assertThat(plain.field()).isEqualTo("plain");
@@ -321,7 +306,7 @@ class HighlightsTest {
                 throw new CancellationException("cancelled");
             };
 
-            assertThatThrownBy(() -> index.highlight(classic("post:fox"), SPEC, 0, Optional.empty(), 100, cancelled))
+            assertThatThrownBy(() -> index.highlight(classic("post:fox"), SPEC, 0, null, 100, cancelled))
                     .isInstanceOf(CancellationException.class);
         }
     }
@@ -352,18 +337,9 @@ class HighlightsTest {
     }
 
     private static SearchResults search(
-            ReadOnlyIndex index, String expression, HighlightSpec spec, Optional<Set<String>> fields)
+            ReadOnlyIndex index, String expression, HighlightSpec spec, @Nullable Set<String> fields)
             throws IOException, InvalidQueryException {
-        return index.search(
-                classic(expression),
-                BM25,
-                Optional.empty(),
-                0,
-                10,
-                false,
-                fields,
-                Optional.of(spec),
-                ScanProgress.NONE);
+        return index.search(classic(expression), BM25, null, 0, 10, false, fields, spec, ScanProgress.NONE);
     }
 
     /**

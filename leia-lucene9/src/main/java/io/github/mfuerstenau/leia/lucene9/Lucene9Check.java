@@ -68,7 +68,7 @@ final class Lucene9Check implements Check {
     @Override
     public CheckResult check(
             Path dir, DirectoryKind kind, Options options, Consumer<String> line, LongConsumer progress) {
-        int checkLevel = options.level().orElse(2);
+        int checkLevel = Optional.ofNullable(options.level()).orElse(2);
         Cancellation cancellation = new Cancellation(progress);
         // Closed by the PrintStream that wraps it (ADR 0088)
         @SuppressWarnings("java:S2095")
@@ -100,12 +100,14 @@ final class Lucene9Check implements Check {
      * allow, at most one per segment, on an executor that is never interrupted.
      */
     private static CheckIndex.Status run(CheckIndex checker, List<String> commit, Options options) throws IOException {
-        List<String> only = options.segments().orElse(null);
+        List<String> only = options.segments();
         long segments = only == null
                 ? commit.size()
                 : commit.stream().filter(only::contains).count();
-        int threads =
-                (int) Math.min(options.threads().orElse(Runtime.getRuntime().availableProcessors()), segments);
+        int threads = (int) Math.min(
+                Optional.ofNullable(options.threads())
+                        .orElse(Runtime.getRuntime().availableProcessors()),
+                segments);
         if (threads < 2) {
             return checker.checkIndex(only, null);
         }
@@ -148,18 +150,18 @@ final class Lucene9Check implements Check {
             segments.add(new SegmentCheck(
                     segment.name,
                     segment.maxDoc,
-                    Optional.ofNullable(segment.codec).map(Codec::getName),
+                    Optional.ofNullable(segment.codec).map(Codec::getName).orElse(null),
                     segment.compound,
                     segment.numFiles,
                     Math.round(segment.sizeMB * 1024 * 1024),
                     segment.hasDeletions,
                     segment.openReaderPassed,
-                    error(segment)));
+                    error(segment).orElse(null)));
         }
         return new CheckResult(
                 status.clean,
-                Optional.empty(),
-                Optional.ofNullable(status.segmentsFileName),
+                null,
+                status.segmentsFileName,
                 status.missingSegments,
                 status.toolOutOfDate,
                 status.numSegments,

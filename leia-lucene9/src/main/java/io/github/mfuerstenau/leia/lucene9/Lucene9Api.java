@@ -3,6 +3,7 @@ package io.github.mfuerstenau.leia.lucene9;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.Arrays;
+import org.jspecify.annotations.Nullable;
 
 /**
  * What the Lucene 9 in this runtime's class loader has of the APIs newer than 9.0 that the adapter
@@ -48,7 +49,7 @@ final class Lucene9Api {
 
     private Lucene9Api() {}
 
-    private static Class<?> find(String name) {
+    private static @Nullable Class<?> find(String name) {
         try {
             return Class.forName(name, false, Lucene9Api.class.getClassLoader());
         } catch (ClassNotFoundException | LinkageError e) {

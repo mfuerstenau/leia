@@ -28,6 +28,6 @@ public final class GetSearchHandler implements MethodHandler<JobParams, GetSearc
     @Override
     public GetSearchResult handle(JobParams params) throws RpcException {
         Jobs.Poll<SearchResults> poll = jobs.poll(params.jobId(), SearchResults.class);
-        return new GetSearchResult(poll.progress(), poll.result());
+        return new GetSearchResult(poll.progress(), poll.outcome());
     }
 }

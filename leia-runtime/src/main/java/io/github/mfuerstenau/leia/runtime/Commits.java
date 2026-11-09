@@ -5,7 +5,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalLong;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The commits of an index directory, read again on each call without a reader, so an index opened
@@ -90,22 +90,22 @@ public interface Commits {
             int maxDoc,
             int docBase,
             int delCount,
-            OptionalLong delGen,
+            @Nullable Long delGen,
             String luceneVersion,
             boolean compound,
-            OptionalLong sizeInBytes,
+            @Nullable Long sizeInBytes,
             Map<String, String> diagnostics,
             Map<String, String> attributes,
-            Optional<String> id,
-            Optional<String> codec,
-            Optional<Formats> formats,
+            @Nullable String id,
+            @Nullable String codec,
+            @Nullable Formats formats,
             List<FieldFormats> fieldFormats,
-            Optional<String> fieldInfosError,
-            OptionalLong fieldInfosGen,
-            OptionalLong docValuesGen,
+            @Nullable String fieldInfosError,
+            @Nullable Long fieldInfosGen,
+            @Nullable Long docValuesGen,
             int softDelCount,
-            Optional<String> minLuceneVersion,
-            Optional<String> indexSort,
+            @Nullable String minLuceneVersion,
+            @Nullable String indexSort,
             boolean hasBlocks) {
 
         /** A segment of Lucene 6.x to 9.8, which didn't record document blocks. */
@@ -114,22 +114,22 @@ public interface Commits {
                 int maxDoc,
                 int docBase,
                 int delCount,
-                OptionalLong delGen,
+                @Nullable Long delGen,
                 String luceneVersion,
                 boolean compound,
-                OptionalLong sizeInBytes,
+                @Nullable Long sizeInBytes,
                 Map<String, String> diagnostics,
                 Map<String, String> attributes,
-                Optional<String> id,
-                Optional<String> codec,
-                Optional<Formats> formats,
+                @Nullable String id,
+                @Nullable String codec,
+                @Nullable Formats formats,
                 List<FieldFormats> fieldFormats,
-                Optional<String> fieldInfosError,
-                OptionalLong fieldInfosGen,
-                OptionalLong docValuesGen,
+                @Nullable String fieldInfosError,
+                @Nullable Long fieldInfosGen,
+                @Nullable Long docValuesGen,
                 int softDelCount,
-                Optional<String> minLuceneVersion,
-                Optional<String> indexSort) {
+                @Nullable String minLuceneVersion,
+                @Nullable String indexSort) {
             this(
                     name,
                     maxDoc,
@@ -160,19 +160,19 @@ public interface Commits {
                 int maxDoc,
                 int docBase,
                 int delCount,
-                OptionalLong delGen,
+                @Nullable Long delGen,
                 String luceneVersion,
                 boolean compound,
-                OptionalLong sizeInBytes,
+                @Nullable Long sizeInBytes,
                 Map<String, String> diagnostics,
                 Map<String, String> attributes,
-                Optional<String> id,
-                Optional<String> codec,
-                Optional<Formats> formats,
+                @Nullable String id,
+                @Nullable String codec,
+                @Nullable Formats formats,
                 List<FieldFormats> fieldFormats,
-                Optional<String> fieldInfosError,
-                OptionalLong fieldInfosGen,
-                OptionalLong docValuesGen) {
+                @Nullable String fieldInfosError,
+                @Nullable Long fieldInfosGen,
+                @Nullable Long docValuesGen) {
             this(
                     name,
                     maxDoc,
@@ -192,8 +192,8 @@ public interface Commits {
                     fieldInfosGen,
                     docValuesGen,
                     0,
-                    Optional.empty(),
-                    Optional.empty());
+                    null,
+                    null);
         }
 
         /** A segment before codecs, as Lucene 2.x and 3.x write it. */
@@ -202,10 +202,10 @@ public interface Commits {
                 int maxDoc,
                 int docBase,
                 int delCount,
-                OptionalLong delGen,
+                @Nullable Long delGen,
                 String luceneVersion,
                 boolean compound,
-                OptionalLong sizeInBytes,
+                @Nullable Long sizeInBytes,
                 Map<String, String> diagnostics,
                 Map<String, String> attributes) {
             this(
@@ -219,13 +219,13 @@ public interface Commits {
                     sizeInBytes,
                     diagnostics,
                     attributes,
-                    Optional.empty(),
-                    Optional.empty(),
-                    Optional.empty(),
+                    null,
+                    null,
+                    null,
                     List.of(),
-                    Optional.empty(),
-                    OptionalLong.empty(),
-                    OptionalLong.empty());
+                    null,
+                    null,
+                    null);
         }
     }
 
@@ -242,8 +242,8 @@ public interface Commits {
             String storedFields,
             String termVectors,
             String norms,
-            Optional<String> points,
-            Optional<String> knnVectors,
+            @Nullable String points,
+            @Nullable String knnVectors,
             String fieldInfos,
             String segmentInfo,
             String liveDocs,
@@ -257,7 +257,10 @@ public interface Commits {
      * @param knnVectors empty if the field has no KNN vectors
      */
     record FieldFormats(
-            String field, Optional<String> postings, Optional<String> docValues, Optional<String> knnVectors) {}
+            String field,
+            @Nullable String postings,
+            @Nullable String docValues,
+            @Nullable String knnVectors) {}
 
     /**
      * A file of a commit.
@@ -265,7 +268,8 @@ public interface Commits {
      * @param segment the segment it belongs to; empty for {@code segments_N}
      * @param size its size in bytes; empty if it can't be stat'ed
      */
-    record CommitFile(String name, Optional<String> segment, OptionalLong size) {}
+    record CommitFile(
+            String name, @Nullable String segment, @Nullable Long size) {}
 
     /** A commit with its segments, in commit order, and its files, in name order. */
     record CommitDetails(Commit commit, List<Segment> segments, List<CommitFile> files) {}

@@ -78,7 +78,7 @@ public final class ExportJob {
 
     // Guarded by this.
     private Snapshot snapshot = Snapshot.of(State.LOADING);
-    private Long rebuildJob;
+    private @Nullable Long rebuildJob;
 
     private ExportJob(DocumentExporter.Calls calls, Request request, Duration poll) {
         this.calls = calls;

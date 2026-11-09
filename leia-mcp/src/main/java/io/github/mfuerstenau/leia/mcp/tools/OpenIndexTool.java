@@ -10,7 +10,7 @@ import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
-import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /** {@code open_index}: opens an index in place of the open one (ADR 0100 §7), below the roots if any (ADR 0102). */
 final class OpenIndexTool implements McpTool<OpenIndexTool.Arguments, IndexInfoTool.Result> {
@@ -22,7 +22,8 @@ final class OpenIndexTool implements McpTool<OpenIndexTool.Arguments, IndexInfoT
 
             @Description("The Lucene Directory to read it through: FS lets Lucene choose, MMAP is MMapDirectory, NIO"
                     + " is NIOFSDirectory. Defaults to leia's --directory")
-            Optional<DirectoryImpl> directory) {}
+            @Nullable
+            DirectoryImpl directory) {}
 
     @Override
     public String name() {

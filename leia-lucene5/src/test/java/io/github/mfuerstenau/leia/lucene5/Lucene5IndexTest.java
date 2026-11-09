@@ -27,6 +27,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.BitSet;
 import java.util.Comparator;
 import java.util.HexFormat;
@@ -34,8 +35,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalInt;
-import java.util.OptionalLong;
 import java.util.ServiceLoader;
 import java.util.Set;
 import java.util.TreeMap;
@@ -57,6 +56,7 @@ import org.apache.lucene.search.similarities.ClassicSimilarity;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -125,8 +125,7 @@ class Lucene5IndexTest {
             assertSegments(only);
             assertThat(only.oldestMajor()).isEqualTo(name.equals("lucene4") ? 4 : 5);
             // Recorded since 5.3.
-            assertThat(only.luceneVersion())
-                    .isEqualTo(name.equals("lucene4") ? Optional.empty() : Optional.of("5.5.5"));
+            assertThat(only.luceneVersion()).isEqualTo(name.equals("lucene4") ? null : "5.5.5");
             assertThat(only.commitVersion("?")).isEqualTo(version);
 
             assertThat(stats.fields())
@@ -155,14 +154,14 @@ class Lucene5IndexTest {
                             0,
                             0,
                             // alpha, document and 1 to 7 in each document, beta in 4, gamma twice in 1.
-                            Optional.of(new RuntimeIndex.TermStats(7, 26, 27))));
+                            new RuntimeIndex.TermStats(7, 26, 27)));
             RuntimeIndex.Field tag = stats.fields().get(2);
             assertThat(tag.indexOptions()).isEqualTo(RuntimeIndex.IndexOptions.DOCS);
             assertThat(tag.hasNorms()).isFalse();
             // Without frequencies, sumTotalTermFreq is sumDocFreq.
-            assertThat(tag.terms()).contains(new RuntimeIndex.TermStats(7, 7, 7));
+            assertThat(tag.terms()).isEqualTo(new RuntimeIndex.TermStats(7, 7, 7));
             assertThat(stats.fields().get(5).indexOptions()).isEqualTo(RuntimeIndex.IndexOptions.NONE);
-            assertThat(stats.fields().get(5).terms()).isEmpty();
+            assertThat(stats.fields().get(5).terms()).isNull();
             assertThat(stats.fields().subList(6, 11))
                     .extracting(RuntimeIndex.Field::docValuesType)
                     .containsExactly(
@@ -188,37 +187,39 @@ class Lucene5IndexTest {
                     .isInstanceOfSatisfying(
                             RuntimeIndex.StoredValue.Binary.class,
                             binary -> assertThat(binary.bytes()).containsExactly(0xff, 0xfe, 1));
-            assertThat(field(first, "body").norm()).isPresent();
+            assertThat(field(first, "body").norm()).isNotNull();
             assertThat(field(first, "body").hasTermVector()).isTrue();
-            assertThat(field(first, "tag").norm()).isEmpty();
-            assertThat(field(first, "body").docValues()).isEmpty();
+            assertThat(field(first, "tag").norm()).isNull();
+            assertThat(field(first, "body").docValues()).isNull();
 
             assertThat(field(first, "dv_num").docValues())
-                    .contains(new Documents.DocValues(RuntimeIndex.DocValuesType.NUMERIC, List.of(1L), List.of()));
-            assertThat(field(first, "dv_sorted_num").docValues().orElseThrow().numbers())
+                    .isEqualTo(new Documents.DocValues(RuntimeIndex.DocValuesType.NUMERIC, List.of(1L), List.of()));
+            assertThat(Optional.ofNullable(field(first, "dv_sorted_num").docValues())
+                            .orElseThrow()
+                            .numbers())
                     .containsExactly(-1L, 1L);
-            assertThat(field(first, "dv_bin").docValues().orElseThrow().values())
+            assertThat(Optional.ofNullable(field(first, "dv_bin").docValues())
+                            .orElseThrow()
+                            .values())
                     .extracting(Lucene5IndexTest::text)
                     .containsExactly("b1");
-            assertThat(field(first, "dv_sorted").docValues().orElseThrow().values())
+            assertThat(Optional.ofNullable(field(first, "dv_sorted").docValues())
+                            .orElseThrow()
+                            .values())
                     .extracting(Lucene5IndexTest::text)
                     .containsExactly("s1");
-            assertThat(field(first, "dv_set").docValues().orElseThrow().values())
+            assertThat(Optional.ofNullable(field(first, "dv_set").docValues())
+                            .orElseThrow()
+                            .values())
                     .extracting(Lucene5IndexTest::text)
                     .containsExactly("x", "y1");
 
             // Document 3 has no dv_num; 5.x set that of document 4 to 400.
-            assertThat(field(documents.document(2), "dv_num").docValues()).isEmpty();
-            assertThat(field(documents.document(3), "dv_num")
-                            .docValues()
-                            .orElseThrow()
-                            .numbers())
+            assertThat(field(documents.document(2), "dv_num").docValues()).isNull();
+            assertThat(field(documents.document(3), "dv_num").docValues().numbers())
                     .containsExactly(name.equals("lucene4") ? 4L : 400L);
             // In the second segment.
-            assertThat(field(documents.document(6), "dv_set")
-                            .docValues()
-                            .orElseThrow()
-                            .values())
+            assertThat(field(documents.document(6), "dv_set").docValues().values())
                     .extracting(Lucene5IndexTest::text)
                     .containsExactly("x", "y7");
             assertThat(documents.document(1).deleted()).isTrue();
@@ -232,13 +233,13 @@ class Lucene5IndexTest {
         try (RuntimeIndex index = open(name)) {
             Documents documents = index.documents().orElseThrow();
             int maxDoc = index.maxDoc();
-            List<Documents.StoredDocument> live = documents.storedValues(0, maxDoc, Optional.of(Set.of("id")), false);
+            List<Documents.StoredDocument> live = documents.storedValues(0, maxDoc, Set.of("id"), false);
             assertThat(live).extracting(Documents.StoredDocument::docId).doesNotContain(1);
             assertThat(live).extracting(Documents.StoredDocument::deleted).containsOnly(false);
             assertThat(live.getFirst().values())
                     .containsExactly(Map.entry("id", List.of(new RuntimeIndex.StoredValue.Text("1"))));
 
-            List<Documents.StoredDocument> page = documents.storedValues(1, 3, Optional.empty(), true);
+            List<Documents.StoredDocument> page = documents.storedValues(1, 3, null, true);
             assertThat(page)
                     .extracting(Documents.StoredDocument::docId, Documents.StoredDocument::deleted)
                     .containsExactly(tuple(1, true), tuple(2, false));
@@ -251,13 +252,12 @@ class Lucene5IndexTest {
                             .isEqualTo(field.stored());
                 }
             }
-            assertThat(documents.storedValues(maxDoc, maxDoc, Optional.empty(), true))
-                    .isEmpty();
-            assertThatThrownBy(() -> documents.storedValues(-1, 1, Optional.empty(), true))
+            assertThat(documents.storedValues(maxDoc, maxDoc, null, true)).isEmpty();
+            assertThatThrownBy(() -> documents.storedValues(-1, 1, null, true))
                     .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> documents.storedValues(2, 1, Optional.empty(), true))
+            assertThatThrownBy(() -> documents.storedValues(2, 1, null, true))
                     .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> documents.storedValues(0, maxDoc + 1, Optional.empty(), true))
+            assertThatThrownBy(() -> documents.storedValues(0, maxDoc + 1, null, true))
                     .isInstanceOf(IllegalArgumentException.class);
         }
     }
@@ -276,15 +276,16 @@ class Lucene5IndexTest {
                             tuple("document", 1),
                             tuple("gamma", 2));
             Documents.Position alpha = vector.get(1).positions().getFirst();
-            assertThat(alpha.position()).hasValue(0);
-            assertThat(alpha.startOffset()).hasValue(0);
+            assertThat(alpha.position()).isEqualTo(0);
+            assertThat(alpha.startOffset()).isEqualTo(0);
             // The token's offsets are those of alpha|a1.
-            assertThat(alpha.endOffset()).hasValue(8);
-            assertThat(alpha.payload().map(Lucene5IndexTest::text)).contains("a1");
+            assertThat(alpha.endOffset()).isEqualTo(8);
+            assertThat(Optional.ofNullable(alpha.payload()).map(Lucene5IndexTest::text))
+                    .contains("a1");
             assertThat(vector.get(4).positions())
-                    .extracting(position -> position.position().getAsInt())
+                    .extracting(position -> position.position())
                     .containsExactly(4, 5);
-            assertThat(vector.get(4).positions().getFirst().payload()).isEmpty();
+            assertThat(vector.get(4).positions().getFirst().payload()).isNull();
             assertThat(index.documents().orElseThrow().termVector(0, "tag")).isEmpty();
         }
     }
@@ -295,20 +296,22 @@ class Lucene5IndexTest {
         try (RuntimeIndex index = open(name)) {
             Terms terms = index.terms().orElseThrow();
             // An IntField's terms are trie-encoded: a shift byte from 0x60, then 7 bits per byte.
-            Terms.TermsPage price = terms.terms("price", Optional.empty(), 2);
+            Terms.TermsPage price = terms.terms("price", null, 2);
             assertThat(price.terms()).hasSize(2);
             assertThat(price.terms().getFirst().term()[0]).isEqualTo((byte) 0x60);
             Terms.TermsPage rest = terms.terms("price", price.next(), 1000);
-            assertThat(rest.terms().getFirst().term()).isEqualTo(price.next().orElseThrow());
-            assertThat(rest.next()).isEmpty();
+            assertThat(rest.terms().getFirst().term())
+                    .isEqualTo(Optional.ofNullable(price.next()).orElseThrow());
+            assertThat(rest.next()).isNull();
 
-            Terms.TermsPage ids = terms.terms("id", Optional.of(utf8("3")), 2);
+            Terms.TermsPage ids = terms.terms("id", utf8("3"), 2);
             assertThat(ids.terms())
                     .extracting(term -> text(term.term()), Terms.TermEntry::docFreq, Terms.TermEntry::totalTermFreq)
                     .containsExactly(tuple("3", 1, 1L), tuple("4", 1, 1L));
-            assertThat(ids.next().map(Lucene5IndexTest::text)).contains("5");
-            assertThat(terms.terms("id", Optional.of(utf8("9")), 2).terms()).isEmpty();
-            assertThat(terms.terms("nothing", Optional.empty(), 2).terms()).isEmpty();
+            assertThat(Optional.ofNullable(ids.next()).map(Lucene5IndexTest::text))
+                    .contains("5");
+            assertThat(terms.terms("id", utf8("9"), 2).terms()).isEmpty();
+            assertThat(terms.terms("nothing", null, 2).terms()).isEmpty();
 
             Terms.PostingsPage alpha = terms.postings("body", utf8("alpha"), 0, 3, 0);
             assertThat(alpha.docFreq()).isEqualTo(7);
@@ -318,7 +321,7 @@ class Lucene5IndexTest {
                             new Terms.Posting(0, 1, false),
                             new Terms.Posting(1, 1, true),
                             new Terms.Posting(2, 1, false));
-            assertThat(alpha.nextDoc()).hasValue(3);
+            assertThat(alpha.nextDoc()).isEqualTo(3);
             assertThat(terms.postings("body", utf8("alpha"), 6, 3, 0).postings())
                     .containsExactly(new Terms.Posting(6, 1, false));
             // Docs only: totalTermFreq is docFreq, as in Lucene 10.
@@ -348,13 +351,13 @@ class Lucene5IndexTest {
                             .postings()
                             .getFirst()
                             .positions())
-                    .extracting(position -> position.position().getAsInt())
+                    .extracting(position -> position.position())
                     .containsExactly(4, 5);
             assertThat(terms.postings("body", utf8("gamma"), 0, 10, 1)
                             .postings()
                             .getFirst()
                             .positions())
-                    .extracting(position -> position.position().getAsInt())
+                    .extracting(position -> position.position())
                     .containsExactly(4);
             // Without maxPositions there are none, and a field without positions has empty lists.
             assertThat(terms.postings("body", utf8("gamma"), 0, 10, 0).postings())
@@ -372,13 +375,14 @@ class Lucene5IndexTest {
             Terms terms = index.terms().orElseThrow();
             assertThat(terms.positions(0, "body", utf8("gamma")).orElseThrow())
                     .extracting(
-                            position -> position.position().getAsInt(),
-                            position -> position.startOffset().getAsInt(),
-                            position -> position.endOffset().getAsInt())
+                            position -> position.position(),
+                            position -> position.startOffset(),
+                            position -> position.endOffset())
                     .containsExactly(tuple(4, 25, 30), tuple(5, 31, 36));
             assertThat(terms.positions(4, "body", utf8("alpha")).orElseThrow())
                     .singleElement()
-                    .satisfies(alpha -> assertThat(alpha.payload().map(Lucene5IndexTest::text))
+                    .satisfies(alpha -> assertThat(
+                                    Optional.ofNullable(alpha.payload()).map(Lucene5IndexTest::text))
                             .contains("a5"));
             // Deleted documents have their positions too.
             assertThat(terms.positions(1, "body", utf8("alpha"))).isPresent();
@@ -414,7 +418,7 @@ class Lucene5IndexTest {
             Search search = index.search().orElseThrow();
             Search.ParsedQuery query = search.parse("documents AND (beta OR gamma)", BODY, named("EnglishAnalyzer"));
             assertThat(query).hasToString("+body:document +(body:beta body:gamma)");
-            Search.SearchResults results = search.search(query, 0, 10, Optional.of(List.of("id")), _ -> {});
+            Search.SearchResults results = search.search(query, 0, 10, List.of("id"), _ -> {});
             assertThat(results.totalHits()).isEqualTo(4);
             assertThat(results.hits().getFirst().docId()).isZero();
             assertThat(results.hits()).extracting(Search.Hit::docId).containsExactlyInAnyOrder(0, 2, 4, 6);
@@ -455,25 +459,20 @@ class Lucene5IndexTest {
     @ValueSource(strings = {"lucene4", "lucene5"})
     void searchesATerm(String name) throws Exception {
         try (RuntimeIndex index = open(name)) {
-            for (Terms.TermEntry term : index.terms()
-                    .orElseThrow()
-                    .terms("body", Optional.empty(), 100)
-                    .terms()) {
+            for (Terms.TermEntry term :
+                    index.terms().orElseThrow().terms("body", null, 100).terms()) {
                 searchesTheTerm(index, "body", term.term());
             }
             // A trie-encoded numeric field's terms are bytes, which aren't text; 7.x has points instead.
-            for (Terms.TermEntry price : index.terms()
-                    .orElseThrow()
-                    .terms("price", Optional.empty(), 1)
-                    .terms()) {
+            for (Terms.TermEntry price :
+                    index.terms().orElseThrow().terms("price", null, 1).terms()) {
                 searchesTheTerm(index, "price", price.term());
             }
 
             Search search = index.search().orElseThrow();
             Search.ParsedQuery nothing = search.term("body", utf8("nothing"));
             assertThat(nothing.toString()).isEqualTo("body:nothing");
-            assertThat(search.search(nothing, 0, 10, Optional.empty(), _ -> {}).totalHits())
-                    .isZero();
+            assertThat(search.search(nothing, 0, 10, null, _ -> {}).totalHits()).isZero();
             assertThat(search.matches(nothing, false, _ -> {}).docs().isEmpty()).isTrue();
         }
     }
@@ -489,7 +488,7 @@ class Lucene5IndexTest {
                 .filter(posting -> !posting.deleted())
                 .map(Terms.Posting::docId)
                 .toList();
-        Search.SearchResults results = search.search(query, 0, index.maxDoc(), Optional.empty(), _ -> {});
+        Search.SearchResults results = search.search(query, 0, index.maxDoc(), null, _ -> {});
         assertThat(results.totalHits()).isEqualTo(live.size());
         assertThat(results.hits()).extracting(Search.Hit::docId).containsExactlyInAnyOrderElementsOf(live);
         assertThat(search.matches(query, false, _ -> {}).docs().stream().boxed().toList())
@@ -507,8 +506,7 @@ class Lucene5IndexTest {
         try (RuntimeIndex index = open("lucene5")) {
             Search search = index.search().orElseThrow();
             Search.ParsedQuery alpha = search.parse("alpha", BODY, named("StandardAnalyzer"));
-            Search.Hit hit =
-                    search.search(alpha, 0, 1, Optional.empty(), _ -> {}).hits().getFirst();
+            Search.Hit hit = search.search(alpha, 0, 1, null, _ -> {}).hits().getFirst();
             List<Long> progress = new ArrayList<>();
             Search.Explanation explanation = search.explain(alpha, hit.docId(), progress::add);
             assertThat(explanation.match()).isTrue();
@@ -542,9 +540,7 @@ class Lucene5IndexTest {
     /** The document ids of a search for {@code alpha}, which every live document has, by {@code sort}. */
     private static Search.SearchResults sorted(RuntimeIndex index, Scoring.SortKey... sort) throws Exception {
         Search.ParsedQuery alpha = index.search().orElseThrow().parse("alpha", BODY, named("StandardAnalyzer"));
-        return index.scoring()
-                .orElseThrow()
-                .search(alpha, BM25, List.of(sort), 0, 10, Optional.of(List.of("id")), _ -> {});
+        return index.scoring().orElseThrow().search(alpha, BM25, List.of(sort), 0, 10, List.of("id"), _ -> {});
     }
 
     private static Scoring.SortKey.Field field(
@@ -559,7 +555,8 @@ class Lucene5IndexTest {
     /** The number each hit was sorted by in its first key; null where it has none. */
     private static List<Number> numbers(Search.SearchResults results) {
         return results.hits().stream()
-                .map(hit -> hit.sortValues().getFirst().number().orElse(null))
+                .map(hit -> Optional.ofNullable(hit.sortValues().getFirst().number())
+                        .orElse(null))
                 .toList();
     }
 
@@ -605,7 +602,9 @@ class Lucene5IndexTest {
                     sorted(index, field("dv_set", Scoring.SortType.STRING, false, Scoring.SortSelector.MIDDLE_MAX));
             assertThat(docIds(set)).containsExactly(0, 2, 3, 4, 5, 6);
             assertThat(set.hits())
-                    .extracting(hit -> text(hit.sortValues().getFirst().term().orElseThrow()))
+                    .extracting(hit ->
+                            text(Optional.ofNullable(hit.sortValues().getFirst().term())
+                                    .orElseThrow()))
                     .containsExactly("y1", "y3", "y4", "y5", "y6", "y7");
 
             assertThatThrownBy(() ->
@@ -636,16 +635,9 @@ class Lucene5IndexTest {
             Search.ParsedQuery alpha = index.search().orElseThrow().parse("alpha", BODY, named("StandardAnalyzer"));
             assertThatThrownBy(() -> index.scoring()
                             .orElseThrow()
-                            .search(
-                                    alpha,
-                                    BM25,
-                                    List.of(new Scoring.SortKey.Doc(false)),
-                                    0,
-                                    10,
-                                    Optional.empty(),
-                                    _ -> {
-                                        throw stop;
-                                    }))
+                            .search(alpha, BM25, List.of(new Scoring.SortKey.Doc(false)), 0, 10, null, _ -> {
+                                throw stop;
+                            }))
                     .isSameAs(stop);
         }
     }
@@ -658,9 +650,8 @@ class Lucene5IndexTest {
             Search.ParsedQuery query = search.parse("beta^2 gamma", BODY, named("StandardAnalyzer"));
             // 5.5's default, TF-IDF
             Search.Hit byDefault =
-                    search.search(query, 0, 1, Optional.empty(), _ -> {}).hits().getFirst();
-            assertThat(scoring.search(
-                                    query, new Scoring.Similarity.Classic(), List.of(), 0, 1, Optional.empty(), _ -> {})
+                    search.search(query, 0, 1, null, _ -> {}).hits().getFirst();
+            assertThat(scoring.search(query, new Scoring.Similarity.Classic(), List.of(), 0, 1, null, _ -> {})
                             .hits())
                     .singleElement()
                     .satisfies(hit -> {
@@ -669,7 +660,7 @@ class Lucene5IndexTest {
                         assertThat(hit.sortValues()).isEmpty();
                     });
             for (Scoring.Similarity similarity : List.of(BM25, new Scoring.Similarity.Bool())) {
-                Search.Hit hit = scoring.search(query, similarity, List.of(), 0, 1, Optional.empty(), _ -> {})
+                Search.Hit hit = scoring.search(query, similarity, List.of(), 0, 1, null, _ -> {})
                         .hits()
                         .getFirst();
                 assertThat(hit.score()).as("%s", similarity).isNotEqualTo(byDefault.score());
@@ -680,7 +671,7 @@ class Lucene5IndexTest {
                         .isEqualTo(hit.score());
             }
             // Boolean: beta's boost 2 and gamma's 1.
-            assertThat(scoring.search(query, new Scoring.Similarity.Bool(), List.of(), 0, 1, Optional.empty(), _ -> {})
+            assertThat(scoring.search(query, new Scoring.Similarity.Bool(), List.of(), 0, 1, null, _ -> {})
                             .hits()
                             .getFirst()
                             .score())
@@ -717,14 +708,9 @@ class Lucene5IndexTest {
                             "Alpha beta",
                             BODY,
                             new Search.AnalyzerSpec.Preset(
-                                    "EnglishAnalyzer",
-                                    Optional.of(new Search.AnalyzerSpec.WordSet.Words(List.of("alpha"))),
-                                    OptionalInt.empty())))
+                                    "EnglishAnalyzer", new Search.AnalyzerSpec.WordSet.Words(List.of("alpha")), null)))
                     .hasToString("body:beta");
-            assertThat(search.parse(
-                            "abcdef",
-                            BODY,
-                            new Search.AnalyzerSpec.Preset("StandardAnalyzer", Optional.empty(), OptionalInt.of(3))))
+            assertThat(search.parse("abcdef", BODY, new Search.AnalyzerSpec.Preset("StandardAnalyzer", null, 3)))
                     .hasToString("body:abc body:def");
             assertThat(search.parse(
                             "\"Alpha beta\" id:\"A b\"",
@@ -732,8 +718,8 @@ class Lucene5IndexTest {
                             new Search.AnalyzerSpec.PerField(
                                     new Search.AnalyzerSpec.Wrapped(
                                             named("SimpleAnalyzer"),
-                                            Optional.empty(),
-                                            Optional.of(new Search.AnalyzerSpec.LimitTokenCount(1, false))),
+                                            null,
+                                            new Search.AnalyzerSpec.LimitTokenCount(1, false)),
                                     Map.of("id", named("KeywordAnalyzer")))))
                     .hasToString("body:alpha id:A b");
             assertThatThrownBy(() -> search.parse("alpha", BODY, named("SmartChineseAnalyzer")))
@@ -744,15 +730,11 @@ class Lucene5IndexTest {
                             "alpha",
                             BODY,
                             new Search.AnalyzerSpec.Preset(
-                                    "WhitespaceAnalyzer",
-                                    Optional.of(new Search.AnalyzerSpec.WordSet.Words(List.of("a"))),
-                                    OptionalInt.empty())))
+                                    "WhitespaceAnalyzer", new Search.AnalyzerSpec.WordSet.Words(List.of("a")), null)))
                     .isInstanceOf(Search.InvalidAnalyzerException.class)
                     .hasMessage("WhitespaceAnalyzer takes no stop words");
-            assertThatThrownBy(() -> search.parse(
-                            "alpha",
-                            BODY,
-                            new Search.AnalyzerSpec.Preset("EnglishAnalyzer", Optional.empty(), OptionalInt.of(3))))
+            assertThatThrownBy(() ->
+                            search.parse("alpha", BODY, new Search.AnalyzerSpec.Preset("EnglishAnalyzer", null, 3)))
                     .isInstanceOf(Search.InvalidAnalyzerException.class)
                     .hasMessage("EnglishAnalyzer takes no max token length");
             // Its StopAnalyzer has default stop words, unlike 9.12's (ADR 0075).
@@ -764,27 +746,26 @@ class Lucene5IndexTest {
                                     List.of(),
                                     new Search.AnalyzerSpec.Component("whitespace", Map.of()),
                                     List.of(new Search.AnalyzerSpec.Component("lowercase", Map.of())),
-                                    Optional.empty())))
+                                    null)))
                     .hasToString("body:alpha body:beta");
             assertThat(search.parse(
                             "\"alpha beta gamma\"",
                             BODY,
                             new Search.AnalyzerSpec.Wrapped(
                                     named("StandardAnalyzer"),
-                                    Optional.of(new Search.AnalyzerSpec.Shingles(2, 2, "_", false, false, "-")),
-                                    Optional.empty())))
+                                    new Search.AnalyzerSpec.Shingles(2, 2, "_", false, false, "-"),
+                                    null)))
                     .hasToString("body:\"alpha_beta beta_gamma\"");
             Search.AnalyzerSpec collation = new Search.AnalyzerSpec.Preset(
                     "CollationKeyAnalyzer",
-                    Optional.empty(),
-                    Optional.empty(),
-                    OptionalInt.empty(),
-                    Optional.empty(),
-                    Optional.empty(),
-                    Optional.empty(),
-                    Optional.of(new Search.AnalyzerSpec.Collation(
-                            "de", Optional.of(Search.AnalyzerSpec.CollationStrength.PRIMARY), Optional.empty())),
-                    Optional.empty());
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    new Search.AnalyzerSpec.Collation("de", Search.AnalyzerSpec.CollationStrength.PRIMARY, null),
+                    null);
             assertThat(search.parse("Alpha", BODY, collation).toString())
                     .isEqualTo(search.parse("alpha", BODY, collation).toString());
             assertThat(search.parse(
@@ -792,15 +773,14 @@ class Lucene5IndexTest {
                             BODY,
                             new Search.AnalyzerSpec.Preset(
                                     "DutchAnalyzer",
-                                    Optional.empty(),
-                                    Optional.empty(),
-                                    OptionalInt.empty(),
-                                    Optional.of(
-                                            new Search.AnalyzerSpec.StemDictionary.Entries(Map.of("alpha", "gamma"))),
-                                    Optional.empty(),
-                                    Optional.empty(),
-                                    Optional.empty(),
-                                    Optional.empty())))
+                                    null,
+                                    null,
+                                    null,
+                                    new Search.AnalyzerSpec.StemDictionary.Entries(Map.of("alpha", "gamma")),
+                                    null,
+                                    null,
+                                    null,
+                                    null)))
                     .hasToString("body:gamma");
             assertThatThrownBy(() -> search.parse(
                             "alpha",
@@ -809,7 +789,7 @@ class Lucene5IndexTest {
                                     List.of(),
                                     new Search.AnalyzerSpec.Component("standard", Map.of()),
                                     List.of(new Search.AnalyzerSpec.Component("romanianNormalization", Map.of())),
-                                    Optional.empty())))
+                                    null)))
                     .isInstanceOf(Search.UnsupportedAnalyzerException.class)
                     .hasMessage("Lucene 5.5.5 has no token filter 'romanianNormalization'");
         }
@@ -885,7 +865,7 @@ class Lucene5IndexTest {
         Terms terms = index.terms().orElseThrow();
         Optional<byte[]> from = Optional.empty();
         do {
-            Terms.TermsPage page = terms.terms(field.name(), from, 100);
+            Terms.TermsPage page = terms.terms(field.name(), from.orElse(null), 100);
             for (Terms.TermEntry entry : page.terms()) {
                 List<Terms.Posting> postings =
                         terms.postings(field.name(), entry.term(), doc, 1, 0).postings();
@@ -899,7 +879,7 @@ class Lucene5IndexTest {
                                     : List.of()));
                 }
             }
-            from = page.next();
+            from = Optional.ofNullable(page.next());
         } while (from.isPresent());
         return result;
     }
@@ -910,7 +890,8 @@ class Lucene5IndexTest {
                         + term.positions().stream()
                                 .map(position -> position.position() + "/" + position.startOffset() + "/"
                                         + position.endOffset() + "/"
-                                        + position.payload().map(HexFormat.of()::formatHex))
+                                        + Optional.ofNullable(position.payload())
+                                                .map(HexFormat.of()::formatHex))
                                 .toList())
                 .toList();
     }
@@ -927,9 +908,12 @@ class Lucene5IndexTest {
                     .extracting(RuntimeIndex.IndexStats::path, RuntimeIndex.IndexStats::docBase)
                     .containsExactly(tuple(lucene4, 0), tuple(lucene5, 7));
             assertThat(index.skipped()).extracting(RuntimeIndex.Skipped::path).containsExactly(empty);
-            assertThat(index.fields().get(1).terms()).contains(new RuntimeIndex.TermStats(14, 52, 54));
+            assertThat(index.fields().get(1).terms()).isEqualTo(new RuntimeIndex.TermStats(14, 52, 54));
             Documents.IndexDocument doc = index.documents().orElseThrow().document(10);
-            assertThat(field(doc, "dv_num").docValues().orElseThrow().numbers()).containsExactly(400L);
+            assertThat(Optional.ofNullable(field(doc, "dv_num").docValues())
+                            .orElseThrow()
+                            .numbers())
+                    .containsExactly(400L);
             assertThat(index.terms()
                             .orElseThrow()
                             .postings("id", utf8("2"), 0, 10, 0)
@@ -937,7 +921,8 @@ class Lucene5IndexTest {
                     .containsExactly(new Terms.Posting(1, 1, true), new Terms.Posting(8, 1, true));
             assertThat(index.terms().orElseThrow().positions(7, "body", utf8("alpha")))
                     .hasValueSatisfying(positions -> assertThat(
-                                    positions.getFirst().payload().map(Lucene5IndexTest::text))
+                                    Optional.ofNullable(positions.getFirst().payload())
+                                            .map(Lucene5IndexTest::text))
                             .contains("a1"));
         }
     }
@@ -964,34 +949,34 @@ class Lucene5IndexTest {
         assertThat(plain.name()).isEqualTo("_0");
         assertThat(plain.codec()).contains(five ? "Lucene54" : "Lucene410");
         // Segment ids came with 5.0.
-        assertThat(plain.id()).matches(id -> five ? id.orElseThrow().length() > 20 : id.isEmpty());
+        assertThat(plain.id()).matches(id -> five ? id != null && id.length() > 20 : id == null);
         assertThat(plain.compound()).isFalse();
-        assertThat(plain.delGen()).hasValue(1);
-        assertThat(plain.fieldInfosGen()).isEqualTo(five ? OptionalLong.of(1) : OptionalLong.empty());
-        assertThat(plain.docValuesGen()).isEqualTo(five ? OptionalLong.of(1) : OptionalLong.empty());
+        assertThat(plain.delGen()).isEqualTo(1);
+        assertThat(plain.fieldInfosGen()).isEqualTo(five ? Long.valueOf(1) : null);
+        assertThat(plain.docValuesGen()).isEqualTo(five ? Long.valueOf(1) : null);
         assertThat(plain.luceneVersion()).isEqualTo(five ? "5.5.5" : "4.10.4");
-        assertThat(plain.sizeInBytes()).isPresent();
+        assertThat(plain.sizeInBytes()).isNotNull();
         assertThat(plain.diagnostics()).containsEntry("source", "flush");
-        assertThat(plain.formats()).hasValueSatisfying(formats -> {
-            assertThat(formats.points()).isEmpty();
-            assertThat(formats.knnVectors()).isEmpty();
+        assertThat(plain.formats()).satisfies(formats -> {
+            assertThat(formats.points()).isNull();
+            assertThat(formats.knnVectors()).isNull();
             assertThat(formats.storedFields()).isNotBlank();
             // 4.10's norms format is an anonymous subclass: shown by the class it extends.
             assertThat(formats.norms()).isEqualTo(five ? "Lucene53NormsFormat" : "Lucene49NormsFormat");
         });
-        assertThat(plain.fieldInfosError()).isEmpty();
+        assertThat(plain.fieldInfosError()).isNull();
         assertThat(plain.fieldFormats())
                 .filteredOn(formats ->
                         formats.field().equals("body") || formats.field().equals("dv_num"))
                 .extracting(
                         Commits.FieldFormats::field, Commits.FieldFormats::postings, Commits.FieldFormats::docValues)
                 .containsExactly(
-                        tuple("body", Optional.of(five ? "Lucene50" : "Lucene41"), Optional.empty()),
-                        tuple("dv_num", Optional.empty(), Optional.of(five ? "Lucene54" : "Lucene410")));
+                        tuple("body", five ? "Lucene50" : "Lucene41", null),
+                        tuple("dv_num", null, five ? "Lucene54" : "Lucene410"));
         Commits.Segment compound = details.segments().get(1);
         assertThat(compound.compound()).isTrue();
         assertThat(compound.docBase()).isEqualTo(4);
-        assertThat(compound.delGen()).isEmpty();
+        assertThat(compound.delGen()).isNull();
         assertThat(compound.fieldFormats()).hasSize(11);
         assertThat(details.files()).extracting(Commits.CommitFile::name).contains("segments_2", "_1.cfs", "_0.si");
         assertThat(details.files())
@@ -999,7 +984,7 @@ class Lucene5IndexTest {
                 .singleElement()
                 .satisfies(file -> {
                     assertThat(file.segment()).contains("_1");
-                    assertThat(file.size()).isPresent();
+                    assertThat(file.size()).isNotNull();
                 });
         assertThat(commits.commit(testIndex(name), DirectoryKind.FS, 99)).isEmpty();
     }
@@ -1014,12 +999,12 @@ class Lucene5IndexTest {
             assertThat(check.hasThreads()).isFalse();
             Check.CheckResult result =
                     check.check(testIndex(name), DirectoryKind.FS, Check.Options.atLevel(level), lines::add, _ -> {});
-            assertThat(result.error()).isEmpty();
+            assertThat(result.error()).isNull();
             assertThat(result.clean()).isTrue();
             assertThat(result.segmentCount()).isEqualTo(2);
             assertThat(result.segments()).allSatisfy(segment -> {
-                assertThat(segment.codec()).isPresent();
-                assertThat(segment.error()).isEmpty();
+                assertThat(segment.codec()).isNotNull();
+                assertThat(segment.error()).isNull();
             });
             assertThat(lines).anyMatch(line -> line.contains("No problems were detected"));
             assertThat(lines).anyMatch(line -> line.contains("test: check integrity"));
@@ -1057,8 +1042,8 @@ class Lucene5IndexTest {
                 .check(dir, DirectoryKind.NIO, Check.Options.atLevel(1), _ -> {}, _ -> {});
         assertThat(result.clean()).isFalse();
         assertThat(result.badSegments()).isEqualTo(1);
-        assertThat(result.segments().get(0).error()).isPresent();
-        assertThat(result.segments().get(1).error()).isEmpty();
+        assertThat(result.segments().get(0).error()).isNotNull();
+        assertThat(result.segments().get(1).error()).isNull();
         assertThat(hashes(dir)).isEqualTo(before);
         assertThat(dir.resolve("write.lock")).doesNotExist();
     }
@@ -1107,10 +1092,7 @@ class Lucene5IndexTest {
                 // The first segment is in both commits, and its reader is shared.
                 assertThat(reopened.documents().orElseThrow().document(0).fields())
                         .isNotEmpty();
-                assertThat(reopened.terms()
-                                .orElseThrow()
-                                .terms("id", Optional.empty(), 20)
-                                .terms())
+                assertThat(reopened.terms().orElseThrow().terms("id", null, 20).terms())
                         .isNotEmpty();
             }
         }
@@ -1137,12 +1119,9 @@ class Lucene5IndexTest {
                 // The unchanged directory's reader, still open.
                 assertThat(reopened.documents().orElseThrow().document(0).fields())
                         .isNotEmpty();
-                assertThat(reopened.terms()
-                                .orElseThrow()
-                                .terms("id", Optional.empty(), 20)
-                                .terms())
+                assertThat(reopened.terms().orElseThrow().terms("id", null, 20).terms())
                         .extracting(term -> text(term.term()), Terms.TermEntry::docFreq)
-                        .isEqualTo(latest.terms().orElseThrow().terms("id", Optional.empty(), 20).terms().stream()
+                        .isEqualTo(latest.terms().orElseThrow().terms("id", null, 20).terms().stream()
                                 .map(term -> tuple(text(term.term()), term.docFreq()))
                                 .toList());
             }
@@ -1173,7 +1152,7 @@ class Lucene5IndexTest {
                 index.stats();
                 index.documents().orElseThrow().document(2);
                 index.documents().orElseThrow().termVector(2, "body");
-                index.terms().orElseThrow().terms("body", Optional.empty(), 100);
+                index.terms().orElseThrow().terms("body", null, 100);
                 index.terms().orElseThrow().topTerms("body", 10, _ -> {});
                 index.terms().orElseThrow().positions(2, "body", utf8("alpha"));
             }
@@ -1234,10 +1213,10 @@ class Lucene5IndexTest {
     @Test
     void readsRangeBoundsAsDates() throws Exception {
         Search.Dates dates = new Search.Dates(
-                Optional.of(Search.DateResolution.YEAR),
+                Search.DateResolution.YEAR,
                 Map.of("published", Search.DateResolution.MILLISECOND),
-                Optional.of(Locale.GERMANY),
-                Optional.of(ZoneId.of("Europe/Berlin")));
+                Locale.GERMANY,
+                ZoneId.of("Europe/Berlin"));
         try (RuntimeIndex index = open("lucene5")) {
             Search.ParsedQuery query = index.search()
                     .orElseThrow()
@@ -1284,10 +1263,10 @@ class Lucene5IndexTest {
             Search.ParsedQuery query =
                     standard.parse("gamma OR beta", STANDARD_BODY, Map.of(), named("StandardAnalyzer"));
             assertThat(query).hasToString("body:gamma body:beta");
-            Search.SearchResults results = index.search().orElseThrow().search(query, 0, 10, Optional.empty(), _ -> {});
+            Search.SearchResults results = index.search().orElseThrow().search(query, 0, 10, null, _ -> {});
             // Documents 1, 3, 5 and 7 have beta.
             assertThat(results.hits()).extracting(Search.Hit::docId).containsExactlyInAnyOrder(0, 2, 4, 6);
-            assertThat(results.likeTerms()).isEmpty();
+            assertThat(results.likeTerms()).isNull();
 
             // 5.5 lower-cases the terms of prefixes and ranges itself.
             assertThat(standard.parse("body:GAM*", STANDARD_BODY, Map.of(), named("StandardAnalyzer")))
@@ -1312,8 +1291,7 @@ class Lucene5IndexTest {
     }
 
     private static MoreLikeThisSearch.Options like(boolean boost, String... fields) {
-        return new MoreLikeThisSearch.Options(
-                List.of(fields), 1, 1, OptionalInt.empty(), 25, boost, 0, OptionalInt.empty(), Set.of());
+        return new MoreLikeThisSearch.Options(List.of(fields), 1, 1, null, 25, boost, 0, null, Set.of());
     }
 
     /**
@@ -1321,7 +1299,8 @@ class Lucene5IndexTest {
      * weakest first. They are ranked by their score.
      */
     private static void assertTheClauses(Search.SearchResults results) {
-        List<MoreLikeThisSearch.LikeTerm> terms = results.likeTerms().orElseThrow();
+        List<MoreLikeThisSearch.LikeTerm> terms =
+                Optional.ofNullable(results.likeTerms()).orElseThrow();
         assertThat(terms)
                 .isSortedAccordingTo(
                         Comparator.comparing(MoreLikeThisSearch.LikeTerm::score).reversed());
@@ -1343,13 +1322,14 @@ class Lucene5IndexTest {
                     like.like(new MoreLikeThisSearch.Source.Doc(0), like(false, "body"), named("StandardAnalyzer"));
             assertThat(query).hasToString("like(doc 0, fields [body], minTermFreq 1, minDocFreq 1, maxQueryTerms 25)");
             List<Long> progress = new ArrayList<>();
-            Search.SearchResults results = search.search(query, 0, 10, Optional.empty(), progress::add);
+            Search.SearchResults results = search.search(query, 0, 10, null, progress::add);
             assertThat(results.query()).isEqualTo(query.toString());
             assertThat(results.hits().getFirst().docId()).isZero();
             assertThat(progress).last().isEqualTo((long) index.maxDoc());
             assertTheClauses(results);
             // From the term vector of document 1: gamma twice, the rarest, ranks first.
-            List<MoreLikeThisSearch.LikeTerm> terms = results.likeTerms().orElseThrow();
+            List<MoreLikeThisSearch.LikeTerm> terms =
+                    Optional.ofNullable(results.likeTerms()).orElseThrow();
             assertThat(terms).extracting(MoreLikeThisSearch.LikeTerm::term).contains("gamma", "beta", "alpha");
             MoreLikeThisSearch.LikeTerm gamma = terms.getFirst();
             assertThat(gamma.field()).isEqualTo("body");
@@ -1391,10 +1371,10 @@ class Lucene5IndexTest {
                             new MoreLikeThisSearch.Source.Doc(0), like(false, "id", "body"), named("StandardAnalyzer")),
                     0,
                     10,
-                    Optional.empty(),
+                    null,
                     _ -> {});
             assertTheClauses(byDoc);
-            assertThat(byDoc.likeTerms().orElseThrow())
+            assertThat(Optional.ofNullable(byDoc.likeTerms()).orElseThrow())
                     .extracting(
                             MoreLikeThisSearch.LikeTerm::field,
                             MoreLikeThisSearch.LikeTerm::term,
@@ -1410,10 +1390,10 @@ class Lucene5IndexTest {
                             named("StandardAnalyzer")),
                     0,
                     10,
-                    Optional.empty(),
+                    null,
                     _ -> {});
             assertTheClauses(byText);
-            assertThat(byText.likeTerms().orElseThrow())
+            assertThat(Optional.ofNullable(byText.likeTerms()).orElseThrow())
                     .extracting(
                             MoreLikeThisSearch.LikeTerm::field,
                             MoreLikeThisSearch.LikeTerm::term,
@@ -1435,10 +1415,10 @@ class Lucene5IndexTest {
             assertThat(query)
                     .hasToString("like(text \"gamma \\\"x\\\"\", fields [body], minTermFreq 1, minDocFreq 1,"
                             + " maxQueryTerms 25, boost)");
-            Search.SearchResults results = index.search().orElseThrow().search(query, 0, 10, Optional.empty(), _ -> {});
+            Search.SearchResults results = index.search().orElseThrow().search(query, 0, 10, null, _ -> {});
             assertThat(results.hits()).extracting(Search.Hit::docId).containsExactly(0);
             assertTheClauses(results);
-            assertThat(results.likeTerms().orElseThrow())
+            assertThat(Optional.ofNullable(results.likeTerms()).orElseThrow())
                     .extracting(MoreLikeThisSearch.LikeTerm::term, MoreLikeThisSearch.LikeTerm::tf)
                     .containsExactly(tuple("gamma", 1));
         }
@@ -1449,7 +1429,7 @@ class Lucene5IndexTest {
     }
 
     private static <T> DocValuesSearch.Match<T> range(T lower, T upper) {
-        return new DocValuesSearch.Match.Range<>(Optional.ofNullable(lower), Optional.ofNullable(upper), true, true);
+        return new DocValuesSearch.Match.Range<>(lower, upper, true, true);
     }
 
     @ParameterizedTest
@@ -1471,10 +1451,7 @@ class Lucene5IndexTest {
             assertThat(matched(
                             index,
                             docValues.numbers(
-                                    "dv_num",
-                                    longs,
-                                    new DocValuesSearch.Match.Range<>(
-                                            Optional.of("5"), Optional.empty(), false, true))))
+                                    "dv_num", longs, new DocValuesSearch.Match.Range<>("5", null, false, true))))
                     .containsExactlyElementsOf(five ? List.of(3, 5, 6) : List.of(5, 6));
             // As raw double bits, every small long is a tiny positive double.
             assertThat(matched(
@@ -1496,7 +1473,7 @@ class Lucene5IndexTest {
             assertThat(query).hasToString("dv_num:[5 TO 5]");
             Search.Hit hit = index.search()
                     .orElseThrow()
-                    .search(query, 0, 1, Optional.empty(), _ -> {})
+                    .search(query, 0, 1, null, _ -> {})
                     .hits()
                     .getFirst();
             Search.Explanation explanation = index.search().orElseThrow().explain(query, hit.docId(), _ -> {});
@@ -1546,7 +1523,7 @@ class Lucene5IndexTest {
             assertThat(binary).hasToString("dv_bin:[[62 35] TO [62 37]]");
             Search.Hit hit = index.search()
                     .orElseThrow()
-                    .search(binary, 0, 1, Optional.empty(), _ -> {})
+                    .search(binary, 0, 1, null, _ -> {})
                     .hits()
                     .getFirst();
             assertThat(index.search()
@@ -1665,7 +1642,7 @@ class Lucene5IndexTest {
                     .isPositive();
             // Lucene 4.x recorded no segment ids.
             assertThat(segments(index)).allSatisfy(segment -> {
-                assertThat(segment.id().isPresent()).isEqualTo(name.equals("lucene5"));
+                assertThat(segment.id() != null).isEqualTo(name.equals("lucene5"));
                 assertThat(segment.files()).contains(segment.name() + ".si").isSorted();
             });
         }
@@ -1686,7 +1663,7 @@ class Lucene5IndexTest {
      */
     private static void assertSegmentsReadAsPages(RuntimeIndex index) throws IOException {
         Documents documents = index.documents().orElseThrow();
-        for (Optional<Set<String>> fields : List.of(Optional.<Set<String>>empty(), Optional.of(Set.of("id")))) {
+        for (Set<String> fields : Arrays.asList(null, Set.of("id"))) {
             for (boolean includeDeleted : new boolean[] {false, true}) {
                 assertThat(bySegment(index, fields, includeDeleted, IntUnaryOperator.identity()))
                         .containsExactlyElementsOf(
@@ -1700,24 +1677,23 @@ class Lucene5IndexTest {
             List<Integer> read = new ArrayList<>();
             // The next odd document at or after doc.
             documents.storedValues(
-                    segment, Optional.empty(), true, doc -> doc | 1, document -> read.add(document.docId()), _ -> {});
+                    segment, null, true, doc -> doc | 1, document -> read.add(document.docId()), _ -> {});
             assertThat(read).hasSize(info.maxDoc() / 2).allMatch(doc -> doc % 2 == 1);
             segment++;
         }
-        assertThatThrownBy(() ->
-                        documents.storedValues(0, Optional.empty(), true, IntUnaryOperator.identity(), _ -> {}, _ -> {
-                            throw new CancellationException();
-                        }))
+        assertThatThrownBy(() -> documents.storedValues(0, null, true, IntUnaryOperator.identity(), _ -> {}, _ -> {
+                    throw new CancellationException();
+                }))
                 .isInstanceOf(CancellationException.class);
         int segments = segment;
-        assertThatThrownBy(() -> documents.storedValues(
-                        segments, Optional.empty(), true, IntUnaryOperator.identity(), _ -> {}, _ -> {}))
+        assertThatThrownBy(() ->
+                        documents.storedValues(segments, null, true, IntUnaryOperator.identity(), _ -> {}, _ -> {}))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     /** The stored documents of every segment, read a segment at a time, as {@link #described}. */
     private static List<String> bySegment(
-            RuntimeIndex index, Optional<Set<String>> fields, boolean includeDeleted, IntUnaryOperator next)
+            RuntimeIndex index, @Nullable Set<String> fields, boolean includeDeleted, IntUnaryOperator next)
             throws IOException {
         Documents documents = index.documents().orElseThrow();
         List<String> read = new ArrayList<>();

@@ -4,7 +4,6 @@ import io.github.mfuerstenau.leia.core.IndexCheck;
 import io.github.mfuerstenau.leia.runtime.Check;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import java.nio.file.Path;
-import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.LongConsumer;
 
@@ -31,14 +30,16 @@ final class Lucene10Check implements Check {
         IndexCheck.Result result = IndexCheck.check(
                 dir,
                 Lucene10Index.directoryImpl(kind),
-                options.level().orElse(DEFAULT_LEVEL),
-                options.threads().orElse(Runtime.getRuntime().availableProcessors()),
-                options.segments().orElse(null),
+                options.level() != null ? options.level() : DEFAULT_LEVEL,
+                options.threads() != null
+                        ? options.threads()
+                        : Runtime.getRuntime().availableProcessors(),
+                options.segments(),
                 line,
                 progress::accept);
-        Optional<String> error = result.error();
-        if (error.isPresent()) {
-            return CheckResult.failed(error.get());
+        String error = result.error();
+        if (error != null) {
+            return CheckResult.failed(error);
         }
         return new CheckResult(
                 result.clean(),

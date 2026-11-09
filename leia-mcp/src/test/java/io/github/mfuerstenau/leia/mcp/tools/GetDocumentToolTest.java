@@ -16,7 +16,6 @@ import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.function.Function;
 import java.util.function.LongFunction;
@@ -71,7 +70,7 @@ class GetDocumentToolTest {
     }
 
     private static GetDocumentTool.Arguments arguments(int maxValueLength) {
-        return new GetDocumentTool.Arguments(3, Optional.empty(), OptionalInt.of(maxValueLength), Optional.empty());
+        return new GetDocumentTool.Arguments(3, null, maxValueLength, null);
     }
 
     @Test
@@ -82,10 +81,9 @@ class GetDocumentToolTest {
 
         GetDocumentTool.Result result = new GetDocumentTool().call(arguments(10), call);
 
-        GetDocumentTool.Value value =
-                result.fields().get(0).stored().orElseThrow().get(0);
+        GetDocumentTool.Value value = result.fields().get(0).stored().get(0);
         assertThat(value.value()).isEqualTo("x".repeat(10));
-        assertThat(value.fullLength()).hasValue(69_000);
+        assertThat(value.fullLength()).isEqualTo(69_000L);
         assertThat(call.methods).containsExactly(Methods.GET_DOCUMENT.name());
     }
 
@@ -98,10 +96,9 @@ class GetDocumentToolTest {
 
         GetDocumentTool.Result result = new GetDocumentTool().call(arguments(6), call);
 
-        GetDocumentTool.Value value =
-                result.fields().get(0).stored().orElseThrow().get(0);
+        GetDocumentTool.Value value = result.fields().get(0).stored().get(0);
         assertThat(value.value()).isEqualTo("abcde");
-        assertThat(value.fullLength()).hasValue(8);
+        assertThat(value.fullLength()).isEqualTo(8L);
         assertThat(call.methods).containsExactly(Methods.GET_DOCUMENT.name(), Methods.GET_STORED_VALUE.name());
     }
 }

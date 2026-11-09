@@ -28,6 +28,6 @@ public final class GetKnnRecallHandler implements MethodHandler<JobParams, GetKn
     @Override
     public GetKnnRecallResult handle(JobParams params) throws RpcException {
         Jobs.Poll<KnnRecallResult> poll = jobs.poll(params.jobId(), KnnRecallResult.class);
-        return new GetKnnRecallResult(poll.progress(), poll.result());
+        return new GetKnnRecallResult(poll.progress(), poll.outcome());
     }
 }

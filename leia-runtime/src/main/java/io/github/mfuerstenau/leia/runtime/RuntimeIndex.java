@@ -7,7 +7,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalInt;
+import org.jspecify.annotations.Nullable;
 
 /**
  * An index opened by a {@link LuceneRuntime}. What it can read beyond the statistics is in groups: a
@@ -120,8 +120,8 @@ public interface RuntimeIndex extends Closeable {
             DocValuesType docValuesType,
             int pointDimensionCount,
             int pointNumBytes,
-            Optional<TermStats> terms,
-            Optional<VectorFormat> vectors) {
+            @Nullable TermStats terms,
+            @Nullable VectorFormat vectors) {
 
         /** A field without KNN vectors, as before Lucene 9. */
         public Field(
@@ -134,7 +134,7 @@ public interface RuntimeIndex extends Closeable {
                 DocValuesType docValuesType,
                 int pointDimensionCount,
                 int pointNumBytes,
-                Optional<TermStats> terms) {
+                @Nullable TermStats terms) {
             this(
                     name,
                     number,
@@ -146,7 +146,7 @@ public interface RuntimeIndex extends Closeable {
                     pointDimensionCount,
                     pointNumBytes,
                     terms,
-                    Optional.empty());
+                    null);
         }
     }
 
@@ -197,11 +197,17 @@ public interface RuntimeIndex extends Closeable {
      * @param files the segment's own files in its directory, without those of its deletions; empty if
      *     the reader doesn't say (ADR 0113)
      */
-    record Segment(String name, int docBase, int maxDoc, int numDocs, Optional<String> id, List<String> files) {
+    record Segment(
+            String name,
+            int docBase,
+            int maxDoc,
+            int numDocs,
+            @Nullable String id,
+            List<String> files) {
 
         /** A segment without an id or files. */
         public Segment(String name, int docBase, int maxDoc, int numDocs) {
-            this(name, docBase, maxDoc, numDocs, Optional.empty(), List.of());
+            this(name, docBase, maxDoc, numDocs, null, List.of());
         }
     }
 
@@ -226,8 +232,8 @@ public interface RuntimeIndex extends Closeable {
             int numDocs,
             int maxDoc,
             List<String> segmentVersions,
-            Optional<String> luceneVersion,
-            OptionalInt createdVersionMajor,
+            @Nullable String luceneVersion,
+            @Nullable Integer createdVersionMajor,
             Map<String, String> userData,
             List<Segment> segments) {
 
@@ -237,7 +243,7 @@ public interface RuntimeIndex extends Closeable {
          * index's creator wrote them.
          */
         public int createdMajor() {
-            return createdVersionMajor.orElseGet(this::oldestMajor);
+            return createdVersionMajor != null ? createdVersionMajor : oldestMajor();
         }
 
         /** The major version of the oldest segment, which stands in for the version that created the index. */
@@ -255,7 +261,7 @@ public interface RuntimeIndex extends Closeable {
 
         /** The version that wrote the commit, or else its newest segment; {@code fallback} without segments. */
         public String commitVersion(String fallback) {
-            return luceneVersion
+            return Optional.ofNullable(luceneVersion)
                     .or(() -> segmentVersions.stream().max(VERSION_ORDER))
                     .orElse(fallback);
         }

@@ -6,17 +6,17 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Optional;
 import java.util.regex.Pattern;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Where a theme's icons come from (ADR 0099): the user's themes folder, then leia's own, resource
  * files beside this class. Each file is looked up on its own, so a colours file of the user's can
  * colour the characters of one of leia's.
  *
- * @param dir the user's themes folder; empty for leia's own icons only
+ * @param dir the user's themes folder; null for leia's own icons only
  */
-public record Icons(Optional<Path> dir) {
+public record Icons(@Nullable Path dir) {
 
     private static final String CHARS = ".chars";
     private static final String COLOURS = ".colours";
@@ -24,12 +24,12 @@ public record Icons(Optional<Path> dir) {
 
     /** leia's own icons. */
     public static Icons bundled() {
-        return new Icons(Optional.empty());
+        return new Icons(null);
     }
 
     /** The user's icons of {@code dir}, then leia's own. */
     public Icons withUserDir(Path dir) {
-        return new Icons(Optional.of(dir));
+        return new Icons(dir);
     }
 
     /**
@@ -58,17 +58,17 @@ public record Icons(Optional<Path> dir) {
             throw new ThemeParser.Invalid(
                     where + "no icon '" + name + "': its name is lower-case letters, digits and -");
         }
-        if (dir.isPresent() && Files.isRegularFile(dir.get().resolve(file))) {
+        if (dir != null && Files.isRegularFile(dir.resolve(file))) {
             try {
-                return Files.readString(dir.get().resolve(file), StandardCharsets.UTF_8);
+                return Files.readString(dir.resolve(file), StandardCharsets.UTF_8);
             } catch (IOException e) {
-                throw new ThemeParser.Invalid(where + dir.get().resolve(file) + " can't be read: " + e.getMessage());
+                throw new ThemeParser.Invalid(where + dir.resolve(file) + " can't be read: " + e.getMessage());
             }
         }
         try (InputStream in = Icons.class.getResourceAsStream(file)) {
             if (in == null) {
-                throw new ThemeParser.Invalid(where + "no icon file " + file
-                        + dir.map(d -> " in " + d + " or").orElse("") + " among leia's own");
+                throw new ThemeParser.Invalid(where + "no icon file " + file + (dir == null ? "" : " in " + dir + " or")
+                        + " among leia's own");
             }
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException e) {

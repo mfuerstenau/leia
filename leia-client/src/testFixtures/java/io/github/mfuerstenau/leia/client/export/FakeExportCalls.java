@@ -10,6 +10,7 @@ import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The calls of an export as a test has them (ADR 0126): a document whose stored values are whole,
@@ -27,7 +28,7 @@ public final class FakeExportCalls implements DocumentExporter.Calls {
     public volatile GetReconstructResult reconstruct = running(5, 10);
 
     /** If set, what {@code getReconstruct} answers instead of {@link #reconstruct}, such as a failure. */
-    public volatile CompletableFuture<GetReconstructResult> reconstructCall;
+    public volatile @Nullable CompletableFuture<GetReconstructResult> reconstructCall;
 
     /** The jobs that were cancelled. */
     public final List<Long> cancelled = new CopyOnWriteArrayList<>();

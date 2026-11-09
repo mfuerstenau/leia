@@ -21,9 +21,9 @@ public record RuntimesDirs(List<Path> dirs) {
         dirs = List.copyOf(dirs);
     }
 
-    /** One folder, or none. */
-    public RuntimesDirs(Optional<Path> dir) {
-        this(dir.stream().toList());
+    /** One folder. */
+    public static RuntimesDirs of(Path dir) {
+        return new RuntimesDirs(List.of(dir));
     }
 
     /** No folder: leia doesn't run from {@code leia.jar}. */

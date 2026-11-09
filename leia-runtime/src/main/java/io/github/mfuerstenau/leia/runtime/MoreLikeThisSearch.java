@@ -3,8 +3,8 @@ package io.github.mfuerstenau.leia.runtime;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.OptionalInt;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Documents like one document of the index, or like a text, by the terms that Lucene's {@code
@@ -63,11 +63,11 @@ public interface MoreLikeThisSearch {
             List<String> fields,
             int minTermFreq,
             int minDocFreq,
-            OptionalInt maxDocFreq,
+            @Nullable Integer maxDocFreq,
             int maxQueryTerms,
             boolean boost,
             int minWordLen,
-            OptionalInt maxWordLen,
+            @Nullable Integer maxWordLen,
             Set<String> stopWords) {
 
         /** The most terms of a query: Lucene's default maximum clause count. */
@@ -96,8 +96,8 @@ public interface MoreLikeThisSearch {
             if (minDocFreq < 0) {
                 throw new IllegalArgumentException("minDocFreq must be 0 or more, not " + minDocFreq);
             }
-            if (maxDocFreq.isPresent() && maxDocFreq.getAsInt() < 0) {
-                throw new IllegalArgumentException("maxDocFreq must be 0 or more, not " + maxDocFreq.getAsInt());
+            if (maxDocFreq != null && maxDocFreq < 0) {
+                throw new IllegalArgumentException("maxDocFreq must be 0 or more, not " + maxDocFreq);
             }
             if (maxQueryTerms < 1 || maxQueryTerms > MAX_QUERY_TERMS) {
                 throw new IllegalArgumentException(
@@ -106,9 +106,9 @@ public interface MoreLikeThisSearch {
             if (minWordLen < 0) {
                 throw new IllegalArgumentException("minWordLen must be 0 or more, not " + minWordLen);
             }
-            if (maxWordLen.isPresent() && maxWordLen.getAsInt() < Math.max(1, minWordLen)) {
-                throw new IllegalArgumentException("maxWordLen must be 1 or more and at least minWordLen (" + minWordLen
-                        + "), not " + maxWordLen.getAsInt());
+            if (maxWordLen != null && maxWordLen < Math.max(1, minWordLen)) {
+                throw new IllegalArgumentException(
+                        "maxWordLen must be 1 or more and at least minWordLen (" + minWordLen + "), not " + maxWordLen);
             }
         }
 
@@ -118,7 +118,7 @@ public interface MoreLikeThisSearch {
             if (minWordLen > 0 && length < minWordLen) {
                 return true;
             }
-            if (maxWordLen.isPresent() && length > maxWordLen.getAsInt()) {
+            if (maxWordLen != null && length > maxWordLen) {
                 return true;
             }
             return stopWords.contains(term);

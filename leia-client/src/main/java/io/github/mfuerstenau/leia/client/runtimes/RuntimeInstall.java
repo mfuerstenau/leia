@@ -33,7 +33,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -45,6 +45,7 @@ import java.util.function.BooleanSupplier;
 import java.util.jar.JarEntry;
 import java.util.jar.JarInputStream;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@code leia --download-runtimes} (ADR 0073): installs runtimes' folders into the runtimes folder,
@@ -150,6 +151,11 @@ public final class RuntimeInstall {
         InstallException(String message) {
             super(message);
         }
+
+        @Override
+        public String getMessage() {
+            return Objects.requireNonNull(super.getMessage());
+        }
     }
 
     /** The install was cancelled. */
@@ -168,6 +174,11 @@ public final class RuntimeInstall {
         AbortedException(String message) {
             super(message);
         }
+
+        @Override
+        public String getMessage() {
+            return Objects.requireNonNull(super.getMessage());
+        }
     }
 
     /** One download from one mirror failed, for {@code reason}; another mirror may do. */
@@ -182,6 +193,11 @@ public final class RuntimeInstall {
             super(message);
             this.reason = reason;
         }
+
+        @Override
+        public String getMessage() {
+            return Objects.requireNonNull(super.getMessage());
+        }
     }
 
     /**
@@ -190,13 +206,14 @@ public final class RuntimeInstall {
      * @param folder the runtime's folder, such as {@code lucene9}
      * @param jar the jar as the adapter's list names it
      * @param uri where it is downloaded from
-     * @param local a copy in a local cache that matches, which is copied instead (ADR 0125)
+     * @param local a copy in a local cache that matches, which is copied instead (ADR 0125); null if
+     *     no cache has one
      */
-    public record Download(String folder, RuntimeFolders.ListedJar jar, URI uri, Optional<LocalCaches.Local> local) {
+    public record Download(String folder, RuntimeFolders.ListedJar jar, URI uri, LocalCaches.@Nullable Local local) {
 
         /** A jar that no local cache has. */
         public Download(String folder, RuntimeFolders.ListedJar jar, URI uri) {
-            this(folder, jar, uri, Optional.empty());
+            this(folder, jar, uri, null);
         }
     }
 
@@ -232,7 +249,7 @@ public final class RuntimeInstall {
         /** The bytes to download: the jars that no local cache has. */
         public long downloadSize() {
             return downloads.stream()
-                    .filter(download -> download.local().isEmpty())
+                    .filter(download -> download.local() == null)
                     .mapToLong(download -> download.jar().size())
                     .sum();
         }
@@ -240,7 +257,7 @@ public final class RuntimeInstall {
         /** The jars to download that a local cache has, which are copied instead (ADR 0125). */
         public List<Download> localCopies() {
             return downloads.stream()
-                    .filter(download -> download.local().isPresent())
+                    .filter(download -> download.local() != null)
                     .toList();
         }
 
@@ -248,7 +265,7 @@ public final class RuntimeInstall {
         public List<String> ownJars() {
             List<String> own = new ArrayList<>();
             own.add(known.adapterJar());
-            listed.stream().filter(jar -> jar.mavenPath().isEmpty()).forEach(jar -> own.add(jar.name()));
+            listed.stream().filter(jar -> jar.mavenPath() == null).forEach(jar -> own.add(jar.name()));
             return own;
         }
     }
@@ -435,8 +452,8 @@ public final class RuntimeInstall {
         List<Download> downloads = new ArrayList<>();
         List<RuntimeFolders.ListedJar> kept = new ArrayList<>();
         for (RuntimeFolders.ListedJar jar : listed) {
-            Optional<String> mavenPath = jar.mavenPath();
-            if (mavenPath.isEmpty()) {
+            String mavenPath = jar.mavenPath();
+            if (mavenPath == null) {
                 continue;
             }
             Path target = folder.resolve(jar.name());
@@ -444,7 +461,10 @@ public final class RuntimeInstall {
                 kept.add(jar);
             } else {
                 downloads.add(new Download(
-                        folderName, jar, repository().resolve(mavenPath.get()), caches.find(mavenPath.get(), jar)));
+                        folderName,
+                        jar,
+                        repository().resolve(mavenPath),
+                        caches.find(mavenPath, jar).orElse(null)));
             }
         }
         return new RuntimePlan(known, adapter, listed, downloads, kept);
@@ -462,10 +482,12 @@ public final class RuntimeInstall {
             for (Download download : runtime.downloads()) {
                 out.println("  " + download.folder() + "/" + download.jar().name() + ", "
                         + Units.size(download.jar().size()));
-                out.println(download.local()
-                        .map(local -> "    copied from " + local.file() + " ("
-                                + local.cache().name() + ")")
-                        .orElse("    " + download.uri()));
+                LocalCaches.Local local = download.local();
+                out.println(
+                        local != null
+                                ? "    copied from " + local.file() + " ("
+                                        + local.cache().name() + ")"
+                                : "    " + download.uri());
                 out.println("    SHA-256 " + download.jar().sha256());
             }
         }
@@ -648,13 +670,13 @@ public final class RuntimeInstall {
                 throw new CancelledException();
             }
             names.add(jar.name());
-            Optional<String> mavenPath = jar.mavenPath();
-            if (mavenPath.isEmpty()) {
+            String mavenPath = jar.mavenPath();
+            if (mavenPath == null) {
                 writeOwn(folder, jar.name(), resource(folderName, jar.name()), listener);
             } else if (downloads.containsKey(jar.name())) {
-                Optional<LocalCaches.Local> local = downloads.get(jar.name()).local();
-                if (local.isEmpty() || !copyLocal(run, folder, jar, local.get())) {
-                    fetch(run, folder, jar, mavenPath.get());
+                LocalCaches.Local local = downloads.get(jar.name()).local();
+                if (local == null || !copyLocal(run, folder, jar, local)) {
+                    fetch(run, folder, jar, mavenPath);
                 }
             } else {
                 listener.jarDone(folderName, jar.name(), JarDone.KEPT, jar.size());
@@ -682,7 +704,7 @@ public final class RuntimeInstall {
             try {
                 byte[] adapter = resource(known.folder(), known.adapterJar());
                 for (RuntimeFolders.ListedJar jar : list(known.folder(), known.adapterJar(), adapter)) {
-                    if (jar.mavenPath().isEmpty()) {
+                    if (jar.mavenPath() == null) {
                         writeOwn(folder, jar.name(), resource(known.folder(), jar.name()), listener);
                     }
                 }
@@ -972,7 +994,7 @@ public final class RuntimeInstall {
         }
     }
 
-    private static void delete(Path part) {
+    private static void delete(@Nullable Path part) {
         if (part == null) {
             return;
         }

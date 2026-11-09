@@ -19,6 +19,9 @@ dependencies {
     // postings formats, so that indexes using them open (ADR 0018).
     runtimeOnly(libs.lucene.codecs)
     runtimeOnly(libs.lucene.suggest)
+    // JSpecify's @Nullable on the records and parameters (ADR 0127): compile-only, and through
+    // compileOnlyApi for leia-lucene10, so runtimes/lucene10 gains no jar.
+    compileOnlyApi(libs.jspecify)
 }
 
 // Test indexes written by older Lucene versions: a Lucene 9 index must open, a Lucene 8 index must

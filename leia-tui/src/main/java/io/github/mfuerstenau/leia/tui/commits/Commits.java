@@ -30,6 +30,7 @@ import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.commits.Segment;
 import io.github.mfuerstenau.leia.protocol.commits.UnreadableCommit;
+import io.github.mfuerstenau.leia.tui.Optionals;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.GoMenu;
@@ -44,6 +45,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
@@ -53,6 +55,7 @@ import java.util.function.Function;
 import java.util.function.IntPredicate;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The commits screen: the commits of the index directory on top and, below, the segments of the
@@ -170,7 +173,7 @@ public final class Commits {
      * The segment to select once the opened commit of the shown index directory is in, as the
      * documents screen asked for (ADR 0052); or null.
      */
-    private String wantedSegment;
+    private @Nullable String wantedSegment;
 
     /**
      * The commits screen of these index directories, as shown; at least one. {@code readerOpen} says
@@ -757,13 +760,13 @@ public final class Commits {
             Selection.numberWidth(segments.stream().mapToLong(Segment::maxDoc)),
             Selection.numberWidth(segments.stream().mapToLong(Segment::docBase)),
             7,
-            textWidth(segments, segment -> sizeOr(segment.sizeInBytes(), "?"), 4),
+            textWidth(segments, segment -> sizeOr(Optionals.orNull(segment.sizeInBytes()), "?"), 4),
             textWidth(segments, Segment::luceneVersion, 6),
             textWidth(segments, segment -> segment.codec().orElse(NONE), 5),
             3
         };
         // The columns on the right are also in the details, so they go first when the table is too wide.
-        Block block = panel(title, focused);
+        Block block = panel(Objects.requireNonNull(title), focused);
         int shown =
                 Panels.shownColumns(widths, COLUMN_SPACING, block.inner(area).width(), 1);
         Row header = segmentCells(
@@ -778,7 +781,7 @@ public final class Commits {
                             Integer.toString(segment.maxDoc()),
                             Integer.toString(segment.docBase()),
                             Integer.toString(segment.delCount()),
-                            sizeOr(segment.sizeInBytes(), "?"),
+                            sizeOr(Optionals.orNull(segment.sizeInBytes()), "?"),
                             segment.luceneVersion(),
                             segment.codec().orElse(NONE),
                             segment.compound() ? "yes" : "no"
@@ -826,7 +829,7 @@ public final class Commits {
         }
         // TamboUI scrolls no further than to show the last line at the bottom (ratatui scrolled on
         // until it was at the top), so the scroll stops there too: the next key after End moves.
-        Block block = panel(title, focused);
+        Block block = panel(Objects.requireNonNull(title), focused);
         Rect inner = block.inner(area);
         List<Line> wrapped = Panels.wrap(lines, inner.width());
         detailsScroll = Math.clamp(detailsScroll, 0, Math.max(wrapped.size() - inner.height(), 0));
@@ -874,8 +877,8 @@ public final class Commits {
                 min);
     }
 
-    private static String sizeOr(OptionalLong bytes, String unknown) {
-        return bytes.isPresent() ? TextFormat.size(bytes.getAsLong()) : unknown;
+    private static String sizeOr(@Nullable Long bytes, String unknown) {
+        return bytes != null ? TextFormat.size(bytes) : unknown;
     }
 
     /** The user data in one line: {@code key=value} pairs, separated by commas. */
@@ -946,12 +949,13 @@ public final class Commits {
         String blocks = segment.hasBlocks() ? "yes" : "no";
         lines.add(Line.from("Compound file " + (segment.compound() ? "yes" : "no")
                 + (atLeast(version, 9, 10) ? " · blocks " + blocks : "")
-                + " · size " + sizeOr(segment.sizeInBytes(), "unknown")));
+                + " · size " + sizeOr(Optionals.orNull(segment.sizeInBytes()), "unknown")));
         if (atLeast(version, 6, 2)) {
             lines.add(Line.from("Sorted by " + segment.indexSort().orElse("document id (no index sort)")));
         }
-        lines.add(Line.from("Generations: deletes " + generation(segment.delGen()) + " · field infos "
-                + generation(segment.fieldInfosGen()) + " · doc values " + generation(segment.docValuesGen())));
+        lines.add(Line.from("Generations: deletes " + generation(Optionals.orNull(segment.delGen())) + " · field infos "
+                + generation(Optionals.orNull(segment.fieldInfosGen())) + " · doc values "
+                + generation(Optionals.orNull(segment.docValuesGen()))));
         lines.add(Line.from("Id " + segment.id().orElse(NONE)));
         Map<String, String> diagnostics = new TreeMap<>();
         segment.diagnostics().forEach((key, value) -> diagnostics.put(key, diagnostic(key, value)));
@@ -998,8 +1002,8 @@ public final class Commits {
         section(lines, "Codec formats", formatPairs);
     }
 
-    private static String generation(OptionalLong generation) {
-        return generation.isPresent() ? Long.toString(generation.getAsLong()) : "–";
+    private static String generation(@Nullable Long generation) {
+        return generation != null ? Long.toString(generation) : "–";
     }
 
     /** A diagnostic's value; Lucene's {@code timestamp} in milliseconds also as a UTC time. */
@@ -1106,7 +1110,7 @@ public final class Commits {
                 : OptionalLong.empty();
         lines.add(Line.empty());
         lines.add(Line.styled(
-                "Files (" + files.size() + ", " + sizeOr(total, "size unknown") + ")",
+                "Files (" + files.size() + ", " + sizeOr(Optionals.orNull(total), "size unknown") + ")",
                 Palette.current().heading()));
         if (files.isEmpty()) {
             lines.add(Line.styled("none", Palette.current().muted()));
@@ -1115,8 +1119,9 @@ public final class Commits {
         List<String> names = files.stream()
                 .map(file -> TextFormat.escapeControl(file.name()))
                 .toList();
-        List<String> sizes =
-                files.stream().map(file -> sizeOr(file.size(), "missing")).toList();
+        List<String> sizes = files.stream()
+                .map(file -> sizeOr(Optionals.orNull(file.size()), "missing"))
+                .toList();
         int nameWidth = names.stream().mapToInt(CharWidth::of).max().orElse(0);
         int sizeWidth = sizes.stream().mapToInt(String::length).max().orElse(0);
         int segmentWidth = files.stream()

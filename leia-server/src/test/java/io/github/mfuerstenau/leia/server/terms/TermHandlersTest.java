@@ -84,26 +84,20 @@ class TermHandlersTest {
     void pagesThroughPostings() throws Exception {
         openIndex();
 
-        GetPostingsResult first =
-                getPostings.handle(new GetPostingsParams("body", text("blue"), 0, 1, Optional.empty()));
+        GetPostingsResult first = getPostings.handle(new GetPostingsParams("body", text("blue"), 0, 1, null));
         assertThat(first)
-                .isEqualTo(new GetPostingsResult(
-                        2, 2, List.of(new Posting(0, false, OptionalInt.of(1), Optional.empty())), OptionalInt.of(2)));
-        assertThat(getPostings.handle(new GetPostingsParams("body", text("blue"), 2, 1, Optional.empty())))
-                .isEqualTo(new GetPostingsResult(
-                        2,
-                        2,
-                        List.of(new Posting(2, false, OptionalInt.of(1), Optional.empty())),
-                        OptionalInt.empty()));
+                .isEqualTo(new GetPostingsResult(2, 2, List.of(new Posting(0, false, 1, null)), OptionalInt.of(2)));
+        assertThat(getPostings.handle(new GetPostingsParams("body", text("blue"), 2, 1, null)))
+                .isEqualTo(new GetPostingsResult(2, 2, List.of(new Posting(2, false, 1, null)), OptionalInt.empty()));
         // A deleted document, and a field without frequencies.
         assertThat(getPostings
-                        .handle(new GetPostingsParams("body", text("green"), 0, 10, Optional.empty()))
+                        .handle(new GetPostingsParams("body", text("green"), 0, 10, null))
                         .postings())
-                .containsExactly(new Posting(1, true, OptionalInt.of(1), Optional.empty()));
+                .containsExactly(new Posting(1, true, 1, null));
         assertThat(getPostings
-                        .handle(new GetPostingsParams("key", new BytesValue("ff", true), 0, 10, Optional.empty()))
+                        .handle(new GetPostingsParams("key", new BytesValue("ff", true), 0, 10, null))
                         .postings())
-                .containsExactly(new Posting(2, false, OptionalInt.empty(), Optional.empty()));
+                .containsExactly(new Posting(2, false, null, null));
     }
 
     @Test
@@ -116,21 +110,18 @@ class TermHandlersTest {
         filters.put(7, filter);
 
         assertThat(getPostings
-                        .handle(new GetPostingsParams(
-                                "body", text("blue"), 0, 10, Optional.of(new PostingsFilter(7, false))))
+                        .handle(new GetPostingsParams("body", text("blue"), 0, 10, new PostingsFilter(7, false)))
                         .postings())
-                .containsExactly(
-                        new Posting(0, false, OptionalInt.of(1), Optional.of(false)),
-                        new Posting(2, false, OptionalInt.of(1), Optional.of(true)));
-        GetPostingsResult only = getPostings.handle(
-                new GetPostingsParams("body", text("blue"), 0, 10, Optional.of(new PostingsFilter(7, true))));
+                .containsExactly(new Posting(0, false, 1, false), new Posting(2, false, 1, true));
+        GetPostingsResult only =
+                getPostings.handle(new GetPostingsParams("body", text("blue"), 0, 10, new PostingsFilter(7, true)));
         assertThat(only.docFreq()).isEqualTo(2);
         assertThat(only.postings()).extracting(Posting::docId).containsExactly(2);
         assertThat(only.nextDoc()).isEmpty();
 
         assertFails(
                 () -> getPostings.handle(
-                        new GetPostingsParams("body", text("blue"), 0, 10, Optional.of(new PostingsFilter(8, false)))),
+                        new GetPostingsParams("body", text("blue"), 0, 10, new PostingsFilter(8, false))),
                 ErrorCode.FILTER_NOT_FOUND);
     }
 
@@ -180,7 +171,7 @@ class TermHandlersTest {
                 .extracting(Posting::positions)
                 .containsExactly(Optional.of(List.of()));
         assertThat(getPostings
-                        .handle(new GetPostingsParams("body", text("red"), 0, 10, Optional.empty()))
+                        .handle(new GetPostingsParams("body", text("red"), 0, 10, null))
                         .postings())
                 .extracting(Posting::positions)
                 .containsExactly(Optional.empty());
@@ -210,7 +201,7 @@ class TermHandlersTest {
     void failsWithoutOpenIndex() {
         assertFails(() -> getTerms.handle(new GetTermsParams("body", Optional.empty(), 10)), ErrorCode.NO_INDEX_OPEN);
         assertFails(
-                () -> getPostings.handle(new GetPostingsParams("body", text("red"), 0, 10, Optional.empty())),
+                () -> getPostings.handle(new GetPostingsParams("body", text("red"), 0, 10, null)),
                 ErrorCode.NO_INDEX_OPEN);
         assertFails(() -> getPositions.handle(new GetPositionsParams(0, "body", text("red"))), ErrorCode.NO_INDEX_OPEN);
     }
@@ -224,7 +215,7 @@ class TermHandlersTest {
                 ErrorCode.FIELD_NOT_FOUND,
                 "No field 'bdy' in the index");
         assertFails(
-                () -> getPostings.handle(new GetPostingsParams("body", text("quik"), 0, 10, Optional.empty())),
+                () -> getPostings.handle(new GetPostingsParams("body", text("quik"), 0, 10, null)),
                 ErrorCode.TERM_NOT_FOUND,
                 "No term 'quik' in field 'body'");
         assertFails(
@@ -252,11 +243,11 @@ class TermHandlersTest {
                 ErrorCode.INVALID_PARAMS,
                 "Invalid params: the binary term 'xyz' is not hex");
         assertFails(
-                () -> getPostings.handle(new GetPostingsParams("body", text("red"), -1, 10, Optional.empty())),
+                () -> getPostings.handle(new GetPostingsParams("body", text("red"), -1, 10, null)),
                 ErrorCode.INVALID_PARAMS,
                 "Invalid params: fromDoc must not be negative, not -1");
         assertFails(
-                () -> getPostings.handle(new GetPostingsParams("body", text("red"), 0, 1001, Optional.empty())),
+                () -> getPostings.handle(new GetPostingsParams("body", text("red"), 0, 1001, null)),
                 ErrorCode.INVALID_PARAMS);
         assertFails(
                 () -> getPostings.handle(

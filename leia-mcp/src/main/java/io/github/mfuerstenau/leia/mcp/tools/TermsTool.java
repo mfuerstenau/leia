@@ -20,8 +20,7 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalInt;
-import java.util.OptionalLong;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@code terms}: the terms of a field, a page at a time in term order, or the ones in the most
@@ -35,26 +34,30 @@ final class TermsTool implements McpTool<TermsTool.Arguments, TermsTool.Result> 
             String field,
 
             @Description("Only terms that start with this text; a binary term if its bytes start with the text's")
-            Optional<String> prefix,
+            @Nullable
+            String prefix,
 
             @Description("Where the page starts: the next of the last page, which continues it with the same prefix")
-            Optional<Term> from,
+            @Nullable
+            Term from,
 
             @Description("The most terms of the page, from 1 to " + GetTermsParams.MAX_LIMIT + "; " + DEFAULT_LIMIT
                     + " by default")
-            OptionalInt limit,
+            @Nullable
+            Integer limit,
 
             @Description("Instead of a page, the N terms in the most documents, from 1 to "
                     + StartFieldTermScanParams.MAX_TOP_N + ", most first: it scans every term of the field, which"
                     + " takes long on a large one. Excludes prefix, from and limit")
-            OptionalInt top) {}
+            @Nullable
+            Integer top) {}
 
     record Term(
             @Description("The term as text, or in hex with binary")
             String value,
 
-            @Description("Whether value is the term's bytes in hex; false by default")
-            Optional<Boolean> binary) {}
+            @Description("Whether value is the term's bytes in hex; false by default") @Nullable
+            Boolean binary) {}
 
     record Result(
             String field,
@@ -62,23 +65,23 @@ final class TermsTool implements McpTool<TermsTool.Arguments, TermsTool.Result> 
             @Description("The terms, in term order, or with top, most documents first")
             List<Entry> terms,
 
-            @Description("The from of the next page; absent after the last term, and with top")
-            Optional<Term> next,
+            @Description("The from of the next page; absent after the last term, and with top") @Nullable
+            Term next,
 
-            @Description("How many distinct terms the field has; with top only")
-            OptionalLong uniqueTerms) {}
+            @Description("How many distinct terms the field has; with top only") @Nullable
+            Long uniqueTerms) {}
 
     record Entry(
             String term,
 
-            @Description("Present, and true, only if term is the term's bytes in hex")
-            Optional<Boolean> binary,
+            @Description("Present, and true, only if term is the term's bytes in hex") @Nullable
+            Boolean binary,
 
             @Description("The documents with the term, deleted ones included")
             int docFreq,
 
-            @Description("The occurrences of the term in all documents; absent if equal to docFreq")
-            OptionalLong totalTermFreq) {}
+            @Description("The occurrences of the term in all documents; absent if equal to docFreq") @Nullable
+            Long totalTermFreq) {}
 
     @Override
     public String name() {
@@ -105,10 +108,8 @@ final class TermsTool implements McpTool<TermsTool.Arguments, TermsTool.Result> 
 
     @Override
     public Result call(Arguments arguments, Call call) throws ToolException, Jobs.Cancelled {
-        if (arguments.top().isPresent()) {
-            if (arguments.prefix().isPresent()
-                    || arguments.from().isPresent()
-                    || arguments.limit().isPresent()) {
+        if (arguments.top() != null) {
+            if (arguments.prefix() != null || arguments.from() != null || arguments.limit() != null) {
                 throw ToolError.invalid("top excludes prefix, from and limit: it ranks every term of the field");
             }
             int top = Slices.bounded("top", arguments.top(), 0, 1, StartFieldTermScanParams.MAX_TOP_N);
@@ -123,20 +124,19 @@ final class TermsTool implements McpTool<TermsTool.Arguments, TermsTool.Result> 
                 new StartFieldTermScanParams(field, n),
                 Methods.GET_FIELD_TERM_SCAN,
                 GetFieldTermScanResult::terms,
-                poll -> new Jobs.Progress(poll.termsScanned(), OptionalLong.empty()));
+                poll -> new Jobs.Progress(poll.termsScanned(), null));
         List<Entry> entries = new ArrayList<>();
         for (TopTerm term : terms.topTerms()) {
             entries.add(entry(term.term(), term.binary(), term.docFreq(), term.totalTermFreq()));
         }
-        return new Result(field, entries, Optional.empty(), OptionalLong.of(terms.uniqueTerms()));
+        return new Result(field, entries, null, terms.uniqueTerms());
     }
 
     private static Result page(Arguments arguments, Call call) throws ToolException, Jobs.Cancelled {
         int limit = Slices.bounded("limit", arguments.limit(), DEFAULT_LIMIT, 1, GetTermsParams.MAX_LIMIT);
-        String prefix = arguments.prefix().orElse("");
-        Optional<BytesValue> from = arguments
-                .from()
-                .map(term -> new BytesValue(term.value(), term.binary().orElse(false)));
+        String prefix = arguments.prefix() != null ? arguments.prefix() : "";
+        Optional<BytesValue> from = Optional.ofNullable(arguments.from())
+                .map(term -> new BytesValue(term.value(), Given.isTrue(term.binary())));
         if (from.isEmpty() && !prefix.isEmpty()) {
             from = Optional.of(new BytesValue(prefix, false));
         }
@@ -153,10 +153,11 @@ final class TermsTool implements McpTool<TermsTool.Arguments, TermsTool.Result> 
             }
         }
         boolean complete = !cut;
-        Optional<Term> next = page.next()
+        Term next = page.next()
                 .filter(value -> complete && matcher.matches(value.value(), value.binary()))
-                .map(value -> new Term(value.value(), Absent.flag(value.binary())));
-        return new Result(arguments.field(), entries, next, OptionalLong.empty());
+                .map(value -> new Term(value.value(), Absent.flag(value.binary())))
+                .orElse(null);
+        return new Result(arguments.field(), entries, next, null);
     }
 
     /**
@@ -175,10 +176,6 @@ final class TermsTool implements McpTool<TermsTool.Arguments, TermsTool.Result> 
     }
 
     private static Entry entry(String term, boolean binary, int docFreq, long totalTermFreq) {
-        return new Entry(
-                term,
-                Absent.flag(binary),
-                docFreq,
-                totalTermFreq == docFreq ? OptionalLong.empty() : OptionalLong.of(totalTermFreq));
+        return new Entry(term, Absent.flag(binary), docFreq, totalTermFreq == docFreq ? null : totalTermFreq);
     }
 }

@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The command line of leia, as the TUI CLI contract in {@code AGENTS.md} has it. The {@code leia}
@@ -23,7 +24,7 @@ import java.util.Optional;
  * @param noDefaultJars {@code --no-default-jars}
  * @param directory {@code --directory}, {@link DirectoryImpl#FS} without it
  * @param noReader {@code --no-reader}
- * @param indexPath {@code INDEX_PATH}
+ * @param indexPath {@code INDEX_PATH}, or null without it
  * @param downloadRuntimes {@code --download-runtimes}, which needs {@code --runtime}, takes no other
  *     option, and no {@code INDEX_PATH} (ADR 0080)
  * @param runtimes {@code --runtime}, in the order given: with {@code --download-runtimes}, the
@@ -31,7 +32,8 @@ import java.util.Optional;
  * @param downloadUrls {@code --download-url}, in the order given: with {@code --download-runtimes},
  *     mirrors of Maven Central to try first, each one that {@link Mirrors#check} accepts (ADR 0124)
  * @param theme {@code --theme}, the colour theme (ADR 0095): a name that {@link Main} checks
- *     against the themes, since the user's own are known only once their folder is read (ADR 0096)
+ *     against the themes, since the user's own are known only once their folder is read (ADR 0096);
+ *     null without it
  * @param mcp {@code --mcp}: serve {@code INDEX_PATH} to an MCP client on stdin and stdout instead
  *     of starting the TUI (ADR 0100); with neither {@code --download-runtimes}, {@code --runtime},
  *     {@code --theme} nor {@code --no-reader}
@@ -48,11 +50,11 @@ record Cli(
         boolean noDefaultJars,
         DirectoryImpl directory,
         boolean noReader,
-        Optional<String> indexPath,
+        @Nullable String indexPath,
         boolean downloadRuntimes,
         List<String> runtimes,
         List<String> downloadUrls,
-        Optional<String> theme,
+        @Nullable String theme,
         boolean mcp,
         List<Path> mcpRoots,
         boolean mcpPin) {
@@ -212,11 +214,11 @@ record Cli(
         private DirectoryImpl directory = DirectoryImpl.FS;
         private boolean directoryGiven;
         private boolean noReader;
-        private Optional<String> indexPath = Optional.empty();
+        private @Nullable String indexPath;
         private boolean downloadRuntimes;
         private final List<String> runtimes = new ArrayList<>();
         private final List<String> downloadUrls = new ArrayList<>();
-        private Optional<String> theme = Optional.empty();
+        private @Nullable String theme;
         private boolean mcp;
         private final List<Path> mcpRoots = new ArrayList<>();
         private boolean mcpPin;
@@ -233,10 +235,10 @@ record Cli(
                     options = false;
                 } else if (options && arg.startsWith("-") && !arg.equals("-")) {
                     option(arg);
-                } else if (indexPath.isPresent()) {
+                } else if (indexPath != null) {
                     throw new UsageException("unexpected argument '" + arg + "': there is only one INDEX_PATH");
                 } else {
-                    indexPath = Optional.of(arg);
+                    indexPath = arg;
                 }
             }
         }
@@ -244,7 +246,7 @@ record Cli(
         private void option(String arg) throws UsageException {
             int equals = arg.startsWith("--") ? arg.indexOf('=') : -1;
             String name = equals < 0 ? arg : arg.substring(0, equals);
-            Optional<String> inline = equals < 0 ? Optional.empty() : Optional.of(arg.substring(equals + 1));
+            @Nullable String inline = equals < 0 ? null : arg.substring(equals + 1);
             switch (name) {
                 case "-h", "--help" -> help = flag(name, inline);
                 case "-V", "--version" -> version = flag(name, inline);
@@ -258,7 +260,7 @@ record Cli(
                 case "--server" -> servers.add(path(name, value(name, inline, "<PATH>")));
                 case "--runtime" -> runtimes.add(runtime(value(name, inline, "<FOLDER>")));
                 case "--download-url" -> downloadUrls.add(downloadUrl(value(name, inline, "<URL>")));
-                case "--theme" -> theme = Optional.of(value(name, inline, "<THEME>"));
+                case "--theme" -> theme = value(name, inline, "<THEME>");
                 case "--directory" -> {
                     directory = directory(value(name, inline, "<IMPL>"));
                     directoryGiven = true;
@@ -271,19 +273,19 @@ record Cli(
         }
 
         /** The value of option {@code name}: after its {@code =}, or else the next argument. */
-        private String value(String name, Optional<String> inline, String placeholder) throws UsageException {
-            return inline.isPresent() ? inline.get() : next(args, ++i, name, placeholder);
+        private String value(String name, @Nullable String inline, String placeholder) throws UsageException {
+            return inline != null ? inline : next(args, ++i, name, placeholder);
         }
 
         Cli cli() throws UsageException {
             if (downloadRuntimes
-                    && (indexPath.isPresent()
+                    && (indexPath != null
                             || !jars.isEmpty()
                             || !servers.isEmpty()
                             || noDefaultJars
                             || directoryGiven
                             || noReader
-                            || theme.isPresent())) {
+                            || theme != null)) {
                 throw new UsageException("--download-runtimes takes no INDEX_PATH and none of --jar, --server,"
                         + " --no-default-jars, --directory, --no-reader, --theme");
             }
@@ -291,7 +293,7 @@ record Cli(
                     && (downloadRuntimes
                             || !runtimes.isEmpty()
                             || !downloadUrls.isEmpty()
-                            || theme.isPresent()
+                            || theme != null
                             || noReader)) {
                 throw new UsageException("--mcp takes none of --download-runtimes, --runtime, --theme, --no-reader:"
                         + " an MCP client reads an index only with a reader");
@@ -299,7 +301,7 @@ record Cli(
             if ((!mcpRoots.isEmpty() || mcpPin) && !mcp) {
                 throw new UsageException("--mcp-root and --mcp-pin go only with --mcp");
             }
-            if (mcpPin && indexPath.isEmpty() && !help && !version) {
+            if (mcpPin && indexPath == null && !help && !version) {
                 throw new UsageException("--mcp-pin needs the INDEX_PATH to serve");
             }
             if (mcpPin && !mcpRoots.isEmpty()) {
@@ -334,8 +336,8 @@ record Cli(
                     mcpPin);
         }
 
-        private static boolean flag(String name, Optional<String> inline) throws UsageException {
-            if (inline.isPresent()) {
+        private static boolean flag(String name, @Nullable String inline) throws UsageException {
+            if (inline != null) {
                 throw new UsageException(name + " takes no value");
             }
             return true;

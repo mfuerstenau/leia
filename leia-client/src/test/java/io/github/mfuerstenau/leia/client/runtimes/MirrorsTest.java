@@ -6,7 +6,6 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -90,8 +89,8 @@ class MirrorsTest {
         Mirrors.Loaded loaded = Mirrors.resolve(
                 "https://property.example.com/maven2",
                 List.of("https://option.example.com/", "https://property.example.com/maven2/"),
-                Optional.of(saved),
-                Optional.of(file),
+                saved,
+                file,
                 false);
 
         List<Mirror> mirrors = loaded.mirrors();
@@ -123,12 +122,8 @@ class MirrorsTest {
 
     @Test
     void reportsABadPropertyAndKeepsLeiasOwnList() {
-        Mirrors.Loaded loaded = Mirrors.resolve(
-                "http://insecure.example.com/",
-                List.of(),
-                Optional.empty(),
-                Optional.of(tmp.resolve("missing")),
-                false);
+        Mirrors.Loaded loaded =
+                Mirrors.resolve("http://insecure.example.com/", List.of(), null, tmp.resolve("missing"), false);
 
         assertThat(loaded.mirrors()).isEqualTo(Mirrors.builtIn());
         assertThat(loaded.problems())
@@ -147,7 +142,7 @@ class MirrorsTest {
 
         Mirrors.save(saved, eu);
 
-        Mirrors.Loaded loaded = Mirrors.resolve(null, List.of(), Optional.of(saved), Optional.empty(), false);
+        Mirrors.Loaded loaded = Mirrors.resolve(null, List.of(), saved, null, false);
         assertThat(loaded.mirrors().getFirst()).isEqualTo(new Mirror(EU, "Google Cloud, EU", Mirror.Origin.SAVED));
         assertThat(loaded.mirrors()).extracting(Mirror::uri).doesNotHaveDuplicates();
     }

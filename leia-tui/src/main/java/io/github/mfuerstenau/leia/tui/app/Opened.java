@@ -3,8 +3,8 @@ package io.github.mfuerstenau.leia.tui.app;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.Feature;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 
 /**
  * What was opened (ADR 0021).
@@ -18,7 +18,7 @@ import java.util.Set;
  * @param features what works on the index (ADR 0044), which decides every screen and key; without a
  *     reader, {@link Feature#withoutReader()}
  * @param oldLucene for an index that an old Lucene reads (ADR 0044), what the tab line says about
- *     it, such as {@code Lucene 2.x, read with 3.6.2}; empty for one that Lucene 10 reads
+ *     it, such as {@code Lucene 2.x, read with 3.6.2}; null for one that Lucene 10 reads
  */
 record Opened(
         String path,
@@ -27,7 +27,7 @@ record Opened(
         List<String> indexes,
         List<String> skipped,
         Set<Feature> features,
-        Optional<String> oldLucene) {
+        @Nullable String oldLucene) {
 
     Opened {
         indexes = List.copyOf(indexes);

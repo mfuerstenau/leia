@@ -20,6 +20,7 @@ import org.apache.lucene.index.SegmentReader;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.bkd.BKDReader;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The BKD trees of point fields, read with Lucene 7.7 (ADR 0048) as leia-core reads Lucene 10's (ADR
@@ -55,7 +56,7 @@ final class Lucene7Points implements Points {
             }
             segments.add(new Segment(
                     context.ord,
-                    segmentName(context.reader()),
+                    segmentName(context.reader()).orElse(null),
                     context.docBase,
                     context.reader().maxDoc(),
                     values.size(),
@@ -71,9 +72,11 @@ final class Lucene7Points implements Points {
                 segments.stream().mapToLong(Segment::size).sum(),
                 segments.stream().mapToLong(Segment::docCount).sum(),
                 Optional.ofNullable(PointValues.getMinPackedValue(reader, field))
-                        .map(byte[]::clone),
+                        .map(byte[]::clone)
+                        .orElse(null),
                 Optional.ofNullable(PointValues.getMaxPackedValue(reader, field))
-                        .map(byte[]::clone),
+                        .map(byte[]::clone)
+                        .orElse(null),
                 List.copyOf(segments));
     }
 
@@ -294,9 +297,9 @@ final class Lucene7Points implements Points {
         final List<LeafPoint> points = new ArrayList<>();
         int count;
         private final int docBase;
-        private final Bits liveDocs;
+        private final @Nullable Bits liveDocs;
 
-        LeafVisitor(int docBase, Bits liveDocs) {
+        LeafVisitor(int docBase, @Nullable Bits liveDocs) {
             this.docBase = docBase;
             this.liveDocs = liveDocs;
         }

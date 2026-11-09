@@ -7,7 +7,6 @@ import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import java.io.Serial;
 import java.time.Duration;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -15,6 +14,7 @@ import java.util.function.LongFunction;
 import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Runs a backend job behind one tool call (ADR 0100 §4): {@code start<Op>}, then {@code get<Op>}
@@ -36,7 +36,7 @@ public final class Jobs {
     public static final Duration LIMIT = Duration.ofMinutes(5);
 
     /** How far a job is: what it has scanned, of how many if it knows. */
-    public record Progress(long scanned, OptionalLong total) {}
+    public record Progress(long scanned, @Nullable Long total) {}
 
     /** The request was cancelled, by the client or by the end of stdin: it gets no answer. */
     public static final class Cancelled extends Exception {

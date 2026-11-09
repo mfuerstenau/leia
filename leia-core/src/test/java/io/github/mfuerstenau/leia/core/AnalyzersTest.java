@@ -24,12 +24,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
-import java.util.OptionalInt;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.apache.lucene.util.BytesRef;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -144,7 +143,7 @@ class AnalyzersTest {
                 List.of(),
                 new Component("whitespace", Map.of()),
                 List.of(new Component("stop", Map.of("words", "stop.txt"))),
-                Optional.of(tmp));
+                tmp);
 
         assertThat(analyze(spec, "the fox", 100).stages().get(1).tokens())
                 .extracting(Token::term)
@@ -173,7 +172,7 @@ class AnalyzersTest {
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessage("token filter 'stop': Resource not found: missing.txt");
         assertThatThrownBy(() -> Analyzers.build(new AnalyzerSpec.Custom(
-                        List.of(), new Component("standard", Map.of()), List.of(), Optional.of(tmp.resolve("none")))))
+                        List.of(), new Component("standard", Map.of()), List.of(), tmp.resolve("none"))))
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessageStartingWith("config directory: ");
     }
@@ -262,22 +261,18 @@ class AnalyzersTest {
 
     @Test
     void aPresetTakesStopWordsOfItsOwn() throws Exception {
-        assertThat(terms(english(Optional.of(words("running")), Optional.empty()), "The running foxes"))
-                .containsExactly("the", "fox");
+        assertThat(terms(english(words("running"), null), "The running foxes")).containsExactly("the", "fox");
         // No stop words at all.
-        assertThat(terms(english(Optional.of(words()), Optional.empty()), "The running foxes"))
-                .containsExactly("the", "run", "fox");
+        assertThat(terms(english(words(), null), "The running foxes")).containsExactly("the", "run", "fox");
     }
 
     @Test
     void stemExclusionsKeepTheDefaultStopWords() throws Exception {
-        assertThat(terms(english(Optional.empty(), Optional.of(words("running"))), "The running foxes"))
-                .containsExactly("running", "fox");
-        assertThat(terms(english(Optional.of(words()), Optional.of(words("running"))), "The running foxes"))
+        assertThat(terms(english(null, words("running")), "The running foxes")).containsExactly("running", "fox");
+        assertThat(terms(english(words(), words("running")), "The running foxes"))
                 .containsExactly("the", "running", "fox");
         // From the static getDefaultStopSet(): "de" is a Dutch stop word.
-        var dutch = new AnalyzerSpec.Preset(
-                "org.apache.lucene.analysis.nl.DutchAnalyzer", Optional.empty(), Optional.of(words("fietsen")));
+        var dutch = new AnalyzerSpec.Preset("org.apache.lucene.analysis.nl.DutchAnalyzer", null, words("fietsen"));
         assertThat(terms(dutch, "de fietsen")).containsExactly("fietsen");
     }
 
@@ -288,7 +283,7 @@ class AnalyzersTest {
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessage("StopAnalyzer needs stop words");
 
-        var spec = new AnalyzerSpec.Preset(stop, Optional.of(words("a")), Optional.empty());
+        var spec = new AnalyzerSpec.Preset(stop, words("a"), null);
         assertThat(terms(spec, "A Fox")).containsExactly("fox");
     }
 
@@ -297,37 +292,34 @@ class AnalyzersTest {
         Path file = tmp.resolve("stopwords.txt");
         Files.writeString(file, "# Lucene's word set format\n  running \n\nfoxes\n");
 
-        var spec = english(Optional.of(new WordSet.File(file)), Optional.empty());
+        var spec = english(new WordSet.File(file), null);
         assertThat(terms(spec, "The running foxes")).containsExactly("the");
     }
 
     @Test
     void aWordSetThatCantBeUsedFails() throws Exception {
-        assertThatThrownBy(() -> Analyzers.build(new AnalyzerSpec.Preset(
-                        "org.apache.lucene.analysis.core.KeywordAnalyzer", Optional.of(words()), Optional.empty())))
+        assertThatThrownBy(() -> Analyzers.build(
+                        new AnalyzerSpec.Preset("org.apache.lucene.analysis.core.KeywordAnalyzer", words(), null)))
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessage("KeywordAnalyzer takes no stop words");
-        assertThatThrownBy(() -> Analyzers.build(new AnalyzerSpec.Preset(
-                        "org.apache.lucene.analysis.standard.StandardAnalyzer",
-                        Optional.empty(),
-                        Optional.of(words()))))
+        assertThatThrownBy(() -> Analyzers.build(
+                        new AnalyzerSpec.Preset("org.apache.lucene.analysis.standard.StandardAnalyzer", null, words())))
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessage("StandardAnalyzer takes no stem exclusions");
         Path missing = tmp.resolve("missing.txt");
-        assertThatThrownBy(() -> Analyzers.build(english(Optional.of(new WordSet.File(missing)), Optional.empty())))
+        assertThatThrownBy(() -> Analyzers.build(english(new WordSet.File(missing), null)))
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessage("stop words: no file " + missing);
         Path latin1 = tmp.resolve("latin1.txt");
         Files.write(latin1, new byte[] {'s', (byte) 0xE9, '\n'});
-        assertThatThrownBy(() -> Analyzers.build(english(Optional.empty(), Optional.of(new WordSet.File(latin1)))))
+        assertThatThrownBy(() -> Analyzers.build(english(null, new WordSet.File(latin1))))
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessage("stem exclusions: " + latin1 + " is not UTF-8");
     }
 
     @Test
     void wrappersAreStagesAfterTheAnalyzer() throws Exception {
-        var spec = new AnalyzerSpec.Wrapped(
-                new AnalyzerSpec.Standard(), Optional.of(shingles(2, 2)), Optional.of(new LimitTokenCount(3, false)));
+        var spec = new AnalyzerSpec.Wrapped(new AnalyzerSpec.Standard(), shingles(2, 2), new LimitTokenCount(3, false));
 
         TextAnalysis analysis = analyze(spec, "The quick brown fox", 100);
 
@@ -349,8 +341,8 @@ class AnalyzersTest {
                         List.of(new Component("htmlStrip", Map.of())),
                         new Component("whitespace", Map.of()),
                         List.of(new Component("lowercase", Map.of()))),
-                Optional.of(new Shingles(3, 3, "+", false, false, "_")),
-                Optional.empty());
+                new Shingles(3, 3, "+", false, false, "_"),
+                null);
 
         TextAnalysis analysis = analyze(spec, "<b>A</b> B C", 100);
 
@@ -365,8 +357,8 @@ class AnalyzersTest {
     void aWrappedAnalyzerSearchesLikeTheWrappers() throws Exception {
         var spec = new AnalyzerSpec.Wrapped(
                 new AnalyzerSpec.Preset("org.apache.lucene.analysis.core.WhitespaceAnalyzer"),
-                Optional.of(shingles(2, 2)),
-                Optional.of(new LimitTokenCount(2, true)));
+                shingles(2, 2),
+                new LimitTokenCount(2, true));
 
         try (Analyzer analyzer = Analyzers.build(spec);
                 TokenStream stream = analyzer.tokenStream("body", "a b c")) {
@@ -383,16 +375,16 @@ class AnalyzersTest {
 
     @Test
     void wrappersMustBeInRange() {
-        assertThatThrownBy(() -> Analyzers.build(new AnalyzerSpec.Wrapped(
-                        new AnalyzerSpec.Standard(), Optional.of(shingles(1, 2)), Optional.empty())))
+        assertThatThrownBy(() ->
+                        Analyzers.build(new AnalyzerSpec.Wrapped(new AnalyzerSpec.Standard(), shingles(1, 2), null)))
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessage("shingles: the minimum size must be at least 2, not 1");
-        assertThatThrownBy(() -> Analyzers.build(new AnalyzerSpec.Wrapped(
-                        new AnalyzerSpec.Standard(), Optional.of(shingles(3, 2)), Optional.empty())))
+        assertThatThrownBy(() ->
+                        Analyzers.build(new AnalyzerSpec.Wrapped(new AnalyzerSpec.Standard(), shingles(3, 2), null)))
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessage("shingles: the maximum size must be at least the minimum size, 3, not 2");
-        assertThatThrownBy(() -> Analyzers.build(new AnalyzerSpec.Wrapped(
-                        new AnalyzerSpec.Standard(), Optional.empty(), Optional.of(new LimitTokenCount(0, false)))))
+        assertThatThrownBy(() -> Analyzers.build(
+                        new AnalyzerSpec.Wrapped(new AnalyzerSpec.Standard(), null, new LimitTokenCount(0, false))))
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessage("token limit: the maximum token count must be at least 1, not 0");
     }
@@ -407,14 +399,14 @@ class AnalyzersTest {
         // With stop words of its own.
         var standard = new AnalyzerSpec.Preset(
                 "org.apache.lucene.analysis.standard.StandardAnalyzer",
-                Optional.of(words("abc")),
-                Optional.empty(),
-                OptionalInt.of(3),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty());
+                words("abc"),
+                null,
+                3,
+                null,
+                null,
+                null,
+                null,
+                null);
         assertThat(terms(standard, "abcdefg")).containsExactly("def", "g");
 
         assertThatThrownBy(() -> Analyzers.build(maxTokenLength("org.apache.lucene.analysis.en.EnglishAnalyzer", 3)))
@@ -428,39 +420,37 @@ class AnalyzersTest {
 
     @Test
     void dutchTakesAStemOverrideDictionary() throws Exception {
-        assertThat(terms(
-                        dutch(Optional.empty(), new StemDictionary.Entries(Map.of("fietsen", "rijwiel"))),
-                        "de fietsen"))
+        assertThat(terms(dutch(null, new StemDictionary.Entries(Map.of("fietsen", "rijwiel"))), "de fietsen"))
                 .containsExactly("rijwiel");
         // Stem exclusions win: the keyword marker comes first.
         assertThat(terms(
-                        dutch(Optional.of(words("fietsen")), new StemDictionary.Entries(Map.of("fietsen", "rijwiel"))),
+                        dutch(words("fietsen"), new StemDictionary.Entries(Map.of("fietsen", "rijwiel"))),
                         "de fietsen"))
                 .containsExactly("fietsen");
 
         Path file = tmp.resolve("stemdict.txt");
         Files.writeString(file, "# word<TAB>stem\n\nfietsen\trijwiel\n");
-        assertThat(terms(dutch(Optional.empty(), new StemDictionary.File(file)), "de fietsen"))
+        assertThat(terms(dutch(null, new StemDictionary.File(file)), "de fietsen"))
                 .containsExactly("rijwiel");
 
         Path broken = tmp.resolve("broken.txt");
         Files.writeString(broken, "fietsen rijwiel\n");
-        assertThatThrownBy(() -> Analyzers.build(dutch(Optional.empty(), new StemDictionary.File(broken))))
+        assertThatThrownBy(() -> Analyzers.build(dutch(null, new StemDictionary.File(broken))))
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessage("stem overrides: " + broken + ": 'fietsen rijwiel' is not word<TAB>stem");
-        assertThatThrownBy(() -> Analyzers.build(dutch(Optional.empty(), new StemDictionary.Entries(Map.of("a", "")))))
+        assertThatThrownBy(() -> Analyzers.build(dutch(null, new StemDictionary.Entries(Map.of("a", "")))))
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessage("stem overrides: an empty word or stem in 'a' → ''");
         var english = new AnalyzerSpec.Preset(
                 "org.apache.lucene.analysis.en.EnglishAnalyzer",
-                Optional.empty(),
-                Optional.empty(),
-                OptionalInt.empty(),
-                Optional.of(new StemDictionary.Entries(Map.of())),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty());
+                null,
+                null,
+                null,
+                new StemDictionary.Entries(Map.of()),
+                null,
+                null,
+                null,
+                null);
         assertThatThrownBy(() -> Analyzers.build(english))
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessage("EnglishAnalyzer takes no stem overrides");
@@ -468,8 +458,8 @@ class AnalyzersTest {
 
     @Test
     void aCollationAnalyzerIndexesTheCollationKey() throws Exception {
-        var german = new Collation("de", Optional.empty(), Optional.empty());
-        Token token = analyze(collation(Optional.of(german)), "Äpfel", 100)
+        var german = new Collation("de", null, null);
+        Token token = analyze(collation(german), "Äpfel", 100)
                 .stages()
                 .getFirst()
                 .tokens()
@@ -483,58 +473,47 @@ class AnalyzersTest {
 
     @Test
     void aCollationAnalyzerTakesTheStrengthAndDecomposition() throws Exception {
-        var primary = new Collation("de", Optional.of(CollationStrength.PRIMARY), Optional.empty());
-        assertThat(bytes(collation(Optional.of(primary)), "Äpfel"))
-                .isEqualTo(bytes(collation(Optional.of(primary)), "apfel"));
-        var tertiary = new Collation("de", Optional.of(CollationStrength.TERTIARY), Optional.empty());
-        assertThat(bytes(collation(Optional.of(tertiary)), "Äpfel"))
-                .isNotEqualTo(bytes(collation(Optional.of(tertiary)), "apfel"));
-        var full = new Collation("de", Optional.empty(), Optional.of(CollationDecomposition.FULL));
+        var primary = new Collation("de", CollationStrength.PRIMARY, null);
+        assertThat(bytes(collation(primary), "Äpfel")).isEqualTo(bytes(collation(primary), "apfel"));
+        var tertiary = new Collation("de", CollationStrength.TERTIARY, null);
+        assertThat(bytes(collation(tertiary), "Äpfel")).isNotEqualTo(bytes(collation(tertiary), "apfel"));
+        var full = new Collation("de", null, CollationDecomposition.FULL);
         Collator fullCollator = Collator.getInstance(Locale.GERMAN);
         fullCollator.setDecomposition(Collator.FULL_DECOMPOSITION);
         // The compatibility form of ﬁ is fi.
-        assertThat(bytes(collation(Optional.of(full)), "ﬁ"))
+        assertThat(bytes(collation(full), "ﬁ"))
                 .isEqualTo(new BytesRef(fullCollator.getCollationKey("fi").toByteArray()).toString());
         // None given: the root locale.
-        assertThat(bytes(collation(Optional.empty()), "Äpfel")).isEqualTo(key(Locale.ROOT, "Äpfel"));
+        assertThat(bytes(collation(null), "Äpfel")).isEqualTo(key(Locale.ROOT, "Äpfel"));
     }
 
     @Test
     void aCollationThatCantBeUsedFails() {
-        var quaternary = new Collation("de", Optional.of(CollationStrength.QUATERNARY), Optional.empty());
-        assertThatThrownBy(() -> Analyzers.build(collation(Optional.of(quaternary))))
+        var quaternary = new Collation("de", CollationStrength.QUATERNARY, null);
+        assertThatThrownBy(() -> Analyzers.build(collation(quaternary)))
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessage("collation: the JDK's collator has no strength QUATERNARY");
-        var illFormed = new Collation("not a tag", Optional.empty(), Optional.empty());
-        assertThatThrownBy(() -> Analyzers.build(collation(Optional.of(illFormed))))
+        var illFormed = new Collation("not a tag", null, null);
+        assertThatThrownBy(() -> Analyzers.build(collation(illFormed)))
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessageStartingWith("collation: 'not a tag' is not a language tag: ");
         var english = new AnalyzerSpec.Preset(
                 "org.apache.lucene.analysis.en.EnglishAnalyzer",
-                Optional.empty(),
-                Optional.empty(),
-                OptionalInt.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.of(new Collation("de", Optional.empty(), Optional.empty())),
-                Optional.empty());
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                new Collation("de", null, null),
+                null);
         assertThatThrownBy(() -> Analyzers.build(english))
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessage("EnglishAnalyzer takes no collation");
     }
 
-    private static AnalyzerSpec.Preset collation(Optional<Collation> collation) {
-        return new AnalyzerSpec.Preset(
-                COLLATION,
-                Optional.empty(),
-                Optional.empty(),
-                OptionalInt.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                collation,
-                Optional.empty());
+    private static AnalyzerSpec.Preset collation(@Nullable Collation collation) {
+        return new AnalyzerSpec.Preset(COLLATION, null, null, null, null, null, null, collation, null);
     }
 
     /** The bytes of the first token, as the analysis shows them. */
@@ -556,29 +535,20 @@ class AnalyzersTest {
     }
 
     private static AnalyzerSpec.Preset maxTokenLength(String className, int length) {
-        return new AnalyzerSpec.Preset(
-                className,
-                Optional.empty(),
-                Optional.empty(),
-                OptionalInt.of(length),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty());
+        return new AnalyzerSpec.Preset(className, null, null, length, null, null, null, null, null);
     }
 
-    private static AnalyzerSpec.Preset dutch(Optional<WordSet> stemExclusion, StemDictionary stemOverride) {
+    private static AnalyzerSpec.Preset dutch(@Nullable WordSet stemExclusion, StemDictionary stemOverride) {
         return new AnalyzerSpec.Preset(
                 "org.apache.lucene.analysis.nl.DutchAnalyzer",
-                Optional.empty(),
+                null,
                 stemExclusion,
-                OptionalInt.empty(),
-                Optional.of(stemOverride),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty());
+                null,
+                stemOverride,
+                null,
+                null,
+                null,
+                null);
     }
 
     @Test
@@ -591,7 +561,7 @@ class AnalyzersTest {
         assertThat(analysis.stages()).extracting(TokenStage::name).containsExactly("whitespace", "lowercase");
     }
 
-    private static AnalyzerSpec.Preset english(Optional<WordSet> stopwords, Optional<WordSet> stemExclusion) {
+    private static AnalyzerSpec.Preset english(@Nullable WordSet stopwords, @Nullable WordSet stemExclusion) {
         return new AnalyzerSpec.Preset("org.apache.lucene.analysis.en.EnglishAnalyzer", stopwords, stemExclusion);
     }
 
@@ -608,7 +578,7 @@ class AnalyzersTest {
 
     private static AnalyzerSpec.Custom custom(
             List<Component> charFilters, Component tokenizer, List<Component> filters) {
-        return new AnalyzerSpec.Custom(charFilters, tokenizer, filters, Optional.empty());
+        return new AnalyzerSpec.Custom(charFilters, tokenizer, filters, null);
     }
 
     private static TextAnalysis analyze(AnalyzerSpec spec, String text, int maxTokens) throws Exception {

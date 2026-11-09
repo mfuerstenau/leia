@@ -14,7 +14,6 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
@@ -74,20 +73,20 @@ class CommitsTest {
             assertThat(first.maxDoc()).isEqualTo(2);
             assertThat(first.docBase()).isZero();
             assertThat(first.delCount()).isEqualTo(1);
-            assertThat(first.delGen()).hasValue(1);
-            assertThat(first.fieldInfosGen()).isEmpty();
+            assertThat(first.delGen()).isEqualTo(1);
+            assertThat(first.fieldInfosGen()).isNull();
             assertThat(first.compound()).isTrue();
             assertThat(first.version()).isEqualTo(Version.LATEST);
             assertThat(first.codec()).isEqualTo(Codec.getDefault().getName());
             assertThat(first.formats().postings()).isEqualTo("PerField40");
             assertThat(first.formats().storedFields()).endsWith("StoredFieldsFormat");
             assertThat(first.diagnostics()).containsEntry("source", "flush");
-            assertThat(first.indexSort()).isEmpty();
+            assertThat(first.indexSort()).isNull();
             assertThat(first.id()).isNotBlank();
 
             Segment second = details.segments().get(1);
             assertThat(second.docBase()).isEqualTo(2);
-            assertThat(second.delGen()).isEmpty();
+            assertThat(second.delGen()).isNull();
             assertThat(second.compound()).isFalse();
         }
     }
@@ -99,15 +98,15 @@ class CommitsTest {
             CommitDetails details = index.commit(0, 2).orElseThrow();
 
             assertThat(details.files()).extracting(CommitFile::name).isSorted().contains("segments_2", "_0.cfs");
-            assertThat(file(details, "segments_2").segment()).isEmpty();
-            assertThat(file(details, "_0.cfs").segment()).hasValue("_0");
-            assertThat(file(details, "_0_1.liv").segment()).hasValue("_0");
-            assertThat(file(details, "_0.cfs").size()).hasValue(Files.size(dir.resolve("_0.cfs")));
+            assertThat(file(details, "segments_2").segment()).isNull();
+            assertThat(file(details, "_0.cfs").segment()).isEqualTo("_0");
+            assertThat(file(details, "_0_1.liv").segment()).isEqualTo("_0");
+            assertThat(file(details, "_0.cfs").size()).isEqualTo(Files.size(dir.resolve("_0.cfs")));
             long segmentSize = details.files().stream()
-                    .filter(file -> file.segment().equals(Optional.of("_1")))
-                    .mapToLong(file -> file.size().getAsLong())
+                    .filter(file -> "_1".equals(file.segment()))
+                    .mapToLong(CommitFile::size)
                     .sum();
-            assertThat(details.segments().get(1).sizeInBytes()).hasValue(segmentSize);
+            assertThat(details.segments().get(1).sizeInBytes()).isEqualTo(segmentSize);
         }
     }
 
@@ -150,9 +149,9 @@ class CommitsTest {
 
             CommitDetails details = index.commit(0, 2).orElseThrow();
 
-            assertThat(file(details, "_0_1.liv").size()).isEmpty();
-            assertThat(details.segments().get(0).sizeInBytes()).isEmpty();
-            assertThat(details.segments().get(1).sizeInBytes()).isPresent();
+            assertThat(file(details, "_0_1.liv").size()).isNull();
+            assertThat(details.segments().get(0).sizeInBytes()).isNull();
+            assertThat(details.segments().get(1).sizeInBytes()).isNotNull();
         }
     }
 
@@ -220,7 +219,7 @@ class CommitsTest {
 
             assertThat(details.segments()).extracting(Segment::compound).containsExactly(true, false);
             assertThat(details.segments()).allSatisfy(segment -> {
-                assertThat(segment.fieldInfosError()).isEmpty();
+                assertThat(segment.fieldInfosError()).isNull();
                 assertThat(segment.fieldFormats()).isEqualTo(DEFAULT_FIELD_FORMATS);
             });
         }
@@ -231,7 +230,7 @@ class CommitsTest {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeFormatsIndex())) {
             Segment updated = index.commit(0, 3).orElseThrow().segments().getFirst();
 
-            assertThat(updated.fieldInfosGen()).hasValue(1);
+            assertThat(updated.fieldInfosGen()).isEqualTo(1);
             assertThat(updated.compound()).isTrue();
             assertThat(updated.fieldFormats()).isEqualTo(DEFAULT_FIELD_FORMATS);
         }
@@ -247,7 +246,7 @@ class CommitsTest {
             assertThat(details.segments().getFirst().fieldFormats()).isEqualTo(DEFAULT_FIELD_FORMATS);
             Segment broken = details.segments().get(1);
             assertThat(broken.fieldFormats()).isEmpty();
-            assertThat(broken.fieldInfosError()).containsInstanceOf(NoSuchFileException.class);
+            assertThat(broken.fieldInfosError()).isInstanceOf(NoSuchFileException.class);
             assertThat(broken.fieldInfosMessage())
                     .hasValueSatisfying(message -> assertThat(message)
                             .startsWith("Corrupt index, missing file: ")
@@ -261,16 +260,16 @@ class CommitsTest {
             CommitDetails details = CommitReader.commit(directory, 1, 1).orElseThrow();
 
             assertThat(details.segments()).isNotEmpty().allSatisfy(segment -> {
-                assertThat(segment.fieldInfosError()).isEmpty();
+                assertThat(segment.fieldInfosError()).isNull();
                 assertThat(segment.fieldFormats()).isNotEmpty().allSatisfy(field -> {
-                    field.postings().ifPresent(name -> assertThat(name).isEqualTo("LeiaTestPostings"));
-                    field.docValues().ifPresent(name -> assertThat(name).isEqualTo("LeiaTestDocValues"));
-                    field.knnVectors().ifPresent(name -> assertThat(name).isEqualTo("LeiaTestKnnVectors"));
+                    assertThat(field.postings()).isIn(null, "LeiaTestPostings");
+                    assertThat(field.docValues()).isIn(null, "LeiaTestDocValues");
+                    assertThat(field.knnVectors()).isIn(null, "LeiaTestKnnVectors");
                 });
                 assertThat(segment.fieldFormats())
-                        .anySatisfy(field -> assertThat(field.postings()).isPresent())
-                        .anySatisfy(field -> assertThat(field.docValues()).isPresent())
-                        .anySatisfy(field -> assertThat(field.knnVectors()).isPresent());
+                        .anySatisfy(field -> assertThat(field.postings()).isNotNull())
+                        .anySatisfy(field -> assertThat(field.docValues()).isNotNull())
+                        .anySatisfy(field -> assertThat(field.knnVectors()).isNotNull());
             });
         }
     }
@@ -282,10 +281,10 @@ class CommitsTest {
 
             Segment segment =
                     index.commit(0, generation).orElseThrow().segments().getFirst();
-            assertThat(segment.fieldInfosError()).isEmpty();
+            assertThat(segment.fieldInfosError()).isNull();
             assertThat(segment.fieldFormats())
                     .extracting(FieldFormats::field, FieldFormats::postings)
-                    .contains(tuple("body", Optional.of("Lucene912")), tuple("id", Optional.of("Lucene912")));
+                    .contains(tuple("body", "Lucene912"), tuple("id", "Lucene912"));
         }
     }
 
@@ -319,12 +318,12 @@ class CommitsTest {
 
     /** The formats of {@link #formatsDoc}'s fields in Lucene's default codec. */
     private static final List<FieldFormats> DEFAULT_FIELD_FORMATS = List.of(
-            new FieldFormats("body", Optional.of("Lucene104"), Optional.empty(), Optional.empty()),
-            new FieldFormats("id", Optional.of("Lucene104"), Optional.empty(), Optional.empty()),
-            new FieldFormats("rank", Optional.empty(), Optional.of("Lucene90"), Optional.empty()),
-            new FieldFormats("stored", Optional.empty(), Optional.empty(), Optional.empty()),
-            new FieldFormats("tag", Optional.of("Lucene104"), Optional.of("Lucene90"), Optional.empty()),
-            new FieldFormats("vector", Optional.empty(), Optional.empty(), Optional.of("Lucene99HnswVectorsFormat")));
+            new FieldFormats("body", "Lucene104", null, null),
+            new FieldFormats("id", "Lucene104", null, null),
+            new FieldFormats("rank", null, "Lucene90", null),
+            new FieldFormats("stored", null, null, null),
+            new FieldFormats("tag", "Lucene104", "Lucene90", null),
+            new FieldFormats("vector", null, null, "Lucene99HnswVectorsFormat"));
 
     /**
      * Three commits of documents with a field of each kind: {@code segments_1} with {@code _0}

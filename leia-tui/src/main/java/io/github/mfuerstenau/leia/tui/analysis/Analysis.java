@@ -38,9 +38,11 @@ import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.function.ToIntFunction;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The analysis screen (ADR 0014): the current analyzer, a text line, and what the analyzer makes of
@@ -110,42 +112,42 @@ public final class Analysis {
     private List<String> fields = List.of();
 
     /** Why the open index can't find auto stop words; empty if it can. */
-    private Optional<String> unsupported = Optional.of(AutoStopWordsForm.NO_INDEX);
+    private @Nullable String unsupported = AutoStopWordsForm.NO_INDEX;
 
-    /** The field the text is analyzed for; empty for the default analyzer. */
-    private Optional<String> field = Optional.empty();
+    /** The field the text is analyzed for; null for the default analyzer. */
+    private @Nullable String field;
 
     /** The auto stop words popup; null while it is closed. */
-    private AutoStopWordsForm stopWordsForm;
+    private @Nullable AutoStopWordsForm stopWordsForm;
 
     /** The id of the last search for auto stop words. */
     private long stopWordsId;
 
     /** The components, once fetched; null before. */
-    private GetAnalysisComponentsResult components;
+    private @Nullable GetAnalysisComponentsResult components;
 
     /** What the tab and the analyzer form say when no loaded runtime has analysis (ADR 0071). */
     static final String NO_ANALYSIS = "No loaded runtime has analysis";
 
     /** Why the components could not be fetched; null otherwise. */
-    private String componentsError;
+    private @Nullable String componentsError;
 
     /** Whether no loaded runtime has analysis (ADR 0071): then there are no components to list. */
     private boolean noAnalysis;
 
     private final LineInput input = new LineInput("");
-    private Origin origin;
+    private @Nullable Origin origin;
     private boolean editing;
-    private AnalyzerForm form;
+    private @Nullable AnalyzerForm form;
 
     /** The analysis with the analyzer that the form applied, while the backend tries it; null otherwise. */
-    private AnalysisSettings trying;
+    private @Nullable AnalysisSettings trying;
 
     /** The last analysis; null before the first one or after it failed. */
-    private Shown shown;
+    private @Nullable Shown shown;
 
     /** Why the last analysis failed; null otherwise. */
-    private String error;
+    private @Nullable String error;
 
     private Focus focus = Focus.TOKENS;
     private int step = -1;
@@ -171,12 +173,12 @@ public final class Analysis {
      * and why it can't find auto stop words, empty if it can (ADR 0044). Another index drops the auto stop words, a reopen keeps them; the backend stopped the job of a
      * search. A field that is gone is no longer the shown one.
      */
-    public void indexChanged(List<String> indexedFields, Optional<String> unsupported, boolean reopen) {
+    public void indexChanged(List<String> indexedFields, @Nullable String unsupported, boolean reopen) {
         this.fields = List.copyOf(indexedFields);
         this.unsupported = unsupported;
         settings = settings.forIndex(reopen);
-        if (field.isPresent() && !fields.contains(field.get())) {
-            field = Optional.empty();
+        if (field != null && !fields.contains(field)) {
+            field = null;
         }
         if (stopWordsForm != null) {
             stopWordsForm.indexChanged(settings.stopWords());
@@ -185,7 +187,7 @@ public final class Analysis {
 
     /** The field the text is analyzed for; empty for the default analyzer. */
     Optional<String> field() {
-        return field;
+        return Optional.ofNullable(field);
     }
 
     /** The search for auto stop words that runs, as its id and job; empty if there is none. */
@@ -211,7 +213,7 @@ public final class Analysis {
         }
         stopWordsForm.progress(result);
         if (result.stopWords().isPresent()) {
-            settings = settings.withStopWords(result.stopWords());
+            settings = settings.withStopWords(result.stopWords().orElse(null));
         }
     }
 
@@ -304,7 +306,8 @@ public final class Analysis {
 
     /** The analysis of the text line with {@code with}, for the shown field. */
     private Optional<Request> analyze(AnalysisSettings with) {
-        return Optional.of(new Request.Analyze(new AnalyzeParams(with.analyzer(), input.text(), field)));
+        return Optional.of(
+                new Request.Analyze(new AnalyzeParams(with.analyzer(), input.text(), Optional.ofNullable(field))));
     }
 
     /** The analysis again, if there is one to redo. */
@@ -334,7 +337,7 @@ public final class Analysis {
         }
         if (key.isChar('e')) {
             // A field's first analyzer starts from the default one.
-            form = new AnalyzerForm(settings.analyzer(field), Optional.ofNullable(components));
+            form = new AnalyzerForm(settings.analyzer(field), components);
             if (noAnalysis) {
                 form.setNoAnalysis();
             }
@@ -344,14 +347,14 @@ public final class Analysis {
             return again();
         }
         if ((key.isChar('f') || key.isChar('F')) && !fields.isEmpty()) {
-            List<Optional<String>> choices = new ArrayList<>();
-            choices.add(Optional.empty());
-            fields.forEach(name -> choices.add(Optional.of(name)));
+            List<@Nullable String> choices = new ArrayList<>();
+            choices.add(null);
+            choices.addAll(fields);
             field = AnalyzerSettings.cycled(field, key.isChar('f'), choices);
             return again();
         }
-        if (key.isChar('D') && field.isPresent() && settings.hasOwn(field.get())) {
-            settings = settings.withoutAnalyzer(field.get());
+        if (key.isChar('D') && field != null && settings.hasOwn(field)) {
+            settings = settings.withoutAnalyzer(field);
             return again();
         }
         if (key.isChar('w')) {
@@ -367,7 +370,7 @@ public final class Analysis {
     }
 
     private Optional<Request> formKey(KeyEvent key) {
-        return switch (form.handleKey(key)) {
+        return switch (Objects.requireNonNull(form).handleKey(key)) {
             case Form.Event.None<AnalyzerSettings> _ -> Optional.empty();
             case Form.Event.Cancel<AnalyzerSettings> _ -> {
                 form = null;
@@ -431,7 +434,7 @@ public final class Analysis {
     }
 
     private Optional<Request> stopWordsKey(KeyEvent key) {
-        return switch (stopWordsForm.handleKey(key)) {
+        return switch (Objects.requireNonNull(stopWordsForm).handleKey(key)) {
             case AutoStopWordsForm.Event.None _ -> Optional.empty();
             case AutoStopWordsForm.Event.Close _ -> {
                 stopWordsForm = null;
@@ -443,7 +446,7 @@ public final class Analysis {
             }
             case AutoStopWordsForm.Event.Cancel cancel -> Optional.of(new Request.CancelAutoStopWords(cancel.jobId()));
             case AutoStopWordsForm.Event.Clear _ -> {
-                settings = settings.withStopWords(Optional.empty());
+                settings = settings.withStopWords(null);
                 yield Optional.empty();
             }
         };
@@ -497,7 +500,11 @@ public final class Analysis {
     /** The tokens of the selected stage; empty if a char filter is selected. */
     private Optional<List<Token>> stageTokens() {
         return step().flatMap(selected -> selected instanceof Step.Stage stage
-                ? Optional.of(shown.result.stages().get(stage.index()).tokens())
+                ? Optional.of(Objects.requireNonNull(shown)
+                        .result
+                        .stages()
+                        .get(stage.index())
+                        .tokens())
                 : Optional.empty());
     }
 
@@ -528,7 +535,7 @@ public final class Analysis {
                 .key(FIND, "/", "text")
                 .keyIf(!fields.isEmpty(), FIND, "f/F", "field")
                 .key(DO, "e", "analyzer")
-                .keyIf(field.isPresent() && settings.hasOwn(field.get()), DO, "D", "default analyzer")
+                .keyIf(field != null && settings.hasOwn(field), DO, "D", "default analyzer")
                 .more(DO, "w", "stop words")
                 .key(DO, "r", "again")
                 .build();
@@ -610,19 +617,19 @@ public final class Analysis {
 
     /** The analyzer of the chosen field, or the default one for any field. */
     private List<Line> fieldLines() {
-        if (field.isEmpty()) {
+        if (field == null) {
             return List.of(Line.from(
                     Span.raw(settings.analyzer(field).text()),
                     Span.styled(fields.isEmpty() ? "" : "   for any field · f picks one", Form.muted())));
         }
         List<Line> lines = new ArrayList<>();
-        String name = TextFormat.escapeControl(field.get());
-        boolean own = settings.hasOwn(field.get());
+        String name = TextFormat.escapeControl(field);
+        boolean own = settings.hasOwn(field);
         lines.add(Line.from(
                 Span.styled(name + ": ", Palette.current().label()),
                 Span.raw(settings.analyzer(field).text()),
                 Span.styled(own ? "   its own · D drops it" : "   the default one", Form.muted())));
-        List<String> words = settings.stopWords(field.get());
+        List<String> words = settings.stopWords(field);
         if (!words.isEmpty()) {
             lines.add(
                     Line.styled(AnalysisSettings.count(words.size(), "auto stop word") + " of " + name, Form.muted()));
@@ -633,13 +640,13 @@ public final class Analysis {
     /** How many other fields have analyzers of their own, and the auto stop words. */
     private Optional<Line> othersLine() {
         long others = settings.fields().keySet().stream()
-                .filter(name -> !field.equals(Optional.of(name)))
+                .filter(name -> !name.equals(field))
                 .count();
         String stopWords = settings.stopWordsText();
         if (others == 0 && stopWords.isEmpty()) {
             return Optional.empty();
         }
-        String noun = field.isEmpty() ? "field" : "other field";
+        String noun = field == null ? "field" : "other field";
         String text = others > 0 ? AnalysisSettings.count((int) others, noun) + " with its own" : "";
         if (!stopWords.isEmpty()) {
             text += text.isEmpty() ? stopWords.substring(3) : stopWords;
@@ -699,7 +706,7 @@ public final class Analysis {
         int width = stepNameWidth();
         boolean focused = focused(Focus.STEPS);
         List<Row> rows = new ArrayList<>();
-        for (CharFilterStep filter : shown.result.charFilters()) {
+        for (CharFilterStep filter : Objects.requireNonNull(shown).result.charFilters()) {
             rows.add(Row.from(Cell.from(Line.from(
                     Span.raw(Form.padded(TextFormat.escapeControl(filter.name()), width) + " "),
                     Span.styled(String.format("%6s", "text"), Form.muted())))));
@@ -732,7 +739,8 @@ public final class Analysis {
             return;
         }
         if (selected.get() instanceof Step.CharFilter charFilter) {
-            CharFilterStep filter = shown.result.charFilters().get(charFilter.index());
+            CharFilterStep filter =
+                    Objects.requireNonNull(shown).result.charFilters().get(charFilter.index());
             frame.renderWidget(
                     Panels.wrapped(
                             TextFormat.escapeControl(filter.text()),
@@ -741,7 +749,7 @@ public final class Analysis {
                     area);
             return;
         }
-        TokenStage stage = shown.result.stages().get(((Step.Stage) selected.get()).index());
+        TokenStage stage = Objects.requireNonNull(shown).result.stages().get(((Step.Stage) selected.get()).index());
         String title = " Tokens after " + TextFormat.escapeControl(stage.name()) + " · "
                 + stage.tokens().size() + " ";
         if (stage.truncated()) {

@@ -11,7 +11,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -287,7 +286,7 @@ class ThemesTest {
         Files.writeString(dir.resolve("solar.theme"), bundledText("light"));
         Files.writeString(dir.resolve("notes.txt"), "not a theme");
 
-        Themes themes = Themes.bundled().withUserDir(Optional.of(dir));
+        Themes themes = Themes.bundled().withUserDir(dir);
 
         assertThat(themes.ids())
                 .containsExactly("dark", "light", "mono", "nord", "solarized-dark", "solarized-light", "solar", "zen");
@@ -317,7 +316,7 @@ class ThemesTest {
         Files.writeString(dir.resolve("old.theme"), "base = none\n");
         Files.writeString(dir.resolve("good.theme"), bundledText("mono"));
 
-        Themes themes = Themes.bundled().withUserDir(Optional.of(dir));
+        Themes themes = Themes.bundled().withUserDir(dir);
 
         assertThat(themes.ids()).contains("good").doesNotContain("old");
         assertThat(themes.leftOut()).hasSize(1);
@@ -332,7 +331,7 @@ class ThemesTest {
     void aUserThemeWithABundledNameReplacesItInItsPlace() throws Exception {
         Files.writeString(dir.resolve("nord.theme"), bundledText("nord").replace("#BF616A", "red"));
 
-        Themes themes = Themes.bundled().withUserDir(Optional.of(dir));
+        Themes themes = Themes.bundled().withUserDir(dir);
 
         assertThat(themes.ids()).containsExactly("dark", "light", "mono", "nord", "solarized-dark", "solarized-light");
         assertThat(themes.find("nord").orElseThrow().palette().error()).isEqualTo(Style.EMPTY.red());
@@ -348,7 +347,7 @@ class ThemesTest {
         Files.writeString(dir.resolve("-dash.theme"), bundledText("dark"));
         Files.writeString(dir.resolve("good.theme"), bundledText("dark"));
 
-        Themes themes = Themes.bundled().withUserDir(Optional.of(dir));
+        Themes themes = Themes.bundled().withUserDir(dir);
 
         assertThat(themes.ids())
                 .containsExactly("dark", "light", "mono", "nord", "solarized-dark", "solarized-light", "good");
@@ -356,9 +355,7 @@ class ThemesTest {
 
     @Test
     void aMissingFolderAddsNothing() {
-        assertThat(Themes.bundled().withUserDir(Optional.of(dir.resolve("missing"))))
-                .isEqualTo(Themes.bundled());
-        assertThat(Themes.bundled().withUserDir(Optional.empty())).isEqualTo(Themes.bundled());
+        assertThat(Themes.bundled().withUserDir(dir.resolve("missing"))).isEqualTo(Themes.bundled());
     }
 
     private static Style[] styles(Palette palette) {

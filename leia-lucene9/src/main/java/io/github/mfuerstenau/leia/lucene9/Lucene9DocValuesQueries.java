@@ -33,6 +33,7 @@ import org.apache.lucene.search.TwoPhaseIterator;
 import org.apache.lucene.search.Weight;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.NumericUtils;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Queries over the doc values of one field on Lucene 9.12, as leia-core's {@code DocValuesQueries}
@@ -103,9 +104,9 @@ final class Lucene9DocValuesQueries {
     static Query prefix(FieldInfo field, byte[] prefix) {
         BytesRef bytes = new BytesRef(prefix);
         if (bytes.length == 0) {
-            return bytesRefs(field, new Match.Range<>(Optional.empty(), Optional.empty(), true, true));
+            return bytesRefs(field, new Match.Range<>(null, null, true, true));
         }
-        return bytesRefs(field, new Match.Range<>(Optional.of(bytes), successor(bytes), true, false));
+        return bytesRefs(field, new Match.Range<>(bytes, successor(bytes).orElse(null), true, false));
     }
 
     private static Match<BytesRef> bytesRefs(Match<byte[]> match) {
@@ -114,8 +115,8 @@ final class Lucene9DocValuesQueries {
                 new Match.Values<>(values.values().stream().map(BytesRef::new).toList());
             case Match.Range<byte[]> range ->
                 new Match.Range<>(
-                        range.lower().map(BytesRef::new),
-                        range.upper().map(BytesRef::new),
+                        Optional.ofNullable(range.lower()).map(BytesRef::new).orElse(null),
+                        Optional.ofNullable(range.upper()).map(BytesRef::new).orElse(null),
                         range.includeLower(),
                         range.includeUpper());
         };
@@ -139,8 +140,8 @@ final class Lucene9DocValuesQueries {
                                 ? SortedSetDocValuesField.newSlowSetQuery(field.name, values.values())
                                 : SortedDocValuesField.newSlowSetQuery(field.name, values.values());
                     case Match.Range<BytesRef> range -> {
-                        BytesRef lower = range.lower().orElse(null);
-                        BytesRef upper = range.upper().orElse(null);
+                        BytesRef lower = range.lower();
+                        BytesRef upper = range.upper();
                         yield set
                                 ? SortedSetDocValuesField.newSlowRangeQuery(
                                         field.name, lower, upper, range.includeLower(), range.includeUpper())
@@ -178,7 +179,7 @@ final class Lucene9DocValuesQueries {
     private static Query longRange(FieldInfo field, boolean sorted, Match.Range<String> range) {
         long lower = Long.MIN_VALUE;
         long upper = Long.MAX_VALUE;
-        Optional<String> from = range.lower();
+        Optional<String> from = Optional.ofNullable(range.lower());
         if (from.isPresent()) {
             lower = parseLong(from.get());
             if (!range.includeLower()) {
@@ -188,7 +189,7 @@ final class Lucene9DocValuesQueries {
                 lower++;
             }
         }
-        Optional<String> to = range.upper();
+        Optional<String> to = Optional.ofNullable(range.upper());
         if (to.isPresent()) {
             upper = parseLong(to.get());
             if (!range.includeUpper()) {
@@ -208,29 +209,29 @@ final class Lucene9DocValuesQueries {
      */
     private static Query floatingRange(
             FieldInfo field, boolean sorted, NumberEncoding number, Match.Range<String> range) {
-        Optional<Double> lower = range.lower().map(text -> parseFloating(number, text));
-        Optional<Double> upper = range.upper().map(text -> parseFloating(number, text));
-        if (lower.isPresent() && !range.includeLower()) {
-            if (lower.get() == Double.POSITIVE_INFINITY) {
+        @Nullable Double lower = range.lower() == null ? null : parseFloating(number, range.lower());
+        @Nullable Double upper = range.upper() == null ? null : parseFloating(number, range.upper());
+        if (lower != null && !range.includeLower()) {
+            if (lower == Double.POSITIVE_INFINITY) {
                 return none(field);
             }
-            lower = Optional.of(nextUp(number, lower.get()));
+            lower = nextUp(number, lower);
         }
-        if (upper.isPresent() && !range.includeUpper()) {
-            if (upper.get() == Double.NEGATIVE_INFINITY) {
+        if (upper != null && !range.includeUpper()) {
+            if (upper == Double.NEGATIVE_INFINITY) {
                 return none(field);
             }
-            upper = Optional.of(nextDown(number, upper.get()));
+            upper = nextDown(number, upper);
         }
-        if (lower.isPresent() && upper.isPresent() && Double.compare(lower.get(), upper.get()) > 0) {
+        if (lower != null && upper != null && Double.compare(lower, upper) > 0) {
             return none(field);
         }
         if (!raw(number)) {
             return longRange(
                     field,
                     sorted,
-                    lower.map(value -> encode(number, value)).orElse(Long.MIN_VALUE),
-                    upper.map(value -> encode(number, value)).orElse(Long.MAX_VALUE));
+                    lower == null ? Long.MIN_VALUE : encode(number, lower),
+                    upper == null ? Long.MAX_VALUE : encode(number, upper));
         }
         return rawRange(field, sorted, number, lower, upper);
     }
@@ -240,26 +241,22 @@ final class Lucene9DocValuesQueries {
      * negative ones reversed.
      */
     private static Query rawRange(
-            FieldInfo field, boolean sorted, NumberEncoding number, Optional<Double> lower, Optional<Double> upper) {
+            FieldInfo field, boolean sorted, NumberEncoding number, @Nullable Double lower, @Nullable Double upper) {
         BooleanQuery.Builder parts = new BooleanQuery.Builder();
-        if (upper.isEmpty() || Double.compare(upper.get(), 0.0) >= 0) {
-            double from = lower.filter(value -> Double.compare(value, 0.0) > 0).orElse(0.0);
+        if (upper == null || Double.compare(upper, 0.0) >= 0) {
+            double from = lower != null && Double.compare(lower, 0.0) > 0 ? lower : 0.0;
             parts.add(
                     longRange(
                             field,
                             sorted,
                             encode(number, from),
-                            upper.map(value -> encode(number, value)).orElse(Long.MAX_VALUE)),
+                            upper == null ? Long.MAX_VALUE : encode(number, upper)),
                     Occur.SHOULD);
         }
-        if (lower.isEmpty() || Double.compare(lower.get(), -0.0) <= 0) {
-            double from = upper.filter(value -> Double.compare(value, -0.0) < 0).orElse(-0.0);
+        if (lower == null || Double.compare(lower, -0.0) <= 0) {
+            double from = upper != null && Double.compare(upper, -0.0) < 0 ? upper : -0.0;
             parts.add(
-                    longRange(
-                            field,
-                            sorted,
-                            encode(number, from),
-                            lower.map(value -> encode(number, value)).orElse(-1L)),
+                    longRange(field, sorted, encode(number, from), lower == null ? -1L : encode(number, lower)),
                     Occur.SHOULD);
         }
         BooleanQuery query = parts.build();
@@ -345,9 +342,9 @@ final class Lucene9DocValuesQueries {
     private static final class BinaryDocValuesQuery extends Query {
 
         private final String field;
-        private final Set<BytesRef> values;
-        private final Optional<BytesRef> lower;
-        private final Optional<BytesRef> upper;
+        private final @Nullable Set<BytesRef> values;
+        private final @Nullable BytesRef lower;
+        private final @Nullable BytesRef upper;
         private final boolean includeLower;
         private final boolean includeUpper;
 
@@ -356,15 +353,15 @@ final class Lucene9DocValuesQueries {
             switch (match) {
                 case Match.Values<BytesRef> exact -> {
                     values = exact.values().stream().map(BytesRef::deepCopyOf).collect(Collectors.toUnmodifiableSet());
-                    lower = Optional.empty();
-                    upper = Optional.empty();
+                    lower = null;
+                    upper = null;
                     includeLower = false;
                     includeUpper = false;
                 }
                 case Match.Range<BytesRef> range -> {
                     values = null;
-                    lower = range.lower().map(BytesRef::deepCopyOf);
-                    upper = range.upper().map(BytesRef::deepCopyOf);
+                    lower = range.lower() == null ? null : BytesRef.deepCopyOf(range.lower());
+                    upper = range.upper() == null ? null : BytesRef.deepCopyOf(range.upper());
                     includeLower = range.includeLower();
                     includeUpper = range.includeUpper();
                 }
@@ -375,14 +372,14 @@ final class Lucene9DocValuesQueries {
             if (values != null) {
                 return values.contains(value);
             }
-            if (lower.isPresent()) {
-                int order = value.compareTo(lower.get());
+            if (lower != null) {
+                int order = value.compareTo(lower);
                 if (order < 0 || (order == 0 && !includeLower)) {
                     return false;
                 }
             }
-            if (upper.isPresent()) {
-                int order = value.compareTo(upper.get());
+            if (upper != null) {
+                int order = value.compareTo(upper);
                 return order < 0 || (order == 0 && includeUpper);
             }
             return true;
@@ -393,7 +390,7 @@ final class Lucene9DocValuesQueries {
         public Weight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost) {
             return new ConstantScoreWeight(this, boost) {
                 @Override
-                public Scorer scorer(LeafReaderContext context) throws IOException {
+                public @Nullable Scorer scorer(LeafReaderContext context) throws IOException {
                     BinaryDocValues docValues = context.reader().getBinaryDocValues(field);
                     if (docValues == null) {
                         return null;
@@ -440,9 +437,9 @@ final class Lucene9DocValuesQueries {
                         .toString();
             }
             return text.append(includeLower ? '[' : '{')
-                    .append(lower.map(BytesRef::toString).orElse("*"))
+                    .append(lower == null ? "*" : lower.toString())
                     .append(" TO ")
-                    .append(upper.map(BytesRef::toString).orElse("*"))
+                    .append(upper == null ? "*" : upper.toString())
                     .append(includeUpper ? ']' : '}')
                     .toString();
         }
@@ -453,8 +450,8 @@ final class Lucene9DocValuesQueries {
                     && other instanceof BinaryDocValuesQuery query
                     && field.equals(query.field)
                     && Objects.equals(values, query.values)
-                    && lower.equals(query.lower)
-                    && upper.equals(query.upper)
+                    && Objects.equals(lower, query.lower)
+                    && Objects.equals(upper, query.upper)
                     && includeLower == query.includeLower
                     && includeUpper == query.includeUpper;
         }

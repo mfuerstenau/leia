@@ -216,7 +216,7 @@ class AnalysisTest {
         Analysis analysis = new Analysis();
         // Without an index, f picks nothing.
         assertThat(press(analysis, key('f'))).isEmpty();
-        analysis.indexChanged(List.of("body", "title"), Optional.empty(), false);
+        analysis.indexChanged(List.of("body", "title"), null, false);
         analysis.input().set("The Fox");
         analysis.analyzed("The Fox", result());
 
@@ -252,14 +252,14 @@ class AnalysisTest {
         assertThat(analysis.settings().hasOwn("title")).isFalse();
 
         // Another index without the field shows the default analyzer again.
-        analysis.indexChanged(List.of("body"), Optional.empty(), false);
+        analysis.indexChanged(List.of("body"), null, false);
         assertThat(analysis.field()).isEmpty();
     }
 
     @Test
     void findsAutoStopWordsInAJob() {
         Analysis analysis = new Analysis();
-        analysis.indexChanged(List.of("body", "title"), Optional.empty(), false);
+        analysis.indexChanged(List.of("body", "title"), null, false);
         press(analysis, key('w'));
         assertThat(analysis.prompting()).isTrue();
         assertThat(render(analysis, 100)).contains("Auto stop words", "every indexed field");
@@ -281,7 +281,7 @@ class AnalysisTest {
                 3, List.of(new FieldStopWords("body", List.of("a", "the")), new FieldStopWords("title", List.of())));
         analysis.autoStopWordsProgress(start.id(), new GetAutoStopWordsResult(6000, Optional.of(found)));
         assertThat(analysis.autoStopWordsJob()).isEmpty();
-        assertThat(analysis.settings().stopWords()).hasValue(found);
+        assertThat(analysis.settings().stopWords()).isEqualTo(found);
         assertThat(analysis.settings().analyzer().autoStopWords())
                 .containsExactly(new FieldStopWords("body", List.of("a", "the")));
         assertThat(render(analysis, 100)).contains("2 words", "more than 3 documents");
@@ -293,16 +293,16 @@ class AnalysisTest {
         assertThat(render(analysis, 130)).contains("2 auto stop words of body");
 
         // A reopen keeps them, another index drops them.
-        analysis.indexChanged(List.of("body", "title"), Optional.empty(), true);
+        analysis.indexChanged(List.of("body", "title"), null, true);
         assertThat(analysis.settings().text()).endsWith("(from before the reopen)");
-        analysis.indexChanged(List.of("body"), Optional.empty(), false);
-        assertThat(analysis.settings().stopWords()).isEmpty();
+        analysis.indexChanged(List.of("body"), null, false);
+        assertThat(analysis.settings().stopWords()).isNull();
     }
 
     @Test
     void escStopsARunningSearch() {
         Analysis analysis = new Analysis();
-        analysis.indexChanged(List.of("body"), Optional.empty(), false);
+        analysis.indexChanged(List.of("body"), null, false);
         press(analysis, key('w'));
         Request.StartAutoStopWords start =
                 (Request.StartAutoStopWords) press(analysis, key(KeyCode.ENTER)).orElseThrow();
@@ -315,7 +315,7 @@ class AnalysisTest {
         assertThat(analysis.prompting()).isFalse();
 
         // Without a reader, the popup says so.
-        analysis.indexChanged(List.of(), Optional.of(AutoStopWordsForm.NO_INDEX), false);
+        analysis.indexChanged(List.of(), AutoStopWordsForm.NO_INDEX, false);
         press(analysis, key('w'));
         assertThat(press(analysis, key(KeyCode.ENTER))).isEmpty();
         assertThat(render(analysis, 100)).contains("needs an index opened with a reader");

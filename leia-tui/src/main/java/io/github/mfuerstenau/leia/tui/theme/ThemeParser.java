@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
@@ -27,6 +28,12 @@ public final class ThemeParser {
 
         Invalid(String message) {
             super(message);
+        }
+
+        /** The message, which the constructor takes. */
+        @Override
+        public String getMessage() {
+            return Objects.requireNonNullElse(super.getMessage(), getClass().getSimpleName());
         }
     }
 
@@ -128,25 +135,29 @@ public final class ThemeParser {
             throw new Invalid(source + ": missing " + String.join(", ", missing));
         }
         return new Palette(
-                styles.get("base"),
-                styles.get("error"),
-                styles.get("warning"),
-                styles.get("success"),
-                styles.get("accent"),
-                styles.get("jsonKey"),
-                styles.get("jsonString"),
-                styles.get("jsonNumber"),
-                styles.get("jsonLiteral"),
-                styles.get("match"),
-                styles.get("muted"),
-                styles.get("border"),
-                styles.get("borderFocused"),
-                styles.get("heading"),
-                styles.get("label"),
-                styles.get("selection"),
-                styles.get("selectionUnfocused"),
-                styles.get("secondary"),
-                logo);
+                role(styles, "base"),
+                role(styles, "error"),
+                role(styles, "warning"),
+                role(styles, "success"),
+                role(styles, "accent"),
+                role(styles, "jsonKey"),
+                role(styles, "jsonString"),
+                role(styles, "jsonNumber"),
+                role(styles, "jsonLiteral"),
+                role(styles, "match"),
+                role(styles, "muted"),
+                role(styles, "border"),
+                role(styles, "borderFocused"),
+                role(styles, "heading"),
+                role(styles, "label"),
+                role(styles, "selection"),
+                role(styles, "selectionUnfocused"),
+                role(styles, "secondary"),
+                Objects.requireNonNull(logo));
+    }
+
+    private static Style role(Map<String, Style> styles, String role) {
+        return Objects.requireNonNull(styles.get(role));
     }
 
     private static Style style(String where, String value) throws Invalid {

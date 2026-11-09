@@ -8,6 +8,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.queries.mlt.MoreLikeThis;
@@ -60,11 +61,11 @@ final class Lucene7MoreLikeQuery extends Query {
         mlt.setFieldNames(options.fields().toArray(String[]::new));
         mlt.setMinTermFreq(options.minTermFreq());
         mlt.setMinDocFreq(options.minDocFreq());
-        mlt.setMaxDocFreq(options.maxDocFreq().orElse(MoreLikeThis.DEFAULT_MAX_DOC_FREQ));
+        mlt.setMaxDocFreq(Optional.ofNullable(options.maxDocFreq()).orElse(MoreLikeThis.DEFAULT_MAX_DOC_FREQ));
         mlt.setMaxQueryTerms(options.maxQueryTerms());
         mlt.setBoost(options.boost());
         mlt.setMinWordLen(options.minWordLen());
-        mlt.setMaxWordLen(options.maxWordLen().orElse(MoreLikeThis.DEFAULT_MAX_WORD_LENGTH));
+        mlt.setMaxWordLen(Optional.ofNullable(options.maxWordLen()).orElse(MoreLikeThis.DEFAULT_MAX_WORD_LENGTH));
         mlt.setStopWords(options.stopWords().isEmpty() ? null : options.stopWords());
         return switch (source) {
             case Source.Doc(int docId) -> mlt.like(docId);
@@ -104,7 +105,8 @@ final class Lucene7MoreLikeQuery extends Query {
                 .append(options.minTermFreq())
                 .append(", minDocFreq ")
                 .append(options.minDocFreq());
-        options.maxDocFreq().ifPresent(max -> text.append(", maxDocFreq ").append(max));
+        Optional.ofNullable(options.maxDocFreq())
+                .ifPresent(max -> text.append(", maxDocFreq ").append(max));
         text.append(", maxQueryTerms ").append(options.maxQueryTerms());
         if (options.boost()) {
             text.append(", boost");
@@ -112,7 +114,8 @@ final class Lucene7MoreLikeQuery extends Query {
         if (options.minWordLen() > 0) {
             text.append(", minWordLen ").append(options.minWordLen());
         }
-        options.maxWordLen().ifPresent(max -> text.append(", maxWordLen ").append(max));
+        Optional.ofNullable(options.maxWordLen())
+                .ifPresent(max -> text.append(", maxWordLen ").append(max));
         if (!options.stopWords().isEmpty()) {
             text.append(", stopWords ")
                     .append(options.stopWords().stream().sorted().toList());

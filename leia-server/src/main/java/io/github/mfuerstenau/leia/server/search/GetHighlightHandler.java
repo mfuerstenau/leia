@@ -28,6 +28,6 @@ public final class GetHighlightHandler implements MethodHandler<JobParams, GetHi
     @Override
     public GetHighlightResult handle(JobParams params) throws RpcException {
         return new GetHighlightResult(
-                jobs.poll(params.jobId(), DocumentHighlight.class).result());
+                jobs.poll(params.jobId(), DocumentHighlight.class).outcome());
     }
 }

@@ -35,9 +35,11 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The window that downloads runtimes inside leia (ADR 0080), opened with {@code D} on the start
@@ -104,21 +106,21 @@ public final class RuntimeWindow {
     private final Map<String, RuntimeFolder> states = new LinkedHashMap<>();
 
     private Phase phase = Phase.PLANNING;
-    private RuntimeInstall install;
-    private RuntimeInstall.Plan plan;
+    private @Nullable RuntimeInstall install;
+    private RuntimeInstall.@Nullable Plan plan;
     private List<RuntimeInstall.RuntimePlan> offered = List.of();
     private List<RuntimeInstall.RuntimePlan> present = List.of();
-    private String planError;
+    private @Nullable String planError;
     private int cursor;
     private int detailsScroll;
-    private Optional<String> hint = Optional.empty();
-    private InstallJob job;
-    private RuntimeInstall.Outcome outcome;
+    private @Nullable String hint;
+    private @Nullable InstallJob job;
+    private RuntimeInstall.@Nullable Outcome outcome;
     private List<Line> loadLines = List.of();
     private int ticks;
     private List<String> mirrorProblems = List.of();
-    private MirrorPicker picker;
-    private MirrorChooser.Failure failure;
+    private @Nullable MirrorPicker picker;
+    private MirrorChooser.@Nullable Failure failure;
     private final Map<URI, String> jarFailures = new LinkedHashMap<>();
 
     /** A window that waits for its plan, with the runtimes' states as {@code getRuntimes} has them. */
@@ -181,7 +183,7 @@ public final class RuntimeWindow {
         List<Line> lines = new ArrayList<>();
         for (RuntimeFolder runtime : result.runtimes()) {
             boolean fresh = result.loaded().contains(runtime.folder());
-            boolean taken = outcome.results().keySet().stream()
+            boolean taken = Objects.requireNonNull(outcome).results().keySet().stream()
                     .anyMatch(known -> known.folder().equals(runtime.folder()));
             if (fresh && runtime.state() == RuntimeState.LOADED) {
                 lines.add(Line.styled(
@@ -253,12 +255,12 @@ public final class RuntimeWindow {
 
     /** The bytes the gauge shows as downloaded, for the tests. */
     long gaugeDone() {
-        return job.snapshot().done();
+        return Objects.requireNonNull(job).snapshot().done();
     }
 
     /** The bytes the gauge shows in all, for the tests. */
     long gaugeTotal() {
-        return job.snapshot().total();
+        return Objects.requireNonNull(job).snapshot().total();
     }
 
     /** The mirror the downloads begin with. */
@@ -275,7 +277,10 @@ public final class RuntimeWindow {
     public void tick() {
         ticks++;
         if (phase == Phase.INSTALLING && job != null) {
-            job.snapshot().question().ifPresent(this::asked);
+            InstallJob.Question question = job.snapshot().question();
+            if (question != null) {
+                asked(question);
+            }
         }
     }
 
@@ -287,7 +292,7 @@ public final class RuntimeWindow {
             case INSTALLING -> {
                 // Closed once the install has ended, and the backend has loaded what it installed.
                 if (key.code() == KeyCode.ESCAPE) {
-                    job.cancel();
+                    Objects.requireNonNull(job).cancel();
                 }
                 yield new Nothing();
             }
@@ -298,10 +303,10 @@ public final class RuntimeWindow {
 
     /** A key to the mirrors that {@code m} opened: the one chosen is the first from now on. */
     private Event pick(KeyEvent key) {
-        return switch (picker.handleKey(key)) {
+        return switch (Objects.requireNonNull(picker).handleKey(key)) {
             case MirrorPicker.Chosen chosen -> {
                 picker = null;
-                install = install.withFirst(chosen.mirror());
+                install = Objects.requireNonNull(install).withFirst(chosen.mirror());
                 yield new UseMirror(chosen.mirror());
             }
             case MirrorPicker.Back _ -> {
@@ -314,7 +319,7 @@ public final class RuntimeWindow {
 
     /** A key after a failed download: a mirror to retry from, or Esc, which stops the download. */
     private Event retry(KeyEvent key) {
-        return switch (picker.handleKey(key)) {
+        return switch (Objects.requireNonNull(picker).handleKey(key)) {
             case MirrorPicker.Chosen chosen -> {
                 answer(new MirrorChooser.Choice.Retry(chosen.mirror()));
                 // The install goes on with it, and so does the next one (ADR 0124).
@@ -333,19 +338,19 @@ public final class RuntimeWindow {
         picker = null;
         phase = Phase.INSTALLING;
         try {
-            job.choose(choice);
+            Objects.requireNonNull(job).choose(choice);
         } catch (IllegalStateException _) {
             // The install doesn't wait any longer: it was cancelled.
         }
     }
 
     private Event choose(KeyEvent key) {
-        hint = Optional.empty();
+        hint = null;
         if (key.code() == KeyCode.ESCAPE || key.isChar('q')) {
             return new Close();
         }
-        if (key.isChar('m') && !plan.runtimes().isEmpty()) {
-            picker = new MirrorPicker(install.mirrors(), Map.of(), 0);
+        if (key.isChar('m') && !Objects.requireNonNull(plan).runtimes().isEmpty()) {
+            picker = new MirrorPicker(Objects.requireNonNull(install).mirrors(), Map.of(), 0);
             return new Nothing();
         }
         if (key.code() == KeyCode.ENTER) {
@@ -365,7 +370,7 @@ public final class RuntimeWindow {
 
     private Event startChosen() {
         if (checked.isEmpty() && refreshed().isEmpty()) {
-            hint = Optional.of(offered.isEmpty() ? "Nothing to download; Esc closes" : NOTHING_CHECKED);
+            hint = offered.isEmpty() ? "Nothing to download; Esc closes" : NOTHING_CHECKED;
             return new Nothing();
         }
         return start();
@@ -381,7 +386,7 @@ public final class RuntimeWindow {
             return;
         }
         String folder = present.get(cursor - offered.size()).known().folder();
-        hint = Optional.of(folder + " is " + stateWord(folder) + "; there is nothing to download for it");
+        hint = folder + " is " + stateWord(folder) + "; there is nothing to download for it";
     }
 
     /** Scrolls the details, or moves the cursor. */
@@ -419,14 +424,14 @@ public final class RuntimeWindow {
 
     /** The planned runtimes that need no download, which every install refreshes. */
     private List<RuntimeInstall.RuntimePlan> refreshed() {
-        return plan.runtimes().stream()
+        return Objects.requireNonNull(plan).runtimes().stream()
                 .filter(runtime -> !runtime.needsDownload())
                 .toList();
     }
 
     /** Starts the install of the checked runtimes, and of those that need no download. */
     private Install start() {
-        job = InstallJob.of(install, plan, Set.copyOf(checked));
+        job = InstallJob.of(Objects.requireNonNull(install), Objects.requireNonNull(plan), Set.copyOf(checked));
         phase = Phase.INSTALLING;
         return new Install(job);
     }
@@ -469,7 +474,7 @@ public final class RuntimeWindow {
         if (phase == Phase.CHOOSE && picker != null) {
             picker.render(frame, rows.get(2), " Mirror to download from ");
         } else if (phase == Phase.CHOOSE) {
-            if (!plan.runtimes().isEmpty() || !present.isEmpty()) {
+            if (!Objects.requireNonNull(plan).runtimes().isEmpty() || !present.isEmpty()) {
                 renderChoose(frame, rows.get(2));
             }
         } else if (phase == Phase.RETRY) {
@@ -478,7 +483,11 @@ public final class RuntimeWindow {
                     .constraints(Constraint.percentage(40), Constraint.fill())
                     .split(rows.get(2));
             renderProgress(frame, parts.get(0));
-            picker.render(frame, parts.get(1), " Retry " + failure.jar() + " from ");
+            Objects.requireNonNull(picker)
+                    .render(
+                            frame,
+                            parts.get(1),
+                            " Retry " + Objects.requireNonNull(failure).jar() + " from ");
         } else if (gaugeHeight > 0) {
             frame.renderWidget(gauge(), rows.get(1));
             renderProgress(frame, rows.get(2));
@@ -497,29 +506,29 @@ public final class RuntimeWindow {
             case RETRY ->
                 List.of(
                         Line.styled(
-                                failure.folder() + "/" + failure.jar() + " from "
+                                Objects.requireNonNull(failure).folder() + "/" + failure.jar() + " from "
                                         + failure.mirror().name() + " failed: " + failure.reason(),
                                 Palette.current().error()),
                         Line.from("Choose a mirror to retry it from, and to go on with; Esc stops the download."));
             case INSTALLING ->
                 List.of(Line.from(Span.styled(
-                        job.snapshot().cancelled()
+                        Objects.requireNonNull(job).snapshot().cancelled()
                                 ? "Cancelling…"
                                 : "Downloading "
                                         + TextFormat.count(job.snapshot().jarCount(), "jar") + " into "
-                                        + install.runtimesDir(),
+                                        + Objects.requireNonNull(install).runtimesDir(),
                         Palette.current().heading())));
             default -> doneHeader();
         };
     }
 
     private List<Line> chooseHeader() {
-        if (plan.runtimes().isEmpty()) {
+        if (Objects.requireNonNull(plan).runtimes().isEmpty()) {
             return List.of(Line.from("Every runtime is loaded or complete; there is nothing to download."));
         }
         List<Line> header = new ArrayList<>();
-        header.add(Line.from(
-                install.source() + ", and checks each against the SHA-256 and size that" + " leia's build recorded."));
+        header.add(Line.from(Objects.requireNonNull(install).source()
+                + ", and checks each against the SHA-256 and size that" + " leia's build recorded."));
         for (String problem : mirrorProblems) {
             header.add(
                     Line.styled("Mirror left out: " + problem, Palette.current().warning()));
@@ -539,9 +548,10 @@ public final class RuntimeWindow {
 
     private List<Line> doneHeader() {
         List<Line> header = new ArrayList<>();
-        header.add(Line.from(
-                Span.styled("Done: " + install.runtimesDir(), Palette.current().heading())));
-        for (String line : outcome.summary()) {
+        header.add(Line.from(Span.styled(
+                "Done: " + Objects.requireNonNull(install).runtimesDir(),
+                Palette.current().heading())));
+        for (String line : Objects.requireNonNull(outcome).summary()) {
             header.add(
                     line.contains(": failed: ")
                             ? Line.from(Span.styled(line, Palette.current().error()))
@@ -563,17 +573,19 @@ public final class RuntimeWindow {
                     yield KeyLegend.lines(picker.keys() + (picker.typing() ? "" : "   Esc back"), width);
                 }
                 List<Line> footer = new ArrayList<>();
-                hint.ifPresent(text -> footer.add(
-                        Line.from(Span.styled(" " + text, Palette.current().warning()))));
+                Optional.ofNullable(hint)
+                        .ifPresent(text -> footer.add(Line.from(
+                                Span.styled(" " + text, Palette.current().warning()))));
                 String keys = CHOOSE_KEYS;
-                if (plan.runtimes().isEmpty()) {
+                if (Objects.requireNonNull(plan).runtimes().isEmpty()) {
                     keys = present.isEmpty() ? CLOSE_KEYS : VIEW_KEYS;
                 }
                 footer.addAll(KeyLegend.lines(keys, width));
                 yield footer;
             }
             case INSTALLING -> KeyLegend.lines("Esc cancel", width);
-            case RETRY -> KeyLegend.lines(picker.keys() + (picker.typing() ? "" : "   Esc stop"), width);
+            case RETRY ->
+                KeyLegend.lines(Objects.requireNonNull(picker).keys() + (picker.typing() ? "" : "   Esc stop"), width);
             default -> KeyLegend.lines("⏎/Esc close", width);
         };
     }
@@ -676,7 +688,7 @@ public final class RuntimeWindow {
                     "Copied from local caches, not downloaded:",
                     Palette.current().heading())));
             for (RuntimeInstall.Download download : runtime.localCopies()) {
-                LocalCaches.Local local = download.local().orElseThrow();
+                LocalCaches.Local local = Objects.requireNonNull(download.local());
                 lines.add(Line.from("• " + download.jar().name() + ", "
                         + TextFormat.size(download.jar().size()) + ", from "
                         + local.cache().name()));
@@ -688,16 +700,15 @@ public final class RuntimeWindow {
                 "To download into runtimes/" + runtime.known().folder() + ":",
                 Palette.current().heading())));
         for (RuntimeInstall.Download download : runtime.downloads()) {
-            if (download.local().isPresent()) {
+            if (download.local() != null) {
                 continue;
             }
             // Unindented: a URL or a SHA-256 wraps on a narrow screen, and loses its indent then.
             lines.add(Line.from("• " + download.jar().name() + ", "
                     + TextFormat.size(download.jar().size())));
             // From the mirror the downloads begin with, which m may have changed since the plan.
-            lines.add(Line.from(download.jar()
-                    .mavenPath()
-                    .map(path -> install.repository().resolve(path))
+            lines.add(Line.from(Optional.ofNullable(download.jar().mavenPath())
+                    .map(path -> Objects.requireNonNull(install).repository().resolve(path))
                     .orElse(download.uri())
                     .toString()));
             lines.add(Line.from(Span.styled(
@@ -739,8 +750,8 @@ public final class RuntimeWindow {
         Set<String> mismatched = new LinkedHashSet<>();
         runtime.downloads().forEach(download -> mismatched.add(download.jar().name()));
         for (RuntimeFolders.ListedJar jar : runtime.listed()) {
-            Optional<String> mavenPath = jar.mavenPath();
-            if (mavenPath.isEmpty()) {
+            String mavenPath = jar.mavenPath();
+            if (mavenPath == null) {
                 continue;
             }
             // Unindented, as in the details of an offered runtime.
@@ -750,7 +761,10 @@ public final class RuntimeWindow {
                         "Not there, or doesn't match the list; the loader checks only that it is there",
                         Palette.current().warning()));
             }
-            lines.add(Line.from(install.repository().resolve(mavenPath.get()).toString()));
+            lines.add(Line.from(Objects.requireNonNull(install)
+                    .repository()
+                    .resolve(mavenPath)
+                    .toString()));
             lines.add(Line.from(
                     Span.styled("SHA-256 " + jar.sha256(), Palette.current().muted())));
         }
@@ -774,7 +788,7 @@ public final class RuntimeWindow {
     }
 
     private LineGauge gauge() {
-        InstallJob.Snapshot snapshot = job.snapshot();
+        InstallJob.Snapshot snapshot = Objects.requireNonNull(job).snapshot();
         long total = snapshot.total();
         long done = snapshot.done();
         double ratio = total == 0 ? 1 : Math.min((double) done / total, 1);
@@ -789,7 +803,7 @@ public final class RuntimeWindow {
     private void renderProgress(Frame frame, Rect area) {
         Block block = Panels.panel(" Jars ", true);
         Rect inner = block.inner(area);
-        InstallJob.Snapshot snapshot = job.snapshot();
+        InstallJob.Snapshot snapshot = Objects.requireNonNull(job).snapshot();
         List<Line> lines = Panels.wrap(lines(snapshot, SPINNER[ticks % SPINNER.length]), Math.max(inner.width(), 1));
         // The active jar stays in sight.
         int active = activeLine(snapshot);
@@ -808,7 +822,7 @@ public final class RuntimeWindow {
         int line = 0;
         for (InstallJob.RuntimeProgress runtime : snapshot.runtimes()) {
             line++;
-            if (runtime.failure().isPresent()) {
+            if (runtime.failure() != null) {
                 line++;
             }
             for (InstallJob.JarProgress jar : runtime.jars()) {
@@ -828,9 +842,10 @@ public final class RuntimeWindow {
             lines.add(Line.from(Span.styled(
                     runtime.known().name() + " · runtimes/" + runtime.known().folder(),
                     Palette.current().heading())));
-            runtime.failure()
-                    .ifPresent(failed -> lines.add(Line.from(
-                            Span.styled("  ✗ " + failed, Palette.current().error()))));
+            if (runtime.failure() != null) {
+                lines.add(Line.from(Span.styled(
+                        "  ✗ " + runtime.failure(), Palette.current().error())));
+            }
             for (InstallJob.JarProgress jar : runtime.jars()) {
                 lines.add(line(jar, spinner));
                 jar.failures()
@@ -855,12 +870,12 @@ public final class RuntimeWindow {
                 Line.from(
                         Span.styled("  ✓ ", Palette.current().success()),
                         Span.raw(jar.name() + ", " + size + " downloaded"
-                                + jar.source().map(source -> " from " + source).orElse("")));
+                                + (jar.source() != null ? " from " + jar.source() : "")));
             case COPIED ->
                 Line.from(
                         Span.styled("  ✓ ", Palette.current().success()),
                         Span.raw(jar.name() + ", " + size + " copied from "
-                                + jar.source().orElse("")));
+                                + Objects.requireNonNullElse(jar.source(), "")));
             case KEPT -> Line.from(Span.raw("  = " + jar.name() + ", " + size + " kept"));
             case FAILED ->
                 Line.from(Span.styled(

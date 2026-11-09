@@ -1,9 +1,11 @@
 package io.github.mfuerstenau.leia.server.filter;
 
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import java.time.Duration;
 import java.util.BitSet;
 import java.util.Optional;
 import java.util.OptionalLong;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The documents that match a query (ADR 0031), or have a stored value in which a pattern is found
@@ -21,7 +23,7 @@ public final class DocFilter {
     private final String query;
     private final String rewrittenQuery;
     private final Duration took;
-    private final OptionalLong timedOutValues;
+    private final @Nullable Long timedOutValues;
 
     /**
      * A matching document.
@@ -37,7 +39,7 @@ public final class DocFilter {
             String query,
             String rewrittenQuery,
             Duration took,
-            OptionalLong timedOutValues) {
+            @Nullable Long timedOutValues) {
         this.matches = matches;
         this.maxDoc = maxDoc;
         this.matchCount = matches.cardinality();
@@ -54,7 +56,7 @@ public final class DocFilter {
      * @throws IllegalArgumentException if a document from {@code maxDoc} on is set
      */
     public static DocFilter of(BitSet docs, int maxDoc, String query, String rewrittenQuery, Duration took) {
-        return of(docs, maxDoc, query, rewrittenQuery, took, OptionalLong.empty());
+        return of(docs, maxDoc, query, rewrittenQuery, took, null);
     }
 
     /**
@@ -62,7 +64,12 @@ public final class DocFilter {
      * too long to match (ADR 0027).
      */
     public static DocFilter of(
-            BitSet docs, int maxDoc, String query, String rewrittenQuery, Duration took, OptionalLong timedOutValues) {
+            BitSet docs,
+            int maxDoc,
+            String query,
+            String rewrittenQuery,
+            Duration took,
+            @Nullable Long timedOutValues) {
         if (docs.length() > maxDoc) {
             throw new IllegalArgumentException(
                     "Document " + (docs.length() - 1) + " is not in the index: maxDoc is " + maxDoc);
@@ -98,7 +105,7 @@ public final class DocFilter {
      * their documents may be missing. Empty for a query.
      */
     public OptionalLong timedOutValues() {
-        return timedOutValues;
+        return Optionals.optionalLong(timedOutValues);
     }
 
     /** Whether {@code docId} matches; an id outside 0 to maxDoc - 1 doesn't. */

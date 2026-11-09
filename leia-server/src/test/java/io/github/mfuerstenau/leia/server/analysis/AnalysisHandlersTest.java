@@ -41,6 +41,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -116,8 +117,8 @@ class AnalysisHandlersTest {
         Files.writeString(tmp.resolve("stop.txt"), "# stop words\nfoxes\n");
         var english = preset(
                 "org.apache.lucene.analysis.en.EnglishAnalyzer",
-                Optional.of(file(tmp.resolve("stop.txt").toString())),
-                Optional.of(words("running")));
+                file(tmp.resolve("stop.txt").toString()),
+                words("running"));
 
         AnalyzeResult result = analyze.handle(new AnalyzeParams(english, "The running foxes", Optional.empty()));
 
@@ -199,25 +200,22 @@ class AnalysisHandlersTest {
         String english = "org.apache.lucene.analysis.en.EnglishAnalyzer";
         var both = new WordSet(Optional.of(List.of("a")), Optional.of("stop.txt"));
         assertFails(
-                () -> analyze.handle(
-                        new AnalyzeParams(preset(english, Optional.of(both), Optional.empty()), "x", Optional.empty())),
+                () -> analyze.handle(new AnalyzeParams(preset(english, both, null), "x", Optional.empty())),
                 ErrorCode.INVALID_PARAMS);
         var neither = new WordSet(Optional.empty(), Optional.empty());
         assertFails(
-                () -> analyze.handle(new AnalyzeParams(
-                        preset(english, Optional.empty(), Optional.of(neither)), "x", Optional.empty())),
+                () -> analyze.handle(new AnalyzeParams(preset(english, null, neither), "x", Optional.empty())),
                 ErrorCode.INVALID_PARAMS);
 
-        var keyword =
-                preset("org.apache.lucene.analysis.core.KeywordAnalyzer", Optional.of(words("a")), Optional.empty());
+        var keyword = preset("org.apache.lucene.analysis.core.KeywordAnalyzer", words("a"), null);
         assertThatThrownBy(() -> analyze.handle(new AnalyzeParams(keyword, "x", Optional.empty())))
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_ANALYZER))
                 .hasMessage("Invalid analyzer: KeywordAnalyzer takes no stop words");
-        var missing = preset(english, Optional.of(file(tmp.resolve("none.txt").toString())), Optional.empty());
+        var missing = preset(english, file(tmp.resolve("none.txt").toString()), null);
         assertFails(
                 () -> analyze.handle(new AnalyzeParams(missing, "x", Optional.empty())), ErrorCode.INVALID_ANALYZER);
-        var badPath = preset(english, Optional.of(file("bad\0path")), Optional.empty());
+        var badPath = preset(english, file("bad\0path"), null);
         assertFails(
                 () -> analyze.handle(new AnalyzeParams(badPath, "x", Optional.empty())), ErrorCode.INVALID_ANALYZER);
     }
@@ -252,7 +250,7 @@ class AnalysisHandlersTest {
                 List.of(component("htmlStrip")),
                 component("whitespace"),
                 List.of(component("lowercase"), new AnalysisComponent("stop", Map.of("words", "stop.txt"))),
-                Optional.of(tmp.toString()));
+                tmp.toString());
 
         AnalyzeResult result = analyze.handle(new AnalyzeParams(analyzer, "<i>Quick</i> FOX", Optional.empty()));
 
@@ -276,8 +274,7 @@ class AnalysisHandlersTest {
         var both = new Analyzer(
                 STANDARD.standard(),
                 Optional.empty(),
-                custom(List.of(), component("whitespace"), List.of(), Optional.empty())
-                        .custom(),
+                custom(List.of(), component("whitespace"), List.of(), null).custom(),
                 Optional.empty(),
                 Optional.empty(),
                 List.of(),
@@ -300,7 +297,7 @@ class AnalysisHandlersTest {
 
     @Test
     void failsForAnAnalyzerThatCantBeBuilt() throws Exception {
-        var unknown = custom(List.of(), component("nope"), List.of(), Optional.empty());
+        var unknown = custom(List.of(), component("nope"), List.of(), null);
         assertThatThrownBy(() -> analyze.handle(new AnalyzeParams(unknown, "x", Optional.empty())))
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_ANALYZER))
@@ -310,14 +307,14 @@ class AnalysisHandlersTest {
                 List.of(),
                 component("whitespace"),
                 List.of(),
-                Optional.of(tmp.resolve("none").toString()));
+                tmp.resolve("none").toString());
         assertFails(() -> analyze.handle(new AnalyzeParams(noDir, "x", Optional.empty())), ErrorCode.INVALID_ANALYZER);
 
         var badParam = custom(
                 List.of(),
                 component("whitespace"),
                 List.of(new AnalysisComponent("lowercase", Map.of("a", "b"))),
-                Optional.empty());
+                null);
         assertFails(
                 () -> analyze.handle(new AnalyzeParams(badParam, "x", Optional.empty())), ErrorCode.INVALID_ANALYZER);
     }
@@ -463,16 +460,16 @@ class AnalysisHandlersTest {
     }
 
     private static Analyzer preset(String className) {
-        return preset(className, Optional.empty(), Optional.empty());
+        return preset(className, null, null);
     }
 
-    private static Analyzer preset(String className, Optional<WordSet> stopwords, Optional<WordSet> stemExclusion) {
+    private static Analyzer preset(String className, @Nullable WordSet stopwords, @Nullable WordSet stemExclusion) {
         return new Analyzer(
                 Optional.empty(),
                 Optional.of(new PresetAnalyzer(
                         className,
-                        stopwords,
-                        stemExclusion,
+                        Optional.ofNullable(stopwords),
+                        Optional.ofNullable(stemExclusion),
                         OptionalInt.empty(),
                         Optional.empty(),
                         Optional.empty(),
@@ -522,11 +519,11 @@ class AnalysisHandlersTest {
             List<AnalysisComponent> charFilters,
             AnalysisComponent tokenizer,
             List<AnalysisComponent> tokenFilters,
-            Optional<String> configDir) {
+            @Nullable String configDir) {
         return new Analyzer(
                 Optional.empty(),
                 Optional.empty(),
-                Optional.of(new CustomAnalyzer(charFilters, tokenizer, tokenFilters, configDir)),
+                Optional.of(new CustomAnalyzer(charFilters, tokenizer, tokenFilters, Optional.ofNullable(configDir))),
                 Optional.empty(),
                 Optional.empty(),
                 List.of(),

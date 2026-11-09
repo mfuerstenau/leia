@@ -34,6 +34,7 @@ import io.github.mfuerstenau.leia.protocol.analysis.LimitTokenCount;
 import io.github.mfuerstenau.leia.protocol.analysis.PresetOption;
 import io.github.mfuerstenau.leia.protocol.analysis.Shingles;
 import io.github.mfuerstenau.leia.protocol.analysis.WordSetSupport;
+import io.github.mfuerstenau.leia.tui.Optionals;
 import io.github.mfuerstenau.leia.tui.analysis.AnalyzerSettings.Language;
 import io.github.mfuerstenau.leia.tui.analysis.AnalyzerSettings.WordSetKind;
 import io.github.mfuerstenau.leia.tui.prompt.LineInput;
@@ -49,6 +50,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.TreeMap;
+import org.jspecify.annotations.Nullable;
 
 /** The analyzer popup of the analysis screen: a draft of the analyzer, which the caller tries before it takes it. */
 public final class AnalyzerForm {
@@ -177,7 +179,7 @@ public final class AnalyzerForm {
     record Target(boolean insert, int index) {}
 
     /** What a picker picks: a component of a section, put at {@code target}, or a preset (null section). */
-    record Pick(Section section, Target target) {
+    record Pick(@Nullable Section section, @Nullable Target target) {
         static final Pick PRESET = new Pick(null, null);
 
         boolean preset() {
@@ -221,12 +223,14 @@ public final class AnalyzerForm {
         record MaxTokenCount() implements TextTarget {}
 
         /** A parameter of a component as {@code name=value}; {@code key} is the one it replaces, if any. */
-        record Param(Section section, int index, Optional<String> key) implements TextTarget {}
+        record Param(Section section, int index, @Nullable String key) implements TextTarget {}
     }
 
     private static final class TextEdit {
         final TextTarget target;
         final LineInput input;
+
+        @Nullable
         String error;
 
         TextEdit(TextTarget target, String text) {
@@ -238,23 +242,23 @@ public final class AnalyzerForm {
     private final AnalyzerSettings draft;
 
     /** The presets, and what a custom analyzer can be built from; empty while they are not loaded. */
-    private Optional<GetAnalysisComponentsResult> components;
+    private @Nullable GetAnalysisComponentsResult components;
 
     private int selected;
 
     /** The open picker, or null. */
-    private Picker picker;
+    private @Nullable Picker picker;
 
     /** The open line input, or null. */
-    private TextEdit textEdit;
+    private @Nullable TextEdit textEdit;
 
     /** Why the draft was refused, until the next change; or null. */
-    private String error;
+    private @Nullable String error;
 
     /** Whether no loaded runtime has analysis (ADR 0071). */
     private boolean noAnalysis;
 
-    public AnalyzerForm(AnalyzerSettings settings, Optional<GetAnalysisComponentsResult> components) {
+    public AnalyzerForm(AnalyzerSettings settings, @Nullable GetAnalysisComponentsResult components) {
         this.draft = settings.copy();
         this.components = components;
     }
@@ -265,13 +269,13 @@ public final class AnalyzerForm {
     }
 
     public void setComponents(GetAnalysisComponentsResult components) {
-        this.components = Optional.of(components);
+        this.components = components;
         this.noAnalysis = false;
     }
 
     /** No loaded runtime has analysis (ADR 0071): the picker says so instead of listing components. */
     public void setNoAnalysis() {
-        this.components = Optional.empty();
+        this.components = null;
         this.noAnalysis = true;
     }
 
@@ -337,13 +341,13 @@ public final class AnalyzerForm {
             case CUSTOM -> chainRows(rows);
         }
         rows.add(new Row.ShinglesRow());
-        if (draft.shingles.isPresent()) {
+        if (draft.shingles != null) {
             for (ShingleField field : ShingleField.values()) {
                 rows.add(new Row.Shingle(field));
             }
         }
         rows.add(new Row.TokenLimit());
-        if (draft.limitTokenCount.isPresent()) {
+        if (draft.limitTokenCount != null) {
             for (LimitField field : LimitField.values()) {
                 rows.add(new Row.Limit(field));
             }
@@ -369,9 +373,10 @@ public final class AnalyzerForm {
 
     /** The draft's preset as listed; empty while the presets are not loaded, or for a preset that is not listed. */
     private Optional<AvailableAnalyzer> listedPreset() {
-        return components.flatMap(loaded -> loaded.analyzers().stream()
-                .filter(analyzer -> analyzer.className().equals(draft.preset))
-                .findFirst());
+        return Optional.ofNullable(components)
+                .flatMap(loaded -> loaded.analyzers().stream()
+                        .filter(analyzer -> analyzer.className().equals(draft.preset))
+                        .findFirst());
     }
 
     /** Whether the draft's preset takes the word set; empty while the presets are not loaded, or for a preset that is not listed. */
@@ -483,9 +488,9 @@ public final class AnalyzerForm {
                     case 'a' -> addAfter(row);
                     case 'p' -> {
                         if (row instanceof Row.Component(Section section, int index)) {
-                            editText(new TextTarget.Param(section, index, Optional.empty()));
+                            editText(new TextTarget.Param(section, index, null));
                         } else if (row instanceof Row.Param(Section section, int index, int _)) {
-                            editText(new TextTarget.Param(section, index, Optional.empty()));
+                            editText(new TextTarget.Param(section, index, null));
                         }
                     }
                     case 'd' -> delete(row);
@@ -514,7 +519,7 @@ public final class AnalyzerForm {
                         .map(AnalyzerForm::keys)
                         .filter(keys -> param < keys.size())
                         .map(keys -> keys.get(param));
-                editText(new TextTarget.Param(section, index, key));
+                editText(new TextTarget.Param(section, index, key.orElse(null)));
             }
             case Row.Add(Section section) ->
                 pick(section, new Target(true, list(section).size()));
@@ -602,7 +607,7 @@ public final class AnalyzerForm {
                 error = null;
             }
             case Row.ShinglesRow _ -> {
-                draft.shingles = draft.shingles.isPresent() ? Optional.empty() : Optional.of(DEFAULT_SHINGLES);
+                draft.shingles = draft.shingles != null ? null : DEFAULT_SHINGLES;
                 error = null;
             }
             case Row.Shingle(ShingleField field) -> {
@@ -611,38 +616,36 @@ public final class AnalyzerForm {
                     case SEPARATOR -> editText(new TextTarget.ShingleSeparator());
                     case FILLER -> editText(new TextTarget.ShingleFiller());
                     case UNIGRAMS -> {
-                        if (draft.shingles.isPresent()) {
-                            Shingles s = draft.shingles.get();
+                        if (draft.shingles != null) {
+                            Shingles s = draft.shingles;
                             // Always, never, or only without shingles.
                             String unigrams = cycled(
                                     unigramsKey(s.outputUnigrams(), s.outputUnigramsIfNoShingles()),
                                     forward,
                                     List.of("always", "never", "without"));
-                            draft.shingles = Optional.of(new Shingles(
+                            draft.shingles = new Shingles(
                                     s.minShingleSize(),
                                     s.maxShingleSize(),
                                     s.tokenSeparator(),
                                     unigrams.equals("always"),
                                     unigrams.equals("without"),
-                                    s.fillerToken()));
+                                    s.fillerToken());
                             error = null;
                         }
                     }
                 }
             }
             case Row.TokenLimit _ -> {
-                draft.limitTokenCount = draft.limitTokenCount.isPresent()
-                        ? Optional.empty()
-                        : Optional.of(new LimitTokenCount(DEFAULT_MAX_TOKEN_COUNT, false));
+                draft.limitTokenCount =
+                        draft.limitTokenCount != null ? null : new LimitTokenCount(DEFAULT_MAX_TOKEN_COUNT, false);
                 error = null;
             }
             case Row.Limit(LimitField field) -> {
                 if (field == LimitField.MAX_TOKENS) {
                     editText(new TextTarget.MaxTokenCount());
-                } else if (draft.limitTokenCount.isPresent()) {
-                    LimitTokenCount limit = draft.limitTokenCount.get();
-                    draft.limitTokenCount =
-                            Optional.of(new LimitTokenCount(limit.maxTokenCount(), !limit.consumeAllTokens()));
+                } else if (draft.limitTokenCount != null) {
+                    LimitTokenCount limit = draft.limitTokenCount;
+                    draft.limitTokenCount = new LimitTokenCount(limit.maxTokenCount(), !limit.consumeAllTokens());
                     error = null;
                 }
             }
@@ -675,43 +678,42 @@ public final class AnalyzerForm {
 
     private void editText(TextTarget target) {
         String text = switch (target) {
-            case TextTarget.ConfigDir _ -> draft.configDir.orElse("");
-            case TextTarget.WordSet(WordSetKind kind) -> AnalyzerSettings.wordSetInput(draft.wordSet(kind));
-            case TextTarget.Param(Section section, int index, Optional<String> key) ->
-                key.map(name -> name + "="
+            case TextTarget.ConfigDir _ -> Objects.requireNonNullElse(draft.configDir, "");
+            case TextTarget.WordSet(WordSetKind kind) ->
+                AnalyzerSettings.wordSetInput(draft.wordSet(kind).orElse(null));
+            case TextTarget.Param(Section section, int index, String key) ->
+                key == null
+                        ? ""
+                        : key + "="
                                 + component(section, index)
-                                        .map(c -> c.params().getOrDefault(name, ""))
-                                        .orElse(""))
-                        .orElse("");
+                                        .map(c -> c.params().getOrDefault(key, ""))
+                                        .orElse("");
             case TextTarget.MaxTokenLength _ ->
-                draft.maxTokenLength.isPresent() ? Integer.toString(draft.maxTokenLength.getAsInt()) : "";
+                draft.maxTokenLength != null ? Integer.toString(draft.maxTokenLength) : "";
             case TextTarget.StemOverride _ -> AnalyzerSettings.stemDictionaryInput(draft.stemOverride);
             case TextTarget.UserDictionary(Language language) ->
                 draft.userDictionary(language).orElse("");
-            case TextTarget.StopTags(Language language) -> AnalyzerSettings.wordSetInput(draft.stopTags(language));
+            case TextTarget.StopTags(Language language) ->
+                AnalyzerSettings.wordSetInput(draft.stopTags(language).orElse(null));
             case TextTarget.CollationLocale _ -> draft.collation.locale();
             case TextTarget.ShingleSize _ ->
-                draft.shingles
+                Optional.ofNullable(draft.shingles)
                         .map(s -> s.minShingleSize() == s.maxShingleSize()
                                 ? Integer.toString(s.minShingleSize())
                                 : s.minShingleSize() + "-" + s.maxShingleSize())
                         .orElse("");
-            case TextTarget.ShingleSeparator _ ->
-                draft.shingles.map(Shingles::tokenSeparator).orElse("");
-            case TextTarget.ShingleFiller _ ->
-                draft.shingles.map(Shingles::fillerToken).orElse("");
+            case TextTarget.ShingleSeparator _ -> draft.shingles == null ? "" : draft.shingles.tokenSeparator();
+            case TextTarget.ShingleFiller _ -> draft.shingles == null ? "" : draft.shingles.fillerToken();
             case TextTarget.MaxTokenCount _ ->
-                draft.limitTokenCount
-                        .map(limit -> Integer.toString(limit.maxTokenCount()))
-                        .orElse("");
+                draft.limitTokenCount == null ? "" : Integer.toString(draft.limitTokenCount.maxTokenCount());
         };
         textEdit = new TextEdit(target, text);
     }
 
     private void delete(Row row) {
         switch (row) {
-            case Row.ConfigDir _ -> draft.configDir = Optional.empty();
-            case Row.WordSet(WordSetKind kind) -> draft.setWordSet(kind, Optional.empty());
+            case Row.ConfigDir _ -> draft.configDir = null;
+            case Row.WordSet(WordSetKind kind) -> draft.setWordSet(kind, null);
             case Row.Component(Section section, int index) -> {
                 if (section == Section.TOKENIZER) {
                     return;
@@ -736,10 +738,10 @@ public final class AnalyzerForm {
                 }
                 clampSelected();
             }
-            case Row.MaxTokenLength _ -> draft.maxTokenLength = OptionalInt.empty();
-            case Row.StemOverride _ -> draft.stemOverride = Optional.empty();
-            case Row.UserDictionary(Language language) -> draft.setUserDictionary(language, Optional.empty());
-            case Row.StopTags(Language language) -> draft.setStopTags(language, Optional.empty());
+            case Row.MaxTokenLength _ -> draft.maxTokenLength = null;
+            case Row.StemOverride _ -> draft.stemOverride = null;
+            case Row.UserDictionary(Language language) -> draft.setUserDictionary(language, null);
+            case Row.StopTags(Language language) -> draft.setStopTags(language, null);
             case Row.JapaneseModeRow _ ->
                 draft.japanese = new JapaneseOptions(
                         draft.japanese.userDictionary(), Optional.empty(), draft.japanese.stopTags());
@@ -766,65 +768,63 @@ public final class AnalyzerForm {
                 draft.japaneseCompletion =
                         new JapaneseCompletionOptions(draft.japaneseCompletion.userDictionary(), Optional.empty());
             case Row.ShinglesRow _ -> {
-                draft.shingles = Optional.empty();
+                draft.shingles = null;
                 clampSelected();
             }
             case Row.Shingle(ShingleField field) -> {
                 // Back to Lucene's default.
-                if (draft.shingles.isEmpty()) {
+                if (draft.shingles == null) {
                     return;
                 }
-                Shingles s = draft.shingles.get();
+                Shingles s = draft.shingles;
                 Shingles d = DEFAULT_SHINGLES;
-                draft.shingles = Optional.of(
-                        switch (field) {
-                            case SIZE ->
-                                new Shingles(
-                                        d.minShingleSize(),
-                                        d.maxShingleSize(),
-                                        s.tokenSeparator(),
-                                        s.outputUnigrams(),
-                                        s.outputUnigramsIfNoShingles(),
-                                        s.fillerToken());
-                            case SEPARATOR ->
-                                new Shingles(
-                                        s.minShingleSize(),
-                                        s.maxShingleSize(),
-                                        d.tokenSeparator(),
-                                        s.outputUnigrams(),
-                                        s.outputUnigramsIfNoShingles(),
-                                        s.fillerToken());
-                            case UNIGRAMS ->
-                                new Shingles(
-                                        s.minShingleSize(),
-                                        s.maxShingleSize(),
-                                        s.tokenSeparator(),
-                                        d.outputUnigrams(),
-                                        d.outputUnigramsIfNoShingles(),
-                                        s.fillerToken());
-                            case FILLER ->
-                                new Shingles(
-                                        s.minShingleSize(),
-                                        s.maxShingleSize(),
-                                        s.tokenSeparator(),
-                                        s.outputUnigrams(),
-                                        s.outputUnigramsIfNoShingles(),
-                                        d.fillerToken());
-                        });
+                draft.shingles = switch (field) {
+                    case SIZE ->
+                        new Shingles(
+                                d.minShingleSize(),
+                                d.maxShingleSize(),
+                                s.tokenSeparator(),
+                                s.outputUnigrams(),
+                                s.outputUnigramsIfNoShingles(),
+                                s.fillerToken());
+                    case SEPARATOR ->
+                        new Shingles(
+                                s.minShingleSize(),
+                                s.maxShingleSize(),
+                                d.tokenSeparator(),
+                                s.outputUnigrams(),
+                                s.outputUnigramsIfNoShingles(),
+                                s.fillerToken());
+                    case UNIGRAMS ->
+                        new Shingles(
+                                s.minShingleSize(),
+                                s.maxShingleSize(),
+                                s.tokenSeparator(),
+                                d.outputUnigrams(),
+                                d.outputUnigramsIfNoShingles(),
+                                s.fillerToken());
+                    case FILLER ->
+                        new Shingles(
+                                s.minShingleSize(),
+                                s.maxShingleSize(),
+                                s.tokenSeparator(),
+                                s.outputUnigrams(),
+                                s.outputUnigramsIfNoShingles(),
+                                d.fillerToken());
+                };
             }
             case Row.TokenLimit _ -> {
-                draft.limitTokenCount = Optional.empty();
+                draft.limitTokenCount = null;
                 clampSelected();
             }
             case Row.Limit(LimitField field) -> {
-                if (draft.limitTokenCount.isEmpty()) {
+                if (draft.limitTokenCount == null) {
                     return;
                 }
-                LimitTokenCount limit = draft.limitTokenCount.get();
-                draft.limitTokenCount = Optional.of(
-                        field == LimitField.MAX_TOKENS
-                                ? new LimitTokenCount(DEFAULT_MAX_TOKEN_COUNT, limit.consumeAllTokens())
-                                : new LimitTokenCount(limit.maxTokenCount(), false));
+                LimitTokenCount limit = draft.limitTokenCount;
+                draft.limitTokenCount = field == LimitField.MAX_TOKENS
+                        ? new LimitTokenCount(DEFAULT_MAX_TOKEN_COUNT, limit.consumeAllTokens())
+                        : new LimitTokenCount(limit.maxTokenCount(), false);
             }
             case Row.KindRow _, Row.Preset _, Row.Add _ -> {
                 return;
@@ -862,15 +862,15 @@ public final class AnalyzerForm {
 
     /** The presets, or the components of the picker's section, whose name contains the filter, ignoring case. */
     private List<Choice> matches(Picker open) {
-        if (components.isEmpty()) {
+        if (components == null) {
             return List.of();
         }
         String filter = open.filter.text().toLowerCase(Locale.ROOT);
         List<Choice> choices = open.pick.preset()
-                ? components.get().analyzers().stream()
+                ? components.analyzers().stream()
                         .map(analyzer -> new Choice(analyzer.name(), analyzer.className()))
                         .toList()
-                : open.pick.section().available(components.get());
+                : Objects.requireNonNull(open.pick.section()).available(components);
         return choices.stream()
                 .filter(choice -> choice.name().toLowerCase(Locale.ROOT).contains(filter))
                 .toList();
@@ -881,41 +881,45 @@ public final class AnalyzerForm {
      * class name, if none matches), Esc goes back.
      */
     private void pickKey(KeyEvent key) {
-        List<Choice> matches = matches(picker);
+        Picker open = picker;
+        if (open == null) {
+            return;
+        }
+        List<Choice> matches = matches(open);
         int last = Math.max(matches.size() - 1, 0);
         switch (key.code()) {
             case ESCAPE -> picker = null;
-            case UP -> picker.selected = Math.max(picker.selected - 1, 0);
-            case DOWN -> picker.selected = Math.min(picker.selected + 1, last);
-            case PAGE_UP -> picker.selected = Math.max(picker.selected - 10, 0);
-            case PAGE_DOWN -> picker.selected = Math.min(picker.selected + 10, last);
+            case UP -> open.selected = Math.max(open.selected - 1, 0);
+            case DOWN -> open.selected = Math.min(open.selected + 1, last);
+            case PAGE_UP -> open.selected = Math.max(open.selected - 10, 0);
+            case PAGE_DOWN -> open.selected = Math.min(open.selected + 10, last);
             case ENTER -> {
-                Pick pick = picker.pick;
+                Pick pick = open.pick;
                 String name = matches.isEmpty()
-                        ? picker.filter.text().strip()
+                        ? open.filter.text().strip()
                         : pick.preset()
-                                ? matches.get(Math.min(picker.selected, last)).className()
-                                : matches.get(Math.min(picker.selected, last)).name();
+                                ? matches.get(Math.min(open.selected, last)).className()
+                                : matches.get(Math.min(open.selected, last)).name();
                 if (name.isEmpty()) {
                     return;
                 }
                 picker = null;
                 if (!pick.preset()) {
-                    put(pick.section(), pick.target(), name);
+                    put(Objects.requireNonNull(pick.section()), Objects.requireNonNull(pick.target()), name);
                     return;
                 }
                 draft.preset = name;
                 // A set or an option that the new preset doesn't take would fail.
                 for (WordSetKind kind : WordSetKind.values()) {
                     if (support(kind).orElse(null) == WordSetSupport.NONE) {
-                        draft.setWordSet(kind, Optional.empty());
+                        draft.setWordSet(kind, null);
                     }
                 }
                 if (!takes(PresetOption.MAX_TOKEN_LENGTH)) {
-                    draft.maxTokenLength = OptionalInt.empty();
+                    draft.maxTokenLength = null;
                 }
                 if (!takes(PresetOption.STEM_OVERRIDE)) {
-                    draft.stemOverride = Optional.empty();
+                    draft.stemOverride = null;
                 }
                 if (!takes(PresetOption.JAPANESE)) {
                     draft.japanese = AnalyzerSettings.noJapanese();
@@ -932,8 +936,8 @@ public final class AnalyzerForm {
                 error = null;
             }
             default -> {
-                if (picker.filter.handleKey(key, LineInput::wordStart) == LineInput.Edit.CHANGED) {
-                    picker.selected = 0;
+                if (open.filter.handleKey(key, LineInput::wordStart) == LineInput.Edit.CHANGED) {
+                    open.selected = 0;
                 }
             }
         }
@@ -961,18 +965,22 @@ public final class AnalyzerForm {
 
     /** Enter takes the text, Esc goes back; any other key edits it. */
     private void textKey(KeyEvent key) {
+        TextEdit edit = textEdit;
+        if (edit == null) {
+            return;
+        }
         switch (key.code()) {
             case ESCAPE -> textEdit = null;
             case ENTER -> {
                 try {
-                    takeText(textEdit.target, textEdit.input.text());
+                    takeText(edit.target, edit.input.text());
                     textEdit = null;
                     error = null;
                 } catch (IllegalArgumentException e) {
-                    textEdit.error = e.getMessage();
+                    edit.error = e.getMessage();
                 }
             }
-            default -> textEdit.input.handleKey(key, LineInput::wordStart);
+            default -> edit.input.handleKey(key, LineInput::wordStart);
         }
     }
 
@@ -987,55 +995,64 @@ public final class AnalyzerForm {
     private void takeText(TextTarget target, String typed) {
         String text = typed.strip();
         switch (target) {
-            case TextTarget.ConfigDir _ -> draft.configDir = text.isEmpty() ? Optional.empty() : Optional.of(text);
-            case TextTarget.WordSet(WordSetKind kind) -> draft.setWordSet(kind, AnalyzerSettings.parseWordSet(text));
+            case TextTarget.ConfigDir _ -> draft.configDir = text.isEmpty() ? null : text;
+            case TextTarget.WordSet(WordSetKind kind) ->
+                draft.setWordSet(kind, AnalyzerSettings.parseWordSet(text).orElse(null));
             case TextTarget.MaxTokenLength _ ->
-                draft.maxTokenLength = AnalyzerSettings.parseNumber(text, 1, MAX_TOKEN_LENGTH);
-            case TextTarget.StemOverride _ -> draft.stemOverride = AnalyzerSettings.parseStemDictionary(text);
+                draft.maxTokenLength = Optionals.orNull(AnalyzerSettings.parseNumber(text, 1, MAX_TOKEN_LENGTH));
+            case TextTarget.StemOverride _ ->
+                draft.stemOverride = AnalyzerSettings.parseStemDictionary(text).orElse(null);
             case TextTarget.UserDictionary(Language language) ->
-                draft.setUserDictionary(language, text.isEmpty() ? Optional.empty() : Optional.of(text));
+                draft.setUserDictionary(language, text.isEmpty() ? null : text);
             case TextTarget.StopTags(Language language) ->
-                draft.setStopTags(language, AnalyzerSettings.parseWordSet(text));
+                draft.setStopTags(language, AnalyzerSettings.parseWordSet(text).orElse(null));
             case TextTarget.CollationLocale _ ->
                 draft.collation = new Collation(text, draft.collation.strength(), draft.collation.decomposition());
             case TextTarget.ShingleSize _ -> {
                 int[] size = AnalyzerSettings.parseShingleSize(text)
                         .orElse(new int[] {DEFAULT_SHINGLES.minShingleSize(), DEFAULT_SHINGLES.maxShingleSize()});
-                draft.shingles = draft.shingles.map(s -> new Shingles(
-                        size[0],
-                        size[1],
-                        s.tokenSeparator(),
-                        s.outputUnigrams(),
-                        s.outputUnigramsIfNoShingles(),
-                        s.fillerToken()));
+                draft.shingles = Optional.ofNullable(draft.shingles)
+                        .map(s -> new Shingles(
+                                size[0],
+                                size[1],
+                                s.tokenSeparator(),
+                                s.outputUnigrams(),
+                                s.outputUnigramsIfNoShingles(),
+                                s.fillerToken()))
+                        .orElse(null);
             }
             case TextTarget.ShingleSeparator _ ->
-                draft.shingles = draft.shingles.map(s -> new Shingles(
-                        s.minShingleSize(),
-                        s.maxShingleSize(),
-                        typed,
-                        s.outputUnigrams(),
-                        s.outputUnigramsIfNoShingles(),
-                        s.fillerToken()));
+                draft.shingles = Optional.ofNullable(draft.shingles)
+                        .map(s -> new Shingles(
+                                s.minShingleSize(),
+                                s.maxShingleSize(),
+                                typed,
+                                s.outputUnigrams(),
+                                s.outputUnigramsIfNoShingles(),
+                                s.fillerToken()))
+                        .orElse(null);
             case TextTarget.ShingleFiller _ ->
-                draft.shingles = draft.shingles.map(s -> new Shingles(
-                        s.minShingleSize(),
-                        s.maxShingleSize(),
-                        s.tokenSeparator(),
-                        s.outputUnigrams(),
-                        s.outputUnigramsIfNoShingles(),
-                        typed));
+                draft.shingles = Optional.ofNullable(draft.shingles)
+                        .map(s -> new Shingles(
+                                s.minShingleSize(),
+                                s.maxShingleSize(),
+                                s.tokenSeparator(),
+                                s.outputUnigrams(),
+                                s.outputUnigramsIfNoShingles(),
+                                typed))
+                        .orElse(null);
             case TextTarget.MaxTokenCount _ -> {
                 OptionalInt count = AnalyzerSettings.parseNumber(text, 1, Integer.MAX_VALUE);
-                draft.limitTokenCount = draft.limitTokenCount.map(
-                        limit -> new LimitTokenCount(count.orElse(DEFAULT_MAX_TOKEN_COUNT), limit.consumeAllTokens()));
+                draft.limitTokenCount = Optional.ofNullable(draft.limitTokenCount)
+                        .map(limit ->
+                                new LimitTokenCount(count.orElse(DEFAULT_MAX_TOKEN_COUNT), limit.consumeAllTokens()))
+                        .orElse(null);
             }
-            case TextTarget.Param(Section section, int index, Optional<String> old) ->
-                takeParam(section, index, old, text);
+            case TextTarget.Param(Section section, int index, String old) -> takeParam(section, index, old, text);
         }
     }
 
-    private void takeParam(Section section, int index, Optional<String> old, String text) {
+    private void takeParam(Section section, int index, @Nullable String old, String text) {
         String key = null;
         String value = null;
         if (!text.isEmpty()) {
@@ -1051,7 +1068,9 @@ public final class AnalyzerForm {
             return;
         }
         TreeMap<String, String> params = new TreeMap<>(component.get().params());
-        old.ifPresent(params::remove);
+        if (old != null) {
+            params.remove(old);
+        }
         if (key != null) {
             params.put(key, value);
         }
@@ -1156,10 +1175,11 @@ public final class AnalyzerForm {
     }
 
     /** A row's label, padded, then its value, or the default dimmed. */
-    private static Line valueLine(String label, Optional<String> value, String fallback) {
+    private static Line valueLine(String label, @Nullable String value, String fallback) {
         String padded = Form.padded(label, Math.max(LABEL, label.length()));
-        return value.map(v -> Line.from(padded + v))
-                .orElseGet(() -> Line.from(Span.raw(padded), Span.styled(fallback, Form.muted())));
+        return value != null
+                ? Line.from(padded + value)
+                : Line.from(Span.raw(padded), Span.styled(fallback, Form.muted()));
     }
 
     private Line rowLine(Row row) {
@@ -1189,82 +1209,106 @@ public final class AnalyzerForm {
             case Row.MaxTokenLength _ ->
                 valueLine(
                         "Token length",
-                        draft.maxTokenLength.isPresent()
-                                ? Optional.of(Integer.toString(draft.maxTokenLength.getAsInt()))
-                                : Optional.empty(),
+                        draft.maxTokenLength != null ? Integer.toString(draft.maxTokenLength) : null,
                         "default: the analyzer's own");
             case Row.StemOverride _ ->
                 valueLine(
                         "Stem overrides",
-                        draft.stemOverride.map(AnalyzerSettings::stemDictionaryText),
+                        draft.stemOverride == null ? null : AnalyzerSettings.stemDictionaryText(draft.stemOverride),
                         "default: the analyzer's own");
             case Row.UserDictionary(Language language) ->
-                valueLine("User dictionary", draft.userDictionary(language).map(TextFormat::escapeControl), "none");
+                valueLine(
+                        "User dictionary",
+                        draft.userDictionary(language)
+                                .map(TextFormat::escapeControl)
+                                .orElse(null),
+                        "none");
             case Row.JapaneseModeRow _ ->
-                valueLine("Mode", draft.japanese.mode().map(AnalyzerSettings::japaneseModeName), "default: search");
+                valueLine(
+                        "Mode",
+                        draft.japanese
+                                .mode()
+                                .map(AnalyzerSettings::japaneseModeName)
+                                .orElse(null),
+                        "default: search");
             case Row.DecompoundMode _ ->
                 valueLine(
                         "Decompound",
-                        draft.korean.decompoundMode().map(AnalyzerSettings::decompoundModeName),
+                        draft.korean
+                                .decompoundMode()
+                                .map(AnalyzerSettings::decompoundModeName)
+                                .orElse(null),
                         "default: discard");
             case Row.StopTags(Language language) ->
                 valueLine(
                         "Stop tags",
-                        draft.stopTags(language).map(AnalyzerSettings::wordSetText),
+                        draft.stopTags(language)
+                                .map(AnalyzerSettings::wordSetText)
+                                .orElse(null),
                         "default: the analyzer's own");
             case Row.UnknownWords _ ->
                 valueLine(
                         "Unknown words",
-                        draft.korean.outputUnknownUnigrams().map(AnalyzerSettings::unknownWordsText),
+                        draft.korean
+                                .outputUnknownUnigrams()
+                                .map(AnalyzerSettings::unknownWordsText)
+                                .orElse(null),
                         "default: kept whole");
             case Row.CollationLocale _ ->
                 valueLine(
                         "Locale",
-                        draft.collation.locale().isEmpty()
-                                ? Optional.empty()
-                                : Optional.of(TextFormat.escapeControl(draft.collation.locale())),
+                        draft.collation.locale().isEmpty() ? null : TextFormat.escapeControl(draft.collation.locale()),
                         "root");
             case Row.Strength _ ->
                 valueLine(
                         "Strength",
-                        draft.collation.strength().map(AnalyzerSettings::strengthName),
+                        draft.collation
+                                .strength()
+                                .map(AnalyzerSettings::strengthName)
+                                .orElse(null),
                         "default: the collator's own");
             case Row.Decomposition _ ->
                 valueLine(
                         "Decomposition",
-                        draft.collation.decomposition().map(AnalyzerSettings::decompositionName),
+                        draft.collation
+                                .decomposition()
+                                .map(AnalyzerSettings::decompositionName)
+                                .orElse(null),
                         "default: the collator's own");
             case Row.CompletionMode _ ->
                 valueLine(
                         "Mode",
-                        draft.japaneseCompletion.mode().map(AnalyzerSettings::completionModeName),
+                        draft.japaneseCompletion
+                                .mode()
+                                .map(AnalyzerSettings::completionModeName)
+                                .orElse(null),
                         "default: index");
-            case Row.ShinglesRow _ -> valueLine("Shingles", draft.shingles.map(_ -> "on"), "off");
+            case Row.ShinglesRow _ -> valueLine("Shingles", draft.shingles != null ? "on" : null, "off");
             case Row.Shingle(ShingleField field) -> {
-                if (draft.shingles.isEmpty()) {
+                if (draft.shingles == null) {
                     yield Line.empty();
                 }
-                Shingles s = draft.shingles.get();
+                Shingles s = draft.shingles;
                 yield switch (field) {
-                    case SIZE -> valueLine("  size", Optional.of(shingleSizeText(s)), "");
-                    case SEPARATOR -> valueLine("  separator", Optional.of(quoted(s.tokenSeparator())), "");
-                    case UNIGRAMS -> valueLine("  unigrams", Optional.of(unigramsText(s)), "");
-                    case FILLER -> valueLine("  filler", Optional.of(quoted(s.fillerToken())), "");
+                    case SIZE -> valueLine("  size", shingleSizeText(s), "");
+                    case SEPARATOR -> valueLine("  separator", quoted(s.tokenSeparator()), "");
+                    case UNIGRAMS -> valueLine("  unigrams", unigramsText(s), "");
+                    case FILLER -> valueLine("  filler", quoted(s.fillerToken()), "");
                 };
             }
-            case Row.TokenLimit _ -> valueLine("Token limit", draft.limitTokenCount.map(_ -> "on"), "off");
+            case Row.TokenLimit _ -> valueLine("Token limit", draft.limitTokenCount != null ? "on" : null, "off");
             case Row.Limit(LimitField field) -> {
-                if (draft.limitTokenCount.isEmpty()) {
+                if (draft.limitTokenCount == null) {
                     yield Line.empty();
                 }
-                LimitTokenCount limit = draft.limitTokenCount.get();
+                LimitTokenCount limit = draft.limitTokenCount;
                 yield field == LimitField.MAX_TOKENS
-                        ? valueLine("  max tokens", Optional.of(Integer.toString(limit.maxTokenCount())), "")
-                        : valueLine("  consume all", Optional.of(limit.consumeAllTokens() ? "yes" : "no"), "");
+                        ? valueLine("  max tokens", Integer.toString(limit.maxTokenCount()), "")
+                        : valueLine("  consume all", limit.consumeAllTokens() ? "yes" : "no", "");
             }
             case Row.ConfigDir _ ->
-                draft.configDir.isPresent()
-                        ? Line.from("Config dir      " + TextFormat.escapeControl(draft.configDir.get()))
+                draft.configDir != null
+                        ? Line.from("Config dir      " + TextFormat.escapeControl(draft.configDir))
                         : Line.from(
                                 Span.raw("Config dir      "),
                                 Span.styled("none: resources from the classpath", Form.muted()));
@@ -1300,7 +1344,7 @@ public final class AnalyzerForm {
         String typed = open.pick.preset() ? "class name" : "name";
         if (noAnalysis) {
             lines.add(Line.from(Analysis.NO_ANALYSIS + "."));
-        } else if (components.isEmpty()) {
+        } else if (components == null) {
             lines.add(Line.styled("The components are not loaded; Enter takes the typed " + typed + ".", Form.muted()));
         } else if (matches.isEmpty()) {
             lines.add(Line.styled("No match; Enter takes the typed " + typed + ".", Form.muted()));
@@ -1315,7 +1359,9 @@ public final class AnalyzerForm {
                     Span.styled(TextFormat.escapeControl(detail), Form.muted()));
             lines.add(i == shown ? line.patchStyle(Palette.current().selection()) : line);
         }
-        String title = open.pick.preset() ? " Pick a preset analyzer " : " Pick a " + open.pick.section().noun + " ";
+        String title = open.pick.preset()
+                ? " Pick a preset analyzer "
+                : " Pick a " + Objects.requireNonNull(open.pick.section()).noun + " ";
         Form.renderPopup(frame, area, title, lines, shown + 2, WIDTH - 8);
     }
 

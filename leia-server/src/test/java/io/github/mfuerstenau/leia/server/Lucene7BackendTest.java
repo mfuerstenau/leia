@@ -391,10 +391,10 @@ class Lucene7BackendTest {
     @Test
     void checksAtTheLevels() throws Exception {
         open(testIndex("lucene7"));
-        Check fast = check(new StartCheckIndexParams(OptionalInt.of(1)));
+        Check fast = check(new StartCheckIndexParams(1));
         assertThat(fast.lines()).contains("Checking with Lucene 7.7.3").noneMatch(line -> line.contains("test: terms"));
         assertThat(fast.result().indexes().getFirst().clean()).isTrue();
-        Check slow = check(new StartCheckIndexParams(OptionalInt.of(3)));
+        Check slow = check(new StartCheckIndexParams(3));
         assertThat(slow.lines()).anyMatch(line -> line.contains("test: points"));
         assertThat(slow.result().indexes().getFirst().clean()).isTrue();
     }

@@ -3,8 +3,8 @@ package io.github.mfuerstenau.leia.runtime;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.function.LongConsumer;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The terms and postings of a {@link RuntimeIndex}. Terms are bytes: the UTF-8 of text, or anything
@@ -13,7 +13,7 @@ import java.util.function.LongConsumer;
 public interface Terms {
 
     /** Up to {@code limit} terms of {@code field}, from {@code from} on (or from its first term). */
-    TermsPage terms(String field, Optional<byte[]> from, int limit) throws IOException;
+    TermsPage terms(String field, byte @Nullable [] from, int limit) throws IOException;
 
     /**
      * Up to {@code limit} postings of {@code term} in {@code field}, from document {@code fromDoc} on.
@@ -60,7 +60,7 @@ public interface Terms {
     record TermEntry(byte[] term, int docFreq, long totalTermFreq) {}
 
     /** A page of terms, and the term after it. */
-    record TermsPage(List<TermEntry> terms, Optional<byte[]> next) {}
+    record TermsPage(List<TermEntry> terms, byte @Nullable [] next) {}
 
     /**
      * A document that contains a term, and how often.
@@ -82,5 +82,9 @@ public interface Terms {
      * @param postings deleted documents too, marked, if the runtime's Lucene can read their postings;
      *     otherwise live documents only
      */
-    record PostingsPage(int docFreq, long totalTermFreq, List<Posting> postings, OptionalInt nextDoc) {}
+    record PostingsPage(
+            int docFreq,
+            long totalTermFreq,
+            List<Posting> postings,
+            @Nullable Integer nextDoc) {}
 }

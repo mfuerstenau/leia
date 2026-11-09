@@ -24,6 +24,8 @@ dependencies {
     annotationProcessor(libs.dagger.compiler)
     // The bitmaps of the stored fields cache, in memory and on disk (ADR 0113).
     implementation(libs.roaringbitmap)
+    // @Nullable and @NullMarked (ADR 0127): annotations only.
+    compileOnly(libs.jspecify)
     testImplementation(project(":leia-lucene10"))
     testImplementation(project(":leia-core"))
 }

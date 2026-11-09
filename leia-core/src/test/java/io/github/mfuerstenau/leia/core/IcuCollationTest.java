@@ -9,9 +9,8 @@ import io.github.mfuerstenau.leia.core.AnalyzerSpec.CollationDecomposition;
 import io.github.mfuerstenau.leia.core.AnalyzerSpec.CollationStrength;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Optional;
-import java.util.OptionalInt;
 import org.apache.lucene.analysis.Analyzer;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -55,7 +54,7 @@ class IcuCollationTest {
         // Only ICU's collator has it.
         var quaternary = collation("de", CollationStrength.QUATERNARY, CollationDecomposition.CANONICAL);
         assertThat(bytes(quaternary, "Äpfel")).isNotEmpty();
-        assertThat(bytes(preset(Optional.empty()), "Äpfel")).isNotEmpty();
+        assertThat(bytes(preset(null), "Äpfel")).isNotEmpty();
     }
 
     @Test
@@ -67,21 +66,11 @@ class IcuCollationTest {
 
     private static AnalyzerSpec.Preset collation(
             String locale, CollationStrength strength, CollationDecomposition decomposition) {
-        return preset(
-                Optional.of(new Collation(locale, Optional.ofNullable(strength), Optional.ofNullable(decomposition))));
+        return preset(new Collation(locale, strength, decomposition));
     }
 
-    private static AnalyzerSpec.Preset preset(Optional<Collation> collation) {
-        return new AnalyzerSpec.Preset(
-                ICU_COLLATION,
-                Optional.empty(),
-                Optional.empty(),
-                OptionalInt.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                collation,
-                Optional.empty());
+    private static AnalyzerSpec.Preset preset(@Nullable Collation collation) {
+        return new AnalyzerSpec.Preset(ICU_COLLATION, null, null, null, null, null, null, collation, null);
     }
 
     /** The bytes of the first token, as the analysis shows them. */

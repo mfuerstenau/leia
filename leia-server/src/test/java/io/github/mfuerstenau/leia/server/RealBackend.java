@@ -43,6 +43,7 @@ import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.StartStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanHit;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanResult;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -52,6 +53,7 @@ import java.util.OptionalInt;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A {@link LeiaBackend} as the UI starts it, for the tests that go through it with the indexes and
@@ -88,22 +90,21 @@ final class RealBackend implements AutoCloseable {
     }
 
     static RealBackend start(List<Path> jars) throws RpcException {
-        return start(Optional.of(testFile("leia.test.runtimes")), jars);
+        return start(testFile("leia.test.runtimes"), jars);
     }
 
-    static RealBackend start(Optional<Path> runtimesDir, List<Path> jars) throws RpcException {
+    static RealBackend start(@Nullable Path runtimesDir, List<Path> jars) throws RpcException {
         return new RealBackend(LeiaBackend.start(runtimesDir, jars));
     }
 
     /** A backend with the servers {@code servers} too (ADR 0090). */
-    static RealBackend start(Optional<Path> runtimesDir, List<Path> jars, List<Path> servers) throws RpcException {
+    static RealBackend start(@Nullable Path runtimesDir, List<Path> jars, List<Path> servers) throws RpcException {
         return new RealBackend(LeiaBackend.start(runtimesDir, jars, servers));
     }
 
     /** A backend with the runtimes' folders and a cache of the stored fields in {@code cacheDir} (ADR 0113). */
     static RealBackend startWithCache(Path cacheDir) throws RpcException {
-        return new RealBackend(LeiaBackend.start(
-                Optional.of(testFile("leia.test.runtimes")), List.of(), List.of(), Optional.of(cacheDir)));
+        return new RealBackend(LeiaBackend.start(testFile("leia.test.runtimes"), List.of(), List.of(), cacheDir));
     }
 
     /** A test index that leia-core's build writes, given by the system property {@code leia.test.index.<name>}. */
@@ -180,10 +181,10 @@ final class RealBackend implements AutoCloseable {
         return job(Methods.START_HIGHLIGHT, params, Methods.GET_HIGHLIGHT, GetHighlightResult::highlight);
     }
 
-    ReconstructResult reconstruct(int docId, Optional<List<String>> fields) throws Exception {
+    ReconstructResult reconstruct(int docId, @Nullable List<String> fields) throws Exception {
         return job(
                 Methods.START_RECONSTRUCT,
-                new StartReconstructParams(docId, fields),
+                new StartReconstructParams(docId, Optional.ofNullable(fields)),
                 Methods.GET_RECONSTRUCT,
                 GetReconstructResult::result);
     }
@@ -261,14 +262,14 @@ final class RealBackend implements AutoCloseable {
      * More-Like-This with Lucene's defaults but minimum frequencies of 1, like {@code docId} or {@code
      * text}, from {@code body}.
      */
-    static SearchQuery moreLikeThis(OptionalInt docId, Optional<String> text) {
+    static SearchQuery moreLikeThis(@Nullable Integer docId, @Nullable String text) {
         return new SearchQuery(
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
                 Optional.of(new MoreLikeThisQuery(
-                        docId,
-                        text,
+                        Optionals.optionalInt(docId),
+                        Optional.ofNullable(text),
                         List.of("body"),
                         1,
                         1,

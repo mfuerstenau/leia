@@ -35,6 +35,7 @@ import java.util.OptionalInt;
 import java.util.ServiceConfigurationError;
 import java.util.Set;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@code openIndex}: opens the indexes of a path read-only, with or without a reader (ADR 0021), and
@@ -75,7 +76,7 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
         Path root = IndexFinder.root(path);
         List<Path> dirs = IndexFinder.find(root);
         // Routed by the version of the first index found, which decides for all (ADR 0044 §3, ADR 0045).
-        Optional<IndexVersion> version = SegmentsHeader.read(dirs.getFirst());
+        @Nullable IndexVersion version = SegmentsHeader.read(dirs.getFirst()).orElse(null);
         Optional<LuceneRuntime> runtime = switch (directories.route(version)) {
             case IndexDirectories.Route.Runtime(LuceneRuntime found) -> Optional.of(found);
             case IndexDirectories.Route.Missing missing -> {
@@ -88,7 +89,7 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
         };
         return switch (mode) {
             case READER -> openWithRuntime(root, dirs, version, runtime.orElseThrow(), kind);
-            case DIRECTORY_ONLY -> openDirectories(root, dirs, runtime, kind);
+            case DIRECTORY_ONLY -> openDirectories(root, dirs, runtime.orElse(null), kind);
         };
     }
 
@@ -97,7 +98,7 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
      * it reads, as one; the others are skipped.
      */
     private OpenIndexResult openWithRuntime(
-            Path root, List<Path> dirs, Optional<IndexVersion> version, LuceneRuntime runtime, DirectoryKind kind)
+            Path root, List<Path> dirs, @Nullable IndexVersion version, LuceneRuntime runtime, DirectoryKind kind)
             throws RpcException {
         List<Path> readable = new ArrayList<>();
         List<RuntimeIndex.Skipped> skipped = new ArrayList<>();
@@ -107,7 +108,7 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
             // major, which the runtime may be trying only to report its format.
             if (dirVersion.isEmpty()
                     || runtime.indexMajors().contains(dirVersion.get().major())
-                    || dirVersion.map(IndexVersion::major).equals(version.map(IndexVersion::major))) {
+                    || (version != null && dirVersion.get().major() == version.major())) {
                 readable.add(dir);
             } else {
                 skipped.add(new RuntimeIndex.Skipped(
@@ -134,7 +135,7 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
      * there is one: naming a server never keeps an index from opening that opened without it (ADR
      * 0090). If that fails too, the server's error is the one reported.
      */
-    private Read read(LuceneRuntime runtime, List<Path> dirs, Optional<IndexVersion> version, DirectoryKind kind)
+    private Read read(LuceneRuntime runtime, List<Path> dirs, @Nullable IndexVersion version, DirectoryKind kind)
             throws RpcException {
         if (!(runtime instanceof ServerRuntime server)) {
             return new Read(runtime, open(runtime, dirs, version, kind));
@@ -167,7 +168,7 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
     }
 
     private static RuntimeIndex open(
-            LuceneRuntime runtime, List<Path> dirs, Optional<IndexVersion> version, DirectoryKind kind)
+            LuceneRuntime runtime, List<Path> dirs, @Nullable IndexVersion version, DirectoryKind kind)
             throws RpcException {
         try {
             return runtime.open(dirs, kind);
@@ -177,8 +178,8 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
             throw new RpcException(
                     ErrorCode.INDEX_NOT_READABLE,
                     "Cannot read the index"
-                            + version.map(found -> " written by Lucene " + found.writtenBy())
-                                    .orElse("") + " with Lucene " + runtime.luceneVersion() + ": " + e,
+                            + (version == null ? "" : " written by Lucene " + version.writtenBy())
+                            + " with Lucene " + runtime.luceneVersion() + ": " + e,
                     e);
         }
     }
@@ -189,15 +190,16 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
      * threads of the check follow the runtime of the first index, as the features do (ADR 0046).
      */
     private OpenIndexResult openDirectories(
-            Path root, List<Path> dirs, Optional<LuceneRuntime> runtime, DirectoryKind kind) {
+            Path root, List<Path> dirs, @Nullable LuceneRuntime runtime, DirectoryKind kind) {
         OpenDirectories open = new OpenDirectories(root, dirs, kind);
         currentIndex.replace(open);
         LOG.info(() -> "Opened " + root + " (" + dirs.size() + " indexes without a reader, " + kind + ")");
         Set<Feature> features = EnumSet.copyOf(Feature.withoutReader());
-        if (!runtime.flatMap(LuceneRuntime::check).map(Check::hasLevels).orElse(false)) {
+        Optional<Check> check = runtime == null ? Optional.empty() : runtime.check();
+        if (!check.map(Check::hasLevels).orElse(false)) {
             features.remove(Feature.CHECK_LEVELS);
         }
-        if (!runtime.flatMap(LuceneRuntime::check).map(Check::hasThreads).orElse(false)) {
+        if (!check.map(Check::hasThreads).orElse(false)) {
             features.remove(Feature.CHECK_THREADS);
         }
         return new OpenIndexResult(
@@ -210,7 +212,7 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
                         .toList(),
                 List.of(),
                 features,
-                runtime.map(LuceneRuntime::luceneVersion).orElse(""),
-                runtime.flatMap(RuntimeResults::server));
+                runtime == null ? "" : runtime.luceneVersion(),
+                runtime == null ? Optional.empty() : RuntimeResults.server(runtime));
     }
 }

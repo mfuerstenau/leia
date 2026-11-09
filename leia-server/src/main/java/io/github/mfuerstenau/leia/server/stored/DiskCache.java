@@ -20,6 +20,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -165,7 +166,7 @@ final class DiskCache {
         out.writeInt(names.size());
         for (String name : names) {
             writeString(out, name);
-            fields.fields().get(name).serialize(out);
+            Objects.requireNonNull(fields.fields().get(name)).serialize(out);
         }
         out.flush();
         CRC32 crc = new CRC32();

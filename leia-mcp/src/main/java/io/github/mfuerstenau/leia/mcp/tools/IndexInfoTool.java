@@ -24,8 +24,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.TreeMap;
+import org.jspecify.annotations.Nullable;
 
 /** {@code index_info}: the open index and its fields (ADR 0100). */
 final class IndexInfoTool implements McpTool<IndexInfoTool.Arguments, IndexInfoTool.Result> {
@@ -46,7 +46,8 @@ final class IndexInfoTool implements McpTool<IndexInfoTool.Arguments, IndexInfoT
             String luceneRuntime,
 
             @Description("The Elasticsearch or OpenSearch installation whose Lucene reads the index, if one does")
-            Optional<String> server,
+            @Nullable
+            String server,
 
             @Description("Live documents") int numDocs,
 
@@ -81,15 +82,17 @@ final class IndexInfoTool implements McpTool<IndexInfoTool.Arguments, IndexInfoT
 
             @Description("The segments_N file of the commit that was opened, the latest one: what the other tools"
                     + " read. Absent without a reader")
-            Optional<String> segmentsFile,
+            @Nullable
+            String segmentsFile,
 
-            @Description("The Lucene version that wrote that commit; absent without a reader")
-            Optional<String> luceneVersion,
+            @Description("The Lucene version that wrote that commit; absent without a reader") @Nullable
+            String luceneVersion,
 
             @Description(
                     "The user data of that commit, sorted by key, such as Elasticsearch's history_uuid, max_seq_no and"
                             + " local_checkpoint; absent if there is none")
-            Optional<Map<String, String>> userData) {}
+            @Nullable
+            Map<String, String> userData) {}
 
     record Field(
             String name,
@@ -97,31 +100,34 @@ final class IndexInfoTool implements McpTool<IndexInfoTool.Arguments, IndexInfoT
             @Description("What the postings hold; NONE if the field isn't indexed")
             IndexOptions indexOptions,
 
-            @Description("The kind of doc values; absent without")
-            Optional<DocValuesType> docValuesType,
+            @Description("The kind of doc values; absent without") @Nullable
+            DocValuesType docValuesType,
 
-            @Description("Dimensions of the point values; absent without points")
-            OptionalInt pointDimensionCount,
+            @Description("Dimensions of the point values; absent without points") @Nullable
+            Integer pointDimensionCount,
 
             @Description("Bytes per dimension of the point values: 4 for an int or float, 8 for a long or double;"
                     + " absent without points")
-            OptionalInt pointBytes,
+            @Nullable
+            Integer pointBytes,
 
-            @Description("Dimensions of the KNN vectors; absent without vectors")
-            OptionalInt vectorDimension,
+            @Description("Dimensions of the KNN vectors; absent without vectors") @Nullable
+            Integer vectorDimension,
 
-            @Description("How the KNN vectors are encoded, FLOAT32 or BYTE; absent without vectors")
-            Optional<VectorEncoding> vectorEncoding,
+            @Description("How the KNN vectors are encoded, FLOAT32 or BYTE; absent without vectors") @Nullable
+            VectorEncoding vectorEncoding,
 
             @Description("How the KNN vectors are compared; COSINE refuses a vector of zeros; absent without vectors")
-            Optional<VectorSimilarity> vectorSimilarity,
+            @Nullable
+            VectorSimilarity vectorSimilarity,
 
-            @Description("Present, and true, only if the field has term vectors")
-            Optional<Boolean> hasTermVectors,
+            @Description("Present, and true, only if the field has term vectors") @Nullable
+            Boolean hasTermVectors,
 
             @Description("Documents with at least one term in the field, deleted ones included; absent without"
                     + " postings")
-            OptionalInt docCount) {}
+            @Nullable
+            Integer docCount) {}
 
     @Override
     public String name() {
@@ -157,7 +163,7 @@ final class IndexInfoTool implements McpTool<IndexInfoTool.Arguments, IndexInfoT
         return new Result(
                 stats.path(),
                 opened.luceneRuntime(),
-                opened.server(),
+                opened.server().orElse(null),
                 stats.numDocs(),
                 stats.maxDoc(),
                 stats.segmentCount(),
@@ -190,11 +196,12 @@ final class IndexInfoTool implements McpTool<IndexInfoTool.Arguments, IndexInfoT
                     entry.reader().isPresent() ? Optional.ofNullable(commits.get(entry.path())) : Optional.empty();
             indexes.add(new Index(
                     entry.path(),
-                    entry.reader().map(ReaderInfo::segmentsFile),
-                    commit.map(IndexCommitStats::commitLuceneVersion),
+                    entry.reader().map(ReaderInfo::segmentsFile).orElse(null),
+                    commit.map(IndexCommitStats::commitLuceneVersion).orElse(null),
                     commit.map(IndexCommitStats::userData)
                             .filter(userData -> !userData.isEmpty())
-                            .map(TreeMap::new)));
+                            .map(TreeMap::new)
+                            .orElse(null)));
         }
         return indexes;
     }
@@ -203,13 +210,13 @@ final class IndexInfoTool implements McpTool<IndexInfoTool.Arguments, IndexInfoT
         return new Field(
                 field.name(),
                 field.indexOptions(),
-                field.docValuesType() == DocValuesType.NONE ? Optional.empty() : Optional.of(field.docValuesType()),
+                field.docValuesType() == DocValuesType.NONE ? null : field.docValuesType(),
                 Absent.nonZero(field.pointDimensionCount()),
                 Absent.nonZero(field.pointNumBytes()),
                 Absent.nonZero(field.vectorDimension()),
-                field.vectorEncoding(),
-                field.vectorSimilarity(),
+                field.vectorEncoding().orElse(null),
+                field.vectorSimilarity().orElse(null),
                 Absent.flag(field.hasTermVectors()),
-                field.terms().map(TermStats::docCount).map(OptionalInt::of).orElseGet(OptionalInt::empty));
+                field.terms().map(TermStats::docCount).orElse(null));
     }
 }

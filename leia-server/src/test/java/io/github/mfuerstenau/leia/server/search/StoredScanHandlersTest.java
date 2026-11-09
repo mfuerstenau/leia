@@ -37,6 +37,7 @@ import org.apache.lucene.index.NoMergePolicy;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.store.FSDirectory;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -51,14 +52,14 @@ class StoredScanHandlersTest {
     private final Jobs jobs = new Jobs();
     private final CurrentIndex currentIndex = new CurrentIndex(jobs, new Filters());
     private final StartStoredScanHandler start =
-            new StartStoredScanHandler(currentIndex, jobs, new StoredFieldsCache(Optional.empty()));
+            new StartStoredScanHandler(currentIndex, jobs, new StoredFieldsCache(null));
     private final GetStoredScanHandler get = new GetStoredScanHandler(jobs);
 
     @Test
     void scansTheStoredValuesAndStreamsTheHits() throws Exception {
         currentIndex.replace(TestIndexes.open(writeIndex()));
 
-        long jobId = start.handle(params("RED", true, Optional.empty(), false)).jobId();
+        long jobId = start.handle(params("RED", true, null, false)).jobId();
         List<StoredScanHit> hits = new ArrayList<>();
         StoredScanResult result = awaitDone(jobId, hits);
 
@@ -82,10 +83,7 @@ class StoredScanHandlersTest {
         currentIndex.replace(TestIndexes.open(writeIndex()));
 
         List<StoredScanHit> hits = new ArrayList<>();
-        awaitDone(
-                start.handle(params("red", false, Optional.of(List.of("title")), true))
-                        .jobId(),
-                hits);
+        awaitDone(start.handle(params("red", false, List.of("title"), true)).jobId(), hits);
 
         assertThat(hits)
                 .extracting(StoredScanHit::docId, StoredScanHit::deleted)
@@ -97,10 +95,10 @@ class StoredScanHandlersTest {
     void returnsTheHitsFromTheGivenOne() throws Exception {
         currentIndex.replace(TestIndexes.open(writeIndex()));
 
-        GetStoredScanResult fromOne = awaitOutcome(
-                start.handle(params("red", true, Optional.empty(), false)).jobId(), 1);
-        GetStoredScanResult pastTheEnd = awaitOutcome(
-                start.handle(params("red", true, Optional.empty(), false)).jobId(), 100);
+        GetStoredScanResult fromOne =
+                awaitOutcome(start.handle(params("red", true, null, false)).jobId(), 1);
+        GetStoredScanResult pastTheEnd =
+                awaitOutcome(start.handle(params("red", true, null, false)).jobId(), 100);
 
         assertThat(fromOne.hits()).extracting(StoredScanHit::field).containsExactly("json", "title");
         assertThat(fromOne.hitCount()).isEqualTo(3);
@@ -114,7 +112,7 @@ class StoredScanHandlersTest {
     void rejectsAPatternThatDoesNotCompile() throws Exception {
         currentIndex.replace(TestIndexes.open(writeIndex()));
 
-        assertThatThrownBy(() -> start.handle(params("(red|", false, Optional.empty(), false)))
+        assertThatThrownBy(() -> start.handle(params("(red|", false, null, false)))
                 .isInstanceOfSatisfying(RpcException.class, e -> {
                     assertThat(e.code()).isEqualTo(ErrorCode.INVALID_QUERY);
                     assertThat(e.getMessage()).isEqualTo("Invalid query: Unclosed group at index 5");
@@ -125,27 +123,25 @@ class StoredScanHandlersTest {
     void rejectsAnUnknownField() throws Exception {
         currentIndex.replace(TestIndexes.open(writeIndex()));
 
-        assertFails(
-                () -> start.handle(params("red", false, Optional.of(List.of("titel")), false)),
-                ErrorCode.FIELD_NOT_FOUND);
+        assertFails(() -> start.handle(params("red", false, List.of("titel"), false)), ErrorCode.FIELD_NOT_FOUND);
     }
 
     @Test
     void needsAReader() throws Exception {
         currentIndex.replace(TestIndexes.withoutReader(writeIndex(), DirectoryKind.FS));
 
-        assertFails(() -> start.handle(params("red", false, Optional.empty(), false)), ErrorCode.NO_READER);
+        assertFails(() -> start.handle(params("red", false, null, false)), ErrorCode.NO_READER);
     }
 
     @Test
     void failsWithoutOpenIndex() {
-        assertFails(() -> start.handle(params("red", false, Optional.empty(), false)), ErrorCode.NO_INDEX_OPEN);
+        assertFails(() -> start.handle(params("red", false, null, false)), ErrorCode.NO_INDEX_OPEN);
     }
 
     @Test
     void rejectsANegativeHit() throws Exception {
         currentIndex.replace(TestIndexes.open(writeIndex()));
-        long jobId = start.handle(params("red", false, Optional.empty(), false)).jobId();
+        long jobId = start.handle(params("red", false, null, false)).jobId();
 
         assertFails(() -> get.handle(new GetStoredScanParams(jobId, -1)), ErrorCode.INVALID_PARAMS);
     }
@@ -156,8 +152,8 @@ class StoredScanHandlersTest {
     }
 
     private static StartStoredScanParams params(
-            String pattern, boolean caseInsensitive, Optional<List<String>> fields, boolean includeDeleted) {
-        return new StartStoredScanParams(pattern, caseInsensitive, fields, includeDeleted);
+            String pattern, boolean caseInsensitive, @Nullable List<String> fields, boolean includeDeleted) {
+        return new StartStoredScanParams(pattern, caseInsensitive, Optional.ofNullable(fields), includeDeleted);
     }
 
     /** Polls as the TUI does, collecting the hits, until the outcome is there. */

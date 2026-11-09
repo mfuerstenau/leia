@@ -23,9 +23,7 @@ import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
 import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
 import java.util.List;
-import java.util.Optional;
-import java.util.OptionalInt;
-import java.util.OptionalLong;
+import org.jspecify.annotations.Nullable;
 
 /**
  * What the {@link Session} has to do after a key: {@link App} makes no calls itself. Each action
@@ -86,7 +84,7 @@ public sealed interface Action {
      * @param from where the page starts; empty for the first term
      * @param more whether the page continues the shown terms
      */
-    record LoadTerms(String field, Optional<BytesValue> from, boolean more) implements Action {}
+    record LoadTerms(String field, @Nullable BytesValue from, boolean more) implements Action {}
 
     /**
      * Fetch a page of the postings of a term, and report back with {@link App#postingsLoaded} or
@@ -95,8 +93,12 @@ public sealed interface Action {
      * @param more whether the page continues the shown postings
      * @param filter the filter to read the postings through (ADR 0032)
      */
-    record LoadPostings(String field, BytesValue term, int fromDoc, boolean more, Optional<PostingsFilter> filter)
-            implements Action {}
+    record LoadPostings(
+            String field,
+            BytesValue term,
+            int fromDoc,
+            boolean more,
+            @Nullable PostingsFilter filter) implements Action {}
 
     /**
      * Fetch the BKD tree of a point field, and report back with {@link App#pointTreeLoaded} or
@@ -127,7 +129,13 @@ public sealed interface Action {
      * document, and report back with {@link App#knnNodeLoaded} or {@link App#knnNodeFailed} (ADR
      * 0085).
      */
-    record LoadKnnNode(String field, long serial, OptionalInt segment, OptionalInt ord, OptionalInt docId, boolean walk)
+    record LoadKnnNode(
+            String field,
+            long serial,
+            @Nullable Integer segment,
+            @Nullable Integer ord,
+            @Nullable Integer docId,
+            boolean walk)
             implements Action {}
 
     /**
@@ -139,7 +147,7 @@ public sealed interface Action {
      * App#documentMatchesFailed} (ADR 0043).
      */
     record LoadDocument(
-            int docId, List<Long> cancel, Optional<Documents.Locate> locate, Optional<Documents.MatchesStart> matches)
+            int docId, List<Long> cancel, Documents.@Nullable Locate locate, Documents.@Nullable MatchesStart matches)
             implements Action {}
 
     /**
@@ -178,8 +186,11 @@ public sealed interface Action {
      * replaces, then start building filter {@code serial}, and report back with {@link
      * App#filterStarted} or {@link App#filterFailed} (ADR 0031).
      */
-    record StartFilter(long serial, StartFilterParams params, OptionalLong cancel, OptionalLong release)
-            implements Action {}
+    record StartFilter(
+            long serial,
+            StartFilterParams params,
+            @Nullable Long cancel,
+            @Nullable Long release) implements Action {}
 
     /**
      * Find a match of filter {@code serial}, and report back with {@link App#filterStepped} or {@link
@@ -191,7 +202,7 @@ public sealed interface Action {
      * Cancel the job that builds a filter, or release the filter. The app has forgotten it already,
      * so nothing is reported back.
      */
-    record ClearFilter(OptionalLong cancel, OptionalLong release) implements Action {}
+    record ClearFilter(@Nullable Long cancel, @Nullable Long release) implements Action {}
 
     /**
      * Start the export of a document that leia-client runs (ADR 0030, ADR 0126), and hand the app
@@ -272,8 +283,11 @@ public sealed interface Action {
      * (ADR 0093), of the indexes and segments of {@code only}, absent for everything, and report back
      * with {@link App#checkStarted} or {@link App#checkFailed} (ADR 0022).
      */
-    record StartCheck(long checkId, OptionalInt level, OptionalInt threads, Optional<List<CheckTarget>> only)
-            implements Action {}
+    record StartCheck(
+            long checkId,
+            @Nullable Integer level,
+            @Nullable Integer threads,
+            @Nullable List<CheckTarget> only) implements Action {}
 
     /** Cancel this check job. The app has stopped the check already, so nothing is reported back. */
     record CancelCheck(long jobId) implements Action {}

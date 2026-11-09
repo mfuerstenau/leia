@@ -10,7 +10,7 @@ import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
 import jakarta.inject.Inject;
-import java.util.OptionalLong;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@code startReconstruct}: checks the document and fields at once, counts the terms and points to
@@ -29,7 +29,7 @@ public final class StartReconstructHandler implements MethodHandler<StartReconst
     }
 
     /** What a poll of the job needs besides its progress. */
-    public record Count(OptionalLong total) {}
+    public record Count(@Nullable Long total) {}
 
     @Override
     public RpcMethod<StartReconstructParams, JobStarted> method() {

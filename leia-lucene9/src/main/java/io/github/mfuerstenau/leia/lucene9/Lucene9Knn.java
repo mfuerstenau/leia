@@ -16,6 +16,7 @@ import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.search.KnnByteVectorQuery;
 import org.apache.lucene.search.KnnFloatVectorQuery;
 import org.apache.lucene.search.Query;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The KNN vectors of a {@link Lucene9Index}, through the KNN queries and vector values of 9.5: a
@@ -32,9 +33,9 @@ final class Lucene9Knn implements Knn {
 
     /** {@inheritDoc} Lucene 9.12's KNN query of the field's encoding; it searches when rewritten. */
     @Override
-    public ParsedQuery approximate(String field, Vector target, int k, Optional<ParsedQuery> filter) {
+    public ParsedQuery approximate(String field, Vector target, int k, @Nullable ParsedQuery filter) {
         index.vectorField(field);
-        Query filterQuery = filter.map(Lucene9Index::query).orElse(null);
+        Query filterQuery = filter == null ? null : Lucene9Index.query(filter);
         return new Lucene9Index.Lucene9Query(
                 switch (target) {
                     case Vector.Floats floats -> new KnnFloatVectorQuery(field, floats.values(), k, filterQuery);
@@ -43,9 +44,10 @@ final class Lucene9Knn implements Knn {
     }
 
     @Override
-    public ParsedQuery exact(String field, Vector target, Optional<ParsedQuery> filter) {
+    public ParsedQuery exact(String field, Vector target, @Nullable ParsedQuery filter) {
         index.vectorField(field);
-        return new Lucene9Index.Lucene9Query(new ExactKnnQuery(field, target, filter.map(Lucene9Index::query)));
+        return new Lucene9Index.Lucene9Query(
+                new ExactKnnQuery(field, target, filter == null ? null : Lucene9Index.query(filter)));
     }
 
     @Override
@@ -66,7 +68,7 @@ final class Lucene9Knn implements Knn {
      * iterator as doc values are; empty if it has none, as a document of a segment of 8.x never has.
      */
     static Optional<Vector> vector(LeafReader leaf, int doc, Field field) throws IOException {
-        Optional<VectorFormat> format = field.vectors();
+        Optional<VectorFormat> format = Optional.ofNullable(field.vectors());
         if (format.isEmpty()) {
             return Optional.empty();
         }

@@ -74,6 +74,7 @@ import io.github.mfuerstenau.leia.protocol.search.StoredScanResult;
 import io.github.mfuerstenau.leia.protocol.search.TermQuery;
 import io.github.mfuerstenau.leia.protocol.search.TotalHitsRelation;
 import io.github.mfuerstenau.leia.protocol.search.ValueHighlight;
+import io.github.mfuerstenau.leia.tui.Optionals;
 import io.github.mfuerstenau.leia.tui.TestScreens;
 import io.github.mfuerstenau.leia.tui.analysis.AnalysisSettings;
 import io.github.mfuerstenau.leia.tui.analysis.AnalyzerSettings;
@@ -88,6 +89,7 @@ import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.stream.IntStream;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 /** The tests of {@code search.rs}, ported, and what the asynchronous replies add. */
@@ -220,14 +222,14 @@ class SearchTest {
     }
 
     /** The search that {@code request} starts. */
-    private static Request.Start started(Optional<Request> request) {
-        assertThat(request).containsInstanceOf(Request.Start.class);
-        return (Request.Start) request.orElseThrow();
+    private static Request.Start started(Request request) {
+        assertThat(request).isInstanceOf(Request.Start.class);
+        return (Request.Start) request;
     }
 
     /** Asserts that {@code request} starts a search with these params, cancelling these jobs. */
     private static Request.Start assertSearch(
-            Optional<Request> request, SearchQuery query, int offset, int limit, List<Long> cancel) {
+            Request request, SearchQuery query, int offset, int limit, List<Long> cancel) {
         Request.Start start = started(request);
         assertThat(start.params()).isEqualTo(params(query, offset, limit));
         assertThat(start.cancel()).isEqualTo(cancel);
@@ -275,7 +277,7 @@ class SearchTest {
 
         press(search, '/');
         typed(search, "red");
-        Request.Start start = started(press(search, KeyCode.ENTER));
+        Request.Start start = started(press(search, KeyCode.ENTER).orElseThrow());
         assertThat(start.params().query().classic()).isPresent();
         assertThat(start.params().highlight()).isEmpty();
         assertThat(search.searchStarted(start.searchId(), 1)).isEmpty();
@@ -307,7 +309,7 @@ class SearchTest {
 
         press(search, '/');
         typed(search, "red");
-        Request.Start start = started(press(search, KeyCode.ENTER));
+        Request.Start start = started(press(search, KeyCode.ENTER).orElseThrow());
         search.searchProgress(start.searchId(), results(0, 2, 2));
         assertThat(render(search)).contains("p parser options · s similarity and sort · l stored fields per hit");
         assertThat(press(search, 's')).isEmpty();
@@ -326,7 +328,7 @@ class SearchTest {
         assertThat(press(search, 'm')).isEmpty();
         assertThat(search.mode()).isEqualTo(Mode.CLASSIC);
 
-        Request.Start start = started(search.knnQuery("embedding", 3));
+        Request.Start start = started(search.knnQuery("embedding", 3).orElseThrow());
         assertThat(start.params().query().knn()).isPresent();
         assertThat(start.params().highlight()).isEmpty();
         assertThat(press(search, 's')).hasValue(new Request.Unsupported("Similarity and sort"));
@@ -375,7 +377,7 @@ class SearchTest {
         Search search = search();
         press(search, '/');
         typed(search, "red");
-        long id = started(press(search, KeyCode.ENTER)).searchId();
+        long id = started(press(search, KeyCode.ENTER).orElseThrow()).searchId();
         assertThat(search.searchStarted(id, 1)).isEmpty();
         search.searchProgress(id, results(0, count, totalHits));
         return search;
@@ -387,7 +389,7 @@ class SearchTest {
     }
 
     /** Starts the running search as {@code jobId} and returns its id. */
-    private static long start(Search search, Optional<Request> request, long jobId) {
+    private static long start(Search search, Request request, long jobId) {
         long id = started(request).searchId();
         assertThat(search.searchStarted(id, jobId)).isEmpty();
         return id;
@@ -511,8 +513,8 @@ class SearchTest {
         Search search = search();
         var found = new AutoStopWords(1, List.of(new FieldStopWords("body", List.of("the"))));
         AnalysisSettings analysis = new AnalysisSettings()
-                .withAnalyzer(Optional.of("title"), new AnalyzerSettings())
-                .withStopWords(Optional.of(found));
+                .withAnalyzer("title", new AnalyzerSettings())
+                .withStopWords(found);
         search.setAnalyzer(analysis);
 
         assertThat(render(search, 130, 24))
@@ -534,7 +536,12 @@ class SearchTest {
         press(search, ctrl('w'));
         typed(search, "fox");
 
-        assertSearch(press(search, KeyCode.ENTER), classic("red fox", "title", QueryOperator.OR), 0, PAGE, List.of());
+        assertSearch(
+                press(search, KeyCode.ENTER).orElseThrow(),
+                classic("red fox", "title", QueryOperator.OR),
+                0,
+                PAGE,
+                List.of());
         assertThat(search.prompting()).isFalse();
         // Esc leaves the line without searching; a blank line searches nothing.
         press(search, '/');
@@ -557,7 +564,7 @@ class SearchTest {
         Search search = search();
         press(search, '/');
         typed(search, "red");
-        long id = start(search, press(search, KeyCode.ENTER), 1);
+        long id = start(search, press(search, KeyCode.ENTER).orElseThrow(), 1);
         assertThat(search.searchJob())
                 .hasValueSatisfying(job -> assertThat(job[1]).isEqualTo(1));
         search.searchProgress(id, new GetSearchResult(200, Optional.empty()));
@@ -575,7 +582,7 @@ class SearchTest {
         Search search = searched(PAGE, 150);
         SearchQuery query = classic("red", "title", QueryOperator.OR);
 
-        long id = assertSearch(press(search, KeyCode.END), query, PAGE, PAGE, List.of())
+        long id = assertSearch(press(search, KeyCode.END).orElseThrow(), query, PAGE, PAGE, List.of())
                 .searchId();
         search.searchStarted(id, 2);
         // No second request while the page is on its way.
@@ -591,7 +598,7 @@ class SearchTest {
     @Test
     void aFailedPageKeepsTheHits() {
         Search search = searched(PAGE, 150);
-        long id = start(search, press(search, KeyCode.END), 2);
+        long id = start(search, press(search, KeyCode.END).orElseThrow(), 2);
 
         search.searchFailed(id, "Cannot search the index: gone");
 
@@ -605,7 +612,7 @@ class SearchTest {
         Search search = search();
         press(search, '/');
         typed(search, "title:(red");
-        long id = started(press(search, KeyCode.ENTER)).searchId();
+        long id = started(press(search, KeyCode.ENTER).orElseThrow()).searchId();
 
         search.searchFailed(id, "Invalid query: Cannot parse 'title:(red'");
 
@@ -617,14 +624,16 @@ class SearchTest {
     void aChangedSettingSearchesAgainAndStopsTheRunningSearch() {
         Search search = searched(2, 2);
         press(search, '/');
-        start(search, press(search, KeyCode.ENTER), 7);
+        start(search, press(search, KeyCode.ENTER).orElseThrow(), 7);
 
-        assertSearch(press(search, 'a'), classic("red", "title", QueryOperator.AND), 0, PAGE, List.of(7L));
-        assertSearch(press(search, 'f'), classic("red", "body", QueryOperator.AND), 0, PAGE, List.of());
+        assertSearch(
+                press(search, 'a').orElseThrow(), classic("red", "title", QueryOperator.AND), 0, PAGE, List.of(7L));
+        assertSearch(press(search, 'f').orElseThrow(), classic("red", "body", QueryOperator.AND), 0, PAGE, List.of());
         // f wraps around, and F steps back.
         press(search, 'f');
-        assertSearch(press(search, 'F'), classic("red", "body", QueryOperator.AND), 0, PAGE, List.of());
-        assertThat(started(press(search, 't')).params().exactTotalHits()).isTrue();
+        assertSearch(press(search, 'F').orElseThrow(), classic("red", "body", QueryOperator.AND), 0, PAGE, List.of());
+        assertThat(started(press(search, 't').orElseThrow()).params().exactTotalHits())
+                .isTrue();
         assertThat(render(search)).contains("AND · exact count");
     }
 
@@ -633,7 +642,7 @@ class SearchTest {
         Search search = searched(2, 2);
 
         press(search, 'm');
-        StartSearchParams params = started(press(search, 'm')).params();
+        StartSearchParams params = started(press(search, 'm').orElseThrow()).params();
         assertThat(params.query().term()).hasValue(new TermQuery("title", new BytesValue("red", false)));
         assertThat(render(search)).contains("Term · field title");
         // There is no operator and there are no parser options for a term.
@@ -642,7 +651,7 @@ class SearchTest {
         assertThat(search.prompting()).isFalse();
     }
 
-    private static DocValuesQuery docValuesOf(Optional<Request> request) {
+    private static DocValuesQuery docValuesOf(Request request) {
         return started(request).params().query().docValues().orElseThrow();
     }
 
@@ -671,7 +680,7 @@ class SearchTest {
 
         press(search, '/');
         typed(search, "{1 TO *]");
-        assertThat(docValuesOf(press(search, KeyCode.ENTER)))
+        assertThat(docValuesOf(press(search, KeyCode.ENTER).orElseThrow()))
                 .isEqualTo(new DocValuesQuery(
                         "price",
                         Optional.of(DocValuesNumber.LONG),
@@ -680,7 +689,7 @@ class SearchTest {
                         Optional.empty()));
 
         // n steps the encoding of the numbers, and searches again.
-        assertThat(docValuesOf(press(search, 'n')).number()).hasValue(DocValuesNumber.DOUBLE);
+        assertThat(docValuesOf(press(search, 'n').orElseThrow()).number()).hasValue(DocValuesNumber.DOUBLE);
         assertThat(render(search)).contains("price (NUMERIC) · double bits");
         // There is no operator and there are no parser options; h is for bytes only.
         assertThat(press(search, 'a')).isEmpty();
@@ -696,7 +705,7 @@ class SearchTest {
         typed(search, "books \"new york\"");
         press(search, KeyCode.ENTER);
 
-        DocValuesQuery query = docValuesOf(press(search, 'f'));
+        DocValuesQuery query = docValuesOf(press(search, 'f').orElseThrow());
         assertThat(query.field()).isEqualTo("category");
         assertThat(query.number()).isEmpty();
         assertThat(query.values()).hasValue(List.of(text("books"), text("new york")));
@@ -704,7 +713,7 @@ class SearchTest {
         // n is for numbers only.
         assertThat(press(search, 'n')).isEmpty();
         // f goes round to price again.
-        assertThat(docValuesOf(press(search, 'f')).field()).isEqualTo("price");
+        assertThat(docValuesOf(press(search, 'f').orElseThrow()).field()).isEqualTo("price");
     }
 
     @Test
@@ -715,7 +724,7 @@ class SearchTest {
         assertThat(press(search, KeyCode.ENTER)).isEmpty();
         assertThat(render(search)).contains("A prefix is for doc values of bytes; numbers take a range.");
 
-        DocValuesQuery query = docValuesOf(press(search, 'f'));
+        DocValuesQuery query = docValuesOf(press(search, 'f').orElseThrow());
         assertThat(query.field()).isEqualTo("category");
         assertThat(query.prefix()).hasValue(text("1"));
         assertThat(query.values()).isEmpty();
@@ -728,12 +737,12 @@ class SearchTest {
         press(search, 'f');
         press(search, '/');
         typed(search, "80ff");
-        start(search, press(search, KeyCode.ENTER), 4);
+        start(search, press(search, KeyCode.ENTER).orElseThrow(), 4);
 
         // In hex, "80ff" reads; "8" doesn't, and the running search stops.
         Optional<Request> hex = press(search, 'h');
-        assertThat(docValuesOf(hex).values()).hasValue(List.of(new BytesValue("80ff", true)));
-        start(search, hex, 5);
+        assertThat(docValuesOf(hex.orElseThrow()).values()).hasValue(List.of(new BytesValue("80ff", true)));
+        start(search, hex.orElseThrow(), 5);
         press(search, '/');
         press(search, KeyCode.BACKSPACE);
         press(search, KeyCode.BACKSPACE);
@@ -743,7 +752,8 @@ class SearchTest {
 
         press(search, '/');
         typed(search, "0");
-        assertThat(docValuesOf(press(search, KeyCode.ENTER)).values()).isPresent();
+        assertThat(docValuesOf(press(search, KeyCode.ENTER).orElseThrow()).values())
+                .isPresent();
         assertThat(render(search)).doesNotContain("Cannot read the values");
     }
 
@@ -752,17 +762,20 @@ class SearchTest {
         Search search = search();
 
         DocValuesQuery query =
-                docValuesOf(search.docValuesQuery("category", DocValuesNumber.FLOAT, false, List.of("new york", "*")));
+                docValuesOf(search.docValuesQuery("category", DocValuesNumber.FLOAT, false, List.of("new york", "*"))
+                        .orElseThrow());
 
         assertThat(query.number()).isEmpty();
         assertThat(query.values()).hasValue(List.of(text("new york"), text("*")));
         assertThat(search.inputText()).isEqualTo("\"new york\" \"*\"");
         // A value ending in * is quoted, so it is not a prefix.
-        assertThat(docValuesOf(search.docValuesQuery("category", DocValuesNumber.LONG, false, List.of("kit*")))
+        assertThat(docValuesOf(search.docValuesQuery("category", DocValuesNumber.LONG, false, List.of("kit*"))
+                                .orElseThrow())
                         .values())
                 .hasValue(List.of(text("kit*")));
         assertThat(search.inputText()).isEqualTo("\"kit*\"");
-        query = docValuesOf(search.docValuesQuery("price", DocValuesNumber.FLOAT, false, List.of("1.5")));
+        query = docValuesOf(search.docValuesQuery("price", DocValuesNumber.FLOAT, false, List.of("1.5"))
+                .orElseThrow());
         assertThat(query.number()).hasValue(DocValuesNumber.FLOAT);
         assertThat(query.values()).hasValue(List.of(text("1.5")));
         assertThat(search.docValuesQuery("title", DocValuesNumber.LONG, false, List.of()))
@@ -827,7 +840,7 @@ class SearchTest {
         return search;
     }
 
-    private static KnnQuery knnOf(Optional<Request> request) {
+    private static KnnQuery knnOf(Request request) {
         return started(request).params().query().knn().orElseThrow();
     }
 
@@ -849,7 +862,7 @@ class SearchTest {
                         "w types a filter in classic syntax, default field title");
         assertThat(TestScreens.allKeys(search.keys())).startsWith("/ target   m mode   w filter");
 
-        assertThat(knnOf(line(search, "42")))
+        assertThat(knnOf(line(search, "42").orElseThrow()))
                 .isEqualTo(new KnnQuery(
                         "embedding",
                         OptionalInt.of(42),
@@ -857,7 +870,7 @@ class SearchTest {
                         OptionalInt.of(10),
                         false,
                         Optional.empty()));
-        assertThat(knnOf(line(search, "[0.5, -1 2]")).vector())
+        assertThat(knnOf(line(search, "[0.5, -1 2]").orElseThrow()).vector())
                 .hasValue(new KnnVector(VectorEncoding.FLOAT32, List.of(0.5f, -1f, 2f), List.of()));
     }
 
@@ -870,9 +883,9 @@ class SearchTest {
         assertThat(press(search, 'f')).isEmpty();
         assertThat(render(search))
                 .contains("KNN · fingerprint (2d byte, euclidean)", "Cannot read the target", "'0.5' is not a byte");
-        assertThat(knnOf(line(search, "[1, -2]")).vector())
+        assertThat(knnOf(line(search, "[1, -2]").orElseThrow()).vector())
                 .hasValue(new KnnVector(VectorEncoding.BYTE, List.of(), List.of((byte) 1, (byte) -2)));
-        assertThat(knnOf(press(search, 'F')).field()).isEqualTo("embedding");
+        assertThat(knnOf(press(search, 'F').orElseThrow()).field()).isEqualTo("embedding");
     }
 
     @Test
@@ -881,11 +894,11 @@ class SearchTest {
         line(search, "7");
 
         // e scores every document instead, without k.
-        KnnQuery exact = knnOf(press(search, 'e'));
+        KnnQuery exact = knnOf(press(search, 'e').orElseThrow());
         assertThat(exact.exact()).isTrue();
         assertThat(exact.k()).isEmpty();
         assertThat(render(search)).contains("KNN · embedding (3d float, cosine) · exact");
-        assertThat(knnOf(press(search, 'e')).k()).hasValue(10);
+        assertThat(knnOf(press(search, 'e').orElseThrow()).k()).hasValue(10);
 
         // k takes digits only, and stays within 1 to 10,000.
         assertThat(press(search, 'k')).isEmpty();
@@ -894,19 +907,23 @@ class SearchTest {
                 .hasValueSatisfying(keys -> assertThat(keys).contains("set k"));
         press(search, ctrl('u'));
         typed(search, "2x5");
-        assertThat(knnOf(press(search, KeyCode.ENTER)).k()).hasValue(25);
+        assertThat(knnOf(press(search, KeyCode.ENTER).orElseThrow()).k()).hasValue(25);
         press(search, 'k');
         press(search, ctrl('u'));
         typed(search, "99999");
-        assertThat(knnOf(press(search, KeyCode.ENTER)).k()).hasValue(KnnQuery.MAX_K);
+        assertThat(knnOf(press(search, KeyCode.ENTER).orElseThrow()).k()).hasValue(KnnQuery.MAX_K);
 
         // w types the filter, which a and p set as a classic query.
         press(search, 'w');
         typed(search, "red blue");
-        ClassicQuery filter = knnOf(press(search, KeyCode.ENTER)).filter().orElseThrow();
+        ClassicQuery filter =
+                knnOf(press(search, KeyCode.ENTER).orElseThrow()).filter().orElseThrow();
         assertThat(filter.expression()).isEqualTo("red blue");
         assertThat(filter.defaultField()).isEqualTo("title");
-        assertThat(knnOf(press(search, 'a')).filter().orElseThrow().defaultOperator())
+        assertThat(knnOf(press(search, 'a').orElseThrow())
+                        .filter()
+                        .orElseThrow()
+                        .defaultOperator())
                 .isEqualTo(QueryOperator.AND);
         assertThat(render(search)).contains("where  red blue");
         press(search, 'p');
@@ -923,7 +940,7 @@ class SearchTest {
         Search search = knnSearch();
         assertThat(search.knnQuery("nope", 3)).isEmpty();
 
-        KnnQuery query = knnOf(search.knnQuery("fingerprint", 3));
+        KnnQuery query = knnOf(search.knnQuery("fingerprint", 3).orElseThrow());
         assertThat(query.field()).isEqualTo("fingerprint");
         assertThat(query.docId()).hasValue(3);
         assertThat(search.mode()).isEqualTo(Mode.KNN);
@@ -945,9 +962,9 @@ class SearchTest {
                 .contains("KNN · fingerprint (2d byte, euclidean) · k 5 · approximate", "where  red");
     }
 
-    private static Request.Recall recallOf(Optional<Request> request) {
-        assertThat(request).containsInstanceOf(Request.Recall.class);
-        return (Request.Recall) request.orElseThrow();
+    private static Request.Recall recallOf(Request request) {
+        assertThat(request).isInstanceOf(Request.Recall.class);
+        return (Request.Recall) request;
     }
 
     private static KnnRecallResult recallResult(int targets, double mean, List<KnnRecallTarget> worst) {
@@ -969,7 +986,7 @@ class SearchTest {
         line(search, "42");
         assertThat(TestScreens.allKeys(search.keys())).contains("K recall");
 
-        Request.Recall recall = recallOf(press(search, 'K'));
+        Request.Recall recall = recallOf(press(search, 'K').orElseThrow());
         assertThat(recall.params().sample()).isEmpty();
         assertThat(recall.params().query())
                 .isEqualTo(new KnnQuery(
@@ -1022,7 +1039,7 @@ class SearchTest {
         press(search, ctrl('u'));
         press(search, KeyCode.ESCAPE);
 
-        Request.Recall recall = recallOf(press(search, 'K'));
+        Request.Recall recall = recallOf(press(search, 'K').orElseThrow());
         assertThat(recall.params().sample()).hasValue(Search.RECALL_SAMPLE);
         assertThat(recall.params().query().docId()).isEmpty();
         assertThat(recall.params().query().vector()).isEmpty();
@@ -1048,20 +1065,20 @@ class SearchTest {
 
         // Enter searches the nearest to the selected target.
         Optional<Request> searched = press(search, KeyCode.ENTER);
-        assertThat(knnOf(searched).docId()).hasValue(63);
+        assertThat(knnOf(searched.orElseThrow()).docId()).hasValue(63);
     }
 
     @Test
     void escStopsARecallCheck() {
         Search search = knnMode();
-        Request.Recall recall = recallOf(press(search, 'K'));
+        Request.Recall recall = recallOf(press(search, 'K').orElseThrow());
         search.knnRecallStarted(recall.recallId(), 5);
 
         assertThat(search.cancel()).containsExactly(5L);
         assertThat(search.running()).isFalse();
         assertThat(render(search)).contains("Recall · k 10 · stopped", "Stopped.");
         // A start of a check that was stopped is cancelled.
-        Request.Recall again = recallOf(press(search, 'K'));
+        Request.Recall again = recallOf(press(search, 'K').orElseThrow());
         assertThat(search.knnRecallStarted(recall.recallId(), 6)).hasValue(6);
         assertThat(search.knnRecallStarted(again.recallId(), 7)).isEmpty();
     }
@@ -1070,7 +1087,7 @@ class SearchTest {
     void aSampledRecallCheckBelongsToItsField() {
         Search search = knnMode();
         assertThat(search.keys().text()).contains("⏎ open doc");
-        Request.Recall recall = recallOf(press(search, 'K'));
+        Request.Recall recall = recallOf(press(search, 'K').orElseThrow());
         assertThat(recall.params().sample()).hasValue(Search.RECALL_SAMPLE);
         search.knnRecallStarted(recall.recallId(), 5);
         // Enter on a sampled target searches its nearest.
@@ -1112,7 +1129,7 @@ class SearchTest {
         Search.Mark mark = search.mark();
 
         // A More-Like-This search replaces it and runs.
-        start(search, search.moreLikeThis(1), 7);
+        start(search, search.moreLikeThis(1).orElseThrow(), 7);
         assertThat(render(search)).contains("More like this");
 
         assertThat(search.restore(mark)).hasValue(new Request.Cancel(List.of(7L)));
@@ -1129,10 +1146,10 @@ class SearchTest {
         Search search = search();
         press(search, '/');
         typed(search, "red");
-        start(search, press(search, KeyCode.ENTER), 1);
+        start(search, press(search, KeyCode.ENTER).orElseThrow(), 1);
         Search.Mark mark = search.mark();
         // The next search stops the first one.
-        start(search, search.moreLikeThis(1), 2);
+        start(search, search.moreLikeThis(1).orElseThrow(), 2);
 
         assertThat(search.restore(mark)).hasValue(new Request.Cancel(List.of(2L)));
         assertThat(search.running()).isFalse();
@@ -1150,10 +1167,10 @@ class SearchTest {
         assertThat(search.step(true)).hasValue(new Request.Document(2));
     }
 
-    private static MoreLikeThisQuery like(OptionalInt docId, Optional<String> text, boolean boost) {
+    private static MoreLikeThisQuery like(@Nullable Integer docId, @Nullable String text, boolean boost) {
         return new MoreLikeThisQuery(
-                docId,
-                text,
+                Optionals.optionalInt(docId),
+                Optional.ofNullable(text),
                 List.of("title", "body"),
                 2,
                 5,
@@ -1167,7 +1184,7 @@ class SearchTest {
     }
 
     private static MoreLikeThisQuery like(int docId) {
-        return like(OptionalInt.of(docId), Optional.empty(), false);
+        return like(docId, null, false);
     }
 
     private static LikeTerm likeTerm(String field, String term, int tf, int docFreq, float score) {
@@ -1187,9 +1204,8 @@ class SearchTest {
         press(search, '/');
         // Anything goes into the line, unlike a document id.
         typed(search, "Red lamp 42");
-        Request.Start start = started(press(search, KeyCode.ENTER));
-        assertThat(start.params().query().moreLikeThis())
-                .hasValue(like(OptionalInt.empty(), Optional.of("Red lamp 42"), false));
+        Request.Start start = started(press(search, KeyCode.ENTER).orElseThrow());
+        assertThat(start.params().query().moreLikeThis()).hasValue(like(null, "Red lamp 42", false));
         // The popup is the same as for a document; f/F don't step a field.
         assertThat(press(search, 'f')).isEmpty();
         assertThat(press(search, 'p')).isEmpty();
@@ -1241,7 +1257,10 @@ class SearchTest {
         press(search, '/');
         // Only digits go into the line.
         typed(search, "4x2 ");
-        assertThat(started(press(search, KeyCode.ENTER)).params().query().moreLikeThis())
+        assertThat(started(press(search, KeyCode.ENTER).orElseThrow())
+                        .params()
+                        .query()
+                        .moreLikeThis())
                 .hasValue(like(42));
         // The fields are the popup's, and there is no operator.
         assertThat(press(search, 'f')).isEmpty();
@@ -1255,21 +1274,24 @@ class SearchTest {
             press(search, KeyCode.DOWN);
         }
         press(search, ' ');
-        assertThat(started(press(search, KeyCode.ENTER)).params().query().moreLikeThis())
-                .hasValue(like(OptionalInt.of(42), Optional.empty(), true));
+        assertThat(started(press(search, KeyCode.ENTER).orElseThrow())
+                        .params()
+                        .query()
+                        .moreLikeThis())
+                .hasValue(like(42, null, true));
     }
 
     @Test
     void marksTheSourceAmongTheHits() {
         Search search = search();
-        Request.Start start = started(search.moreLikeThis(3));
+        Request.Start start = started(search.moreLikeThis(3).orElseThrow());
         assertThat(start.cancel()).isEmpty();
         assertThat(start.params().query().moreLikeThis()).hasValue(like(3));
         search.searchStarted(start.searchId(), 1);
         search.searchProgress(start.searchId(), results(2, 5, 3));
         assertThat(render(search)).contains("◆ id=doc-3", "◆ marks document 3, the source.");
 
-        long id = started(search.moreLikeThis(4)).searchId();
+        long id = started(search.moreLikeThis(4).orElseThrow()).searchId();
         search.searchStarted(id, 2);
         search.searchProgress(
                 id,
@@ -1290,11 +1312,11 @@ class SearchTest {
     void aLineThatIsNoDocumentIdForgetsTheHits() {
         Search search = searched(2, 2);
         press(search, 'm');
-        start(search, press(search, 'm'), 6);
+        start(search, press(search, 'm').orElseThrow(), 6);
         // The doc values mode takes "red" as a value too.
         Optional<Request> running = press(search, 'm');
-        assertThat(started(running).cancel()).containsExactly(6L);
-        start(search, running, 7);
+        assertThat(started(running.orElseThrow()).cancel()).containsExactly(6L);
+        start(search, running.orElseThrow(), 7);
 
         // "red" is no KNN target (and there is no vector field here): the doc values search's hits and
         // job go.
@@ -1311,7 +1333,7 @@ class SearchTest {
     void standardModeSendsThePointTypes() {
         Search search = searched(2, 2);
 
-        Request.Start start = started(press(search, 'm'));
+        Request.Start start = started(press(search, 'm').orElseThrow());
         assertThat(start.params().query().standard())
                 .hasValue(new StandardQuery(
                         "red",
@@ -1347,7 +1369,7 @@ class SearchTest {
         press(search, ' ');
         press(search, KeyCode.DOWN);
         press(search, '2');
-        Request.Start start = started(press(search, KeyCode.ENTER));
+        Request.Start start = started(press(search, KeyCode.ENTER).orElseThrow());
         assertThat(start.cancel()).isEmpty();
         ClassicQuery classic = start.params().query().classic().orElseThrow();
         assertThat(classic.options().allowLeadingWildcard()).isTrue();
@@ -1361,7 +1383,7 @@ class SearchTest {
     @Test
     void theOptionsPopupListsThePointTypesForTheStandardParser() {
         Search search = searched(2, 2);
-        long id = start(search, press(search, 'm'), 2);
+        long id = start(search, press(search, 'm').orElseThrow(), 2);
         search.searchProgress(id, results(0, 2, 2));
 
         press(search, 'p');
@@ -1371,7 +1393,7 @@ class SearchTest {
         // The last row is quantity: INT becomes FLOAT.
         press(search, KeyCode.END);
         press(search, KeyCode.RIGHT);
-        assertThat(started(press(search, KeyCode.ENTER))
+        assertThat(started(press(search, KeyCode.ENTER).orElseThrow())
                         .params()
                         .query()
                         .standard()
@@ -1386,7 +1408,7 @@ class SearchTest {
         Search search = search();
         BytesValue binary = new BytesValue("ff00", true);
 
-        assertThat(started(search.termQuery("body", binary))
+        assertThat(started(search.termQuery("body", binary).orElseThrow())
                         .params()
                         .query()
                         .term()
@@ -1397,7 +1419,7 @@ class SearchTest {
 
         press(search, '/');
         typed(search, "1");
-        assertThat(started(press(search, KeyCode.ENTER))
+        assertThat(started(press(search, KeyCode.ENTER).orElseThrow())
                         .params()
                         .query()
                         .term()
@@ -1446,7 +1468,7 @@ class SearchTest {
         Search search = search();
         press(search, '/');
         typed(search, "red");
-        Request.Start start = started(press(search, KeyCode.ENTER));
+        Request.Start start = started(press(search, KeyCode.ENTER).orElseThrow());
         assertThat(search.searchStarted(start.searchId(), 1)).isEmpty();
         Hit hit = new Hit(
                 7,
@@ -1532,16 +1554,16 @@ class SearchTest {
         Search search = searched(2, 2);
         SearchQuery query = classic("red", "title", QueryOperator.OR);
 
-        Request.Start any = started(press(search, 'H'));
+        Request.Start any = started(press(search, 'H').orElseThrow());
         assertThat(any.params().highlight())
                 .hasValue(new HighlightOptions(Search.HIGHLIGHT_PASSAGES, false, new AnalysisSettings().analyzer()));
         assertThat(render(search)).contains("count to 1000 · highlight any field's terms");
-        Request.Start off = started(press(search, 'H'));
+        Request.Start off = started(press(search, 'H').orElseThrow());
         assertThat(off.params().highlight()).isEmpty();
         assertThat(search.matchesQuery()).isEmpty();
         assertThat(render(search)).contains("count to 1000 · no highlights");
         // Back to the query's fields; the searches before never started a job.
-        assertSearch(press(search, 'H'), query, 0, Search.SEARCH_PAGE, List.of());
+        assertSearch(press(search, 'H').orElseThrow(), query, 0, Search.SEARCH_PAGE, List.of());
     }
 
     /** {@code S} reverses the first sort level and searches again (ADR 0120). */
@@ -1550,11 +1572,11 @@ class SearchTest {
         Search search = searched(2, 2);
 
         // Without a sort, the score with the worst hits first.
-        Request.Start worst = started(press(search, 'S'));
+        Request.Start worst = started(press(search, 'S').orElseThrow());
         assertThat(worst.params().sort())
                 .containsExactly(new SortKey(Optional.empty(), Optional.of(new ScoreSort(true)), Optional.empty()));
         // Again: the best first.
-        Request.Start best = started(press(search, 'S'));
+        Request.Start best = started(press(search, 'S').orElseThrow());
         assertThat(best.params().sort())
                 .containsExactly(new SortKey(Optional.empty(), Optional.of(new ScoreSort(false)), Optional.empty()));
 
@@ -1563,10 +1585,10 @@ class SearchTest {
         for (KeyCode code : List.of(KeyCode.DOWN, KeyCode.DOWN, KeyCode.DOWN, KeyCode.RIGHT, KeyCode.RIGHT)) {
             press(search, code);
         }
-        Request.Start price = started(press(search, KeyCode.ENTER));
+        Request.Start price = started(press(search, KeyCode.ENTER).orElseThrow());
         assertThat(price.params().sort().getFirst().field())
                 .hasValueSatisfying(field -> assertThat(field.reverse()).isFalse());
-        Request.Start reversed = started(press(search, 'S'));
+        Request.Start reversed = started(press(search, 'S').orElseThrow());
         assertThat(reversed.params().sort().getFirst().field())
                 .hasValue(new FieldSort("price", SortType.LONG, true, SortSelector.MIN, SortMissing.DEFAULT));
     }
@@ -1583,7 +1605,7 @@ class SearchTest {
                 List.of(KeyCode.DOWN, KeyCode.DOWN, KeyCode.DOWN, KeyCode.RIGHT, KeyCode.RIGHT, KeyCode.RIGHT)) {
             assertThat(press(search, code)).isEmpty();
         }
-        Request.Start start = started(press(search, KeyCode.ENTER));
+        Request.Start start = started(press(search, KeyCode.ENTER).orElseThrow());
         assertThat(start.params().sort())
                 .containsExactly(new SortKey(
                         Optional.of(
@@ -1626,7 +1648,7 @@ class SearchTest {
 
         press(search, 's');
         press(search, ' ');
-        Request.Start start = started(press(search, KeyCode.ENTER));
+        Request.Start start = started(press(search, KeyCode.ENTER).orElseThrow());
         Similarity classic = new Similarity(Optional.empty(), Optional.of(new ClassicSimilarity()), Optional.empty());
         assertThat(start.params().similarity()).isEqualTo(classic);
         assertThat(start.params().sort()).isEmpty();
@@ -1650,7 +1672,7 @@ class SearchTest {
         assertThat(render(search)).contains("Stored fields per hit");
         press(search, 'n');
         press(search, ' ');
-        Request.Start start = started(press(search, KeyCode.ENTER));
+        Request.Start start = started(press(search, KeyCode.ENTER).orElseThrow());
         assertThat(start.params().fields()).hasValue(List.of("id"));
         search.searchStarted(start.searchId(), 2);
         search.searchProgress(start.searchId(), results(0, 2, 2));
@@ -1660,9 +1682,10 @@ class SearchTest {
         search = searched(PAGE, 150);
         press(search, 'l');
         press(search, ' ');
-        long id = start(search, press(search, KeyCode.ENTER), 2);
+        long id = start(search, press(search, KeyCode.ENTER).orElseThrow(), 2);
         search.searchProgress(id, results(0, PAGE, 150));
-        StartSearchParams next = started(press(search, KeyCode.END)).params();
+        StartSearchParams next =
+                started(press(search, KeyCode.END).orElseThrow()).params();
         assertThat(next.offset()).isEqualTo(PAGE);
         assertThat(next.fields().orElseThrow()).hasSize(6);
     }
@@ -1718,7 +1741,12 @@ class SearchTest {
             assertThat(search.step(true)).hasValue(new Request.Document(docId));
         }
         // Past the last hit: the next page first, then its first hit.
-        long id = assertSearch(search.step(true), classic("red", "title", QueryOperator.OR), PAGE, PAGE, List.of())
+        long id = assertSearch(
+                        search.step(true).orElseThrow(),
+                        classic("red", "title", QueryOperator.OR),
+                        PAGE,
+                        PAGE,
+                        List.of())
                 .searchId();
         assertThat(search.step(true)).isEmpty();
         search.searchStarted(id, 2);
@@ -1732,7 +1760,7 @@ class SearchTest {
         Search search = search();
         press(search, '/');
         typed(search, "red");
-        start(search, press(search, KeyCode.ENTER), 1);
+        start(search, press(search, KeyCode.ENTER).orElseThrow(), 1);
         assertThat(search.jobs()).containsExactly(1L);
 
         assertThat(search.cancel()).containsExactly(1L);
@@ -1746,7 +1774,7 @@ class SearchTest {
         Search search = search();
         press(search, '/');
         typed(search, "red");
-        long id = started(press(search, KeyCode.ENTER)).searchId();
+        long id = started(press(search, KeyCode.ENTER).orElseThrow()).searchId();
         Hit hit = new Hit(
                 0,
                 1.5f,
@@ -1803,9 +1831,9 @@ class SearchTest {
         Search search = search();
         press(search, '/');
         typed(search, "red");
-        long first = started(press(search, KeyCode.ENTER)).searchId();
+        long first = started(press(search, KeyCode.ENTER).orElseThrow()).searchId();
         // A changed setting replaces the search before its job has started.
-        long second = started(press(search, 't')).searchId();
+        long second = started(press(search, 't').orElseThrow()).searchId();
 
         assertThat(search.searchStarted(first, 3)).hasValue(3);
         assertThat(search.searchStarted(second, 4)).isEmpty();
@@ -1822,7 +1850,7 @@ class SearchTest {
         Search search = search();
         press(search, '/');
         typed(search, "red");
-        long id = started(press(search, KeyCode.ENTER)).searchId();
+        long id = started(press(search, KeyCode.ENTER).orElseThrow()).searchId();
         assertThat(search.running()).isTrue();
 
         assertThat(search.cancel()).isEmpty();
@@ -1841,7 +1869,9 @@ class SearchTest {
         assertThat(reopened.inputText()).isEqualTo("red");
         assertThat(render(reopened)).doesNotContain("doc-0");
         reopened.handleKey(key('/'));
-        assertThat(started(reopened.handleKey(key(KeyCode.ENTER))).params().query())
+        assertThat(started(reopened.handleKey(key(KeyCode.ENTER)).orElseThrow())
+                        .params()
+                        .query())
                 .isEqualTo(classic("red", "title", QueryOperator.OR));
     }
 }

@@ -16,6 +16,7 @@ import io.github.mfuerstenau.leia.protocol.analysis.WordSet;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Search.AnalyzerSpec;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import io.github.mfuerstenau.leia.server.RpcException;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -24,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The analyzer of a request as the runtime interface has it (ADR 0045, ADR 0067), for the classic and
@@ -115,10 +117,11 @@ public final class RuntimeAnalyzers {
                                 shingles.tokenSeparator(),
                                 shingles.outputUnigrams(),
                                 shingles.outputUnigramsIfNoShingles(),
-                                shingles.fillerToken())),
+                                shingles.fillerToken()))
+                        .orElse(null),
                 analyzer.limitTokenCount()
-                        .map(limit ->
-                                new AnalyzerSpec.LimitTokenCount(limit.maxTokenCount(), limit.consumeAllTokens())));
+                        .map(limit -> new AnalyzerSpec.LimitTokenCount(limit.maxTokenCount(), limit.consumeAllTokens()))
+                        .orElse(null));
     }
 
     private static AnalyzerSpec base(Analyzer analyzer) throws RpcException {
@@ -135,14 +138,14 @@ public final class RuntimeAnalyzers {
             PresetAnalyzer preset = analyzer.preset().orElseThrow();
             return new AnalyzerSpec.Preset(
                     preset.className(),
-                    wordSet("stop words", preset.stopwords()),
-                    wordSet("stem exclusions", preset.stemExclusion()),
-                    preset.maxTokenLength(),
-                    stemDictionary(preset.stemOverride()),
-                    japanese(preset.japanese()),
-                    korean(preset.korean()),
-                    preset.collation().map(RuntimeAnalyzers::collation),
-                    japaneseCompletion(preset.japaneseCompletion()));
+                    wordSet("stop words", preset.stopwords().orElse(null)),
+                    wordSet("stem exclusions", preset.stemExclusion().orElse(null)),
+                    Optionals.orNull(preset.maxTokenLength()),
+                    stemDictionary(preset.stemOverride().orElse(null)),
+                    japanese(preset.japanese().orElse(null)),
+                    korean(preset.korean().orElse(null)),
+                    preset.collation().map(RuntimeAnalyzers::collation).orElse(null),
+                    japaneseCompletion(preset.japaneseCompletion().orElse(null)));
         }
         CustomAnalyzer custom = analyzer.custom().orElseThrow();
         return new AnalyzerSpec.Custom(
@@ -150,105 +153,111 @@ public final class RuntimeAnalyzers {
                 component(custom.tokenizer()),
                 components(custom.tokenFilters()),
                 custom.configDir().isPresent()
-                        ? Optional.of(
-                                path("config directory", custom.configDir().orElseThrow()))
-                        : Optional.empty());
+                        ? path("config directory", custom.configDir().orElseThrow())
+                        : null);
     }
 
-    private static Optional<AnalyzerSpec.WordSet> wordSet(String what, Optional<WordSet> wordSet) throws RpcException {
-        if (wordSet.isEmpty()) {
-            return Optional.empty();
+    private static AnalyzerSpec.@Nullable WordSet wordSet(String what, @Nullable WordSet set) throws RpcException {
+        if (set == null) {
+            return null;
         }
-        WordSet set = wordSet.orElseThrow();
         if (set.words().isPresent() == set.file().isPresent()) {
             throw invalid("the " + what + " need exactly one of words and file");
         }
         if (set.words().isPresent()) {
-            return Optional.of(new AnalyzerSpec.WordSet.Words(set.words().orElseThrow()));
+            return new AnalyzerSpec.WordSet.Words(set.words().orElseThrow());
         }
-        return Optional.of(new AnalyzerSpec.WordSet.File(path(what, set.file().orElseThrow())));
+        return new AnalyzerSpec.WordSet.File(path(what, set.file().orElseThrow()));
     }
 
-    private static Optional<AnalyzerSpec.StemDictionary> stemDictionary(Optional<StemDictionary> dictionary)
+    private static AnalyzerSpec.@Nullable StemDictionary stemDictionary(@Nullable StemDictionary given)
             throws RpcException {
-        if (dictionary.isEmpty()) {
-            return Optional.empty();
+        if (given == null) {
+            return null;
         }
-        StemDictionary given = dictionary.orElseThrow();
         if (given.entries().isPresent() == given.file().isPresent()) {
             throw invalid("the stem overrides need exactly one of entries and file");
         }
         if (given.entries().isPresent()) {
-            return Optional.of(
-                    new AnalyzerSpec.StemDictionary.Entries(given.entries().orElseThrow()));
+            return new AnalyzerSpec.StemDictionary.Entries(given.entries().orElseThrow());
         }
-        return Optional.of(new AnalyzerSpec.StemDictionary.File(
-                path("stem overrides", given.file().orElseThrow())));
+        return new AnalyzerSpec.StemDictionary.File(
+                path("stem overrides", given.file().orElseThrow()));
     }
 
-    private static Optional<AnalyzerSpec.Japanese> japanese(Optional<JapaneseOptions> options) throws RpcException {
-        if (options.isEmpty()) {
-            return Optional.empty();
+    private static AnalyzerSpec.@Nullable Japanese japanese(@Nullable JapaneseOptions given) throws RpcException {
+        if (given == null) {
+            return null;
         }
-        JapaneseOptions given = options.orElseThrow();
-        return Optional.of(new AnalyzerSpec.Japanese(
-                userDictionary(given.userDictionary()),
-                given.mode().map(mode -> switch (mode) {
-                    case NORMAL -> AnalyzerSpec.JapaneseMode.NORMAL;
-                    case SEARCH -> AnalyzerSpec.JapaneseMode.SEARCH;
-                    case EXTENDED -> AnalyzerSpec.JapaneseMode.EXTENDED;
-                }),
-                wordSet("stop tags", given.stopTags())));
+        return new AnalyzerSpec.Japanese(
+                userDictionary(given.userDictionary().orElse(null)),
+                given.mode()
+                        .map(mode -> switch (mode) {
+                            case NORMAL -> AnalyzerSpec.JapaneseMode.NORMAL;
+                            case SEARCH -> AnalyzerSpec.JapaneseMode.SEARCH;
+                            case EXTENDED -> AnalyzerSpec.JapaneseMode.EXTENDED;
+                        })
+                        .orElse(null),
+                wordSet("stop tags", given.stopTags().orElse(null)));
     }
 
-    private static Optional<AnalyzerSpec.Korean> korean(Optional<KoreanOptions> options) throws RpcException {
-        if (options.isEmpty()) {
-            return Optional.empty();
+    private static AnalyzerSpec.@Nullable Korean korean(@Nullable KoreanOptions given) throws RpcException {
+        if (given == null) {
+            return null;
         }
-        KoreanOptions given = options.orElseThrow();
-        return Optional.of(new AnalyzerSpec.Korean(
-                userDictionary(given.userDictionary()),
-                given.decompoundMode().map(mode -> switch (mode) {
-                    case NONE -> AnalyzerSpec.KoreanDecompoundMode.NONE;
-                    case DISCARD -> AnalyzerSpec.KoreanDecompoundMode.DISCARD;
-                    case MIXED -> AnalyzerSpec.KoreanDecompoundMode.MIXED;
-                }),
-                wordSet("stop tags", given.stopTags()),
-                given.outputUnknownUnigrams()));
+        return new AnalyzerSpec.Korean(
+                userDictionary(given.userDictionary().orElse(null)),
+                given.decompoundMode()
+                        .map(mode -> switch (mode) {
+                            case NONE -> AnalyzerSpec.KoreanDecompoundMode.NONE;
+                            case DISCARD -> AnalyzerSpec.KoreanDecompoundMode.DISCARD;
+                            case MIXED -> AnalyzerSpec.KoreanDecompoundMode.MIXED;
+                        })
+                        .orElse(null),
+                wordSet("stop tags", given.stopTags().orElse(null)),
+                given.outputUnknownUnigrams().orElse(null));
     }
 
     private static AnalyzerSpec.Collation collation(Collation collation) {
         return new AnalyzerSpec.Collation(
                 collation.locale(),
-                collation.strength().map(strength -> switch (strength) {
-                    case PRIMARY -> AnalyzerSpec.CollationStrength.PRIMARY;
-                    case SECONDARY -> AnalyzerSpec.CollationStrength.SECONDARY;
-                    case TERTIARY -> AnalyzerSpec.CollationStrength.TERTIARY;
-                    case QUATERNARY -> AnalyzerSpec.CollationStrength.QUATERNARY;
-                    case IDENTICAL -> AnalyzerSpec.CollationStrength.IDENTICAL;
-                }),
-                collation.decomposition().map(decomposition -> switch (decomposition) {
-                    case NO -> AnalyzerSpec.CollationDecomposition.NO;
-                    case CANONICAL -> AnalyzerSpec.CollationDecomposition.CANONICAL;
-                    case FULL -> AnalyzerSpec.CollationDecomposition.FULL;
-                }));
+                collation
+                        .strength()
+                        .map(strength -> switch (strength) {
+                            case PRIMARY -> AnalyzerSpec.CollationStrength.PRIMARY;
+                            case SECONDARY -> AnalyzerSpec.CollationStrength.SECONDARY;
+                            case TERTIARY -> AnalyzerSpec.CollationStrength.TERTIARY;
+                            case QUATERNARY -> AnalyzerSpec.CollationStrength.QUATERNARY;
+                            case IDENTICAL -> AnalyzerSpec.CollationStrength.IDENTICAL;
+                        })
+                        .orElse(null),
+                collation
+                        .decomposition()
+                        .map(decomposition -> switch (decomposition) {
+                            case NO -> AnalyzerSpec.CollationDecomposition.NO;
+                            case CANONICAL -> AnalyzerSpec.CollationDecomposition.CANONICAL;
+                            case FULL -> AnalyzerSpec.CollationDecomposition.FULL;
+                        })
+                        .orElse(null));
     }
 
-    private static Optional<AnalyzerSpec.JapaneseCompletion> japaneseCompletion(
-            Optional<JapaneseCompletionOptions> options) throws RpcException {
-        if (options.isEmpty()) {
-            return Optional.empty();
+    private static AnalyzerSpec.@Nullable JapaneseCompletion japaneseCompletion(
+            @Nullable JapaneseCompletionOptions given) throws RpcException {
+        if (given == null) {
+            return null;
         }
-        JapaneseCompletionOptions given = options.orElseThrow();
-        return Optional.of(new AnalyzerSpec.JapaneseCompletion(
-                userDictionary(given.userDictionary()), given.mode().map(mode -> switch (mode) {
-                    case INDEX -> AnalyzerSpec.JapaneseCompletionMode.INDEX;
-                    case QUERY -> AnalyzerSpec.JapaneseCompletionMode.QUERY;
-                })));
+        return new AnalyzerSpec.JapaneseCompletion(
+                userDictionary(given.userDictionary().orElse(null)),
+                given.mode()
+                        .map(mode -> switch (mode) {
+                            case INDEX -> AnalyzerSpec.JapaneseCompletionMode.INDEX;
+                            case QUERY -> AnalyzerSpec.JapaneseCompletionMode.QUERY;
+                        })
+                        .orElse(null));
     }
 
-    private static Optional<Path> userDictionary(Optional<String> file) throws RpcException {
-        return file.isPresent() ? Optional.of(path("user dictionary", file.orElseThrow())) : Optional.empty();
+    private static @Nullable Path userDictionary(@Nullable String file) throws RpcException {
+        return file == null ? null : path("user dictionary", file);
     }
 
     /** {@code path} as a path; {@code what} names it in leia-core's message if it isn't one. */

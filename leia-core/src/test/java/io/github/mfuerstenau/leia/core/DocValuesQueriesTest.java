@@ -7,7 +7,6 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.lucene.document.BinaryDocValuesField;
@@ -215,8 +214,7 @@ class DocValuesQueriesTest {
     void searchesAndExplainsADocValuesQuery() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             Query query = DocValuesQueries.bytes(field(index, "bin"), range(bytes(0x80), null, true, true));
-            SearchResults results =
-                    index.search(query, BM25, Optional.empty(), 0, 10, true, Optional.empty(), ScanProgress.NONE);
+            SearchResults results = index.search(query, BM25, null, 0, 10, true, null, ScanProgress.NONE);
 
             assertThat(results.hits()).extracting(SearchResults.Hit::docId).containsExactly(1, 2);
             assertThat(index.explain(query, BM25, 2, ScanProgress.NONE).isMatch())
@@ -298,8 +296,7 @@ class DocValuesQueriesTest {
     }
 
     private static <T> DocValuesMatch<T> range(T lower, T upper, boolean includeLower, boolean includeUpper) {
-        return new DocValuesMatch.Range<>(
-                Optional.ofNullable(lower), Optional.ofNullable(upper), includeLower, includeUpper);
+        return new DocValuesMatch.Range<>(lower, upper, includeLower, includeUpper);
     }
 
     private static BytesRef text(String text) {

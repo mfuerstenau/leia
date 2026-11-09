@@ -18,6 +18,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CancellationException;
 
 /**
@@ -95,6 +96,12 @@ public final class TermExport {
 
         OutputException(String message) {
             super(message);
+        }
+
+        /** The message, which every constructor takes. */
+        @Override
+        public String getMessage() {
+            return Objects.requireNonNullElse(super.getMessage(), getClass().getSimpleName());
         }
 
         OutputException(String message, Throwable cause) {

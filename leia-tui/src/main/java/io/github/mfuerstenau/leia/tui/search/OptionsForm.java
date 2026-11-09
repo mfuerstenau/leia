@@ -16,7 +16,9 @@ import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /** The parser options popup: a draft of the {@link ParserSettings}, applied with Enter. */
 public final class OptionsForm {
@@ -75,9 +77,9 @@ public final class OptionsForm {
     private int selected;
 
     /** The row whose text is typed, or null. */
-    private Row editingRow;
+    private @Nullable Row editingRow;
 
-    private LineInput input;
+    private @Nullable LineInput input;
 
     public OptionsForm(ParserSettings settings, boolean classic) {
         this.draft = settings.copy();
@@ -91,7 +93,9 @@ public final class OptionsForm {
 
     /** The text that is typed, for the tests. */
     Optional<String> editedText() {
-        return editingRow == null ? Optional.empty() : Optional.of(input.text());
+        return editingRow == null
+                ? Optional.empty()
+                : Optional.of(Objects.requireNonNull(input).text());
     }
 
     /** The rows before the field rows. */
@@ -182,11 +186,11 @@ public final class OptionsForm {
         switch (key.code()) {
             case ESCAPE -> editingRow = null;
             case ENTER -> {
-                String typed = input.text().strip();
-                setText(editingRow, typed.isEmpty() ? Optional.empty() : Optional.of(typed));
+                String typed = Objects.requireNonNull(input).text().strip();
+                setText(Objects.requireNonNull(editingRow), typed.isEmpty() ? null : typed);
                 editingRow = null;
             }
-            default -> input.handleKey(key, LineInput::wordStart);
+            default -> Objects.requireNonNull(input).handleKey(key, LineInput::wordStart);
         }
     }
 
@@ -194,11 +198,11 @@ public final class OptionsForm {
         return row == Row.LOCALE || row == Row.TIME_ZONE;
     }
 
-    private Optional<String> text(Row row) {
+    private @Nullable String text(Row row) {
         return row == Row.LOCALE ? draft.locale : draft.timeZone;
     }
 
-    private void setText(Row row, Optional<String> text) {
+    private void setText(Row row, @Nullable String text) {
         if (row == Row.LOCALE) {
             draft.locale = text;
         } else {
@@ -209,7 +213,7 @@ public final class OptionsForm {
     /** Clears a locale or time zone back to the backend's default, or a field's date resolution back to the one for every field. */
     private void clear(Row row, int index) {
         if (isText(row)) {
-            setText(row, Optional.empty());
+            setText(row, null);
         } else if (row == Row.FIELD_DATE) {
             draft.fieldDateResolutions.remove(dateField(index));
         }
@@ -248,7 +252,7 @@ public final class OptionsForm {
         if (isText(row)) {
             if (step > 0) {
                 editingRow = row;
-                input = new LineInput(text(row).orElse(""));
+                input = new LineInput(Objects.requireNonNullElse(text(row), ""));
             }
             return;
         }
@@ -264,11 +268,10 @@ public final class OptionsForm {
                 draft.autoGeneratePhraseQueries = !draft.autoGeneratePhraseQueries;
                 draft.splitOnWhitespace |= draft.autoGeneratePhraseQueries;
             }
-            case DATE_RESOLUTION ->
-                draft.dateResolution =
-                        Optional.ofNullable(cycled(resolutions(), draft.dateResolution.orElse(null), step));
+            case DATE_RESOLUTION -> draft.dateResolution = cycled(resolutions(), draft.dateResolution, step);
             case FIELD_DATE -> {
                 String field = dateField(index);
+                @Nullable
                 DateResolution resolution = cycled(resolutions(), draft.fieldDateResolutions.get(field), step);
                 if (resolution == null) {
                     draft.fieldDateResolutions.remove(field);
@@ -279,26 +282,26 @@ public final class OptionsForm {
             case POINT -> {
                 int point = index - firstPoint();
                 PointSetting setting = draft.points.get(point);
-                List<PointType> cycle = setting.bytes() == 4
+                List<@Nullable PointType> cycle = setting.bytes() == 4
                         ? Arrays.asList(PointType.INT, PointType.FLOAT, null)
                         : Arrays.asList(PointType.LONG, PointType.DOUBLE, null);
-                PointType type = cycled(cycle, setting.pointType().orElse(null), step);
-                draft.points.set(point, new PointSetting(setting.field(), setting.bytes(), Optional.ofNullable(type)));
+                @Nullable PointType type = cycled(cycle, setting.pointType(), step);
+                draft.points.set(point, new PointSetting(setting.field(), setting.bytes(), type));
             }
             default -> {}
         }
     }
 
     /** No resolution, then each from the coarsest. */
-    private static List<DateResolution> resolutions() {
-        List<DateResolution> cycle = new ArrayList<>();
+    private static List<@Nullable DateResolution> resolutions() {
+        List<@Nullable DateResolution> cycle = new ArrayList<>();
         cycle.add(null);
         cycle.addAll(List.of(DateResolution.values()));
         return cycle;
     }
 
     /** The entry after (or before) {@code current} in {@code cycle}, wrapping around. */
-    private static <T> T cycled(List<T> cycle, T current, int step) {
+    private static <T extends @Nullable Object> T cycled(List<T> cycle, T current, int step) {
         int at = Math.max(cycle.indexOf(current), 0);
         return cycle.get(Math.floorMod(at + step, cycle.size()));
     }
@@ -351,7 +354,7 @@ public final class OptionsForm {
                 }
                 case DATE_RESOLUTION -> {
                     label = "Resolution";
-                    value = draft.dateResolution.map(Enum::name).orElse("none: text");
+                    value = draft.dateResolution == null ? "none: text" : draft.dateResolution.name();
                 }
                 case LOCALE -> {
                     label = "Locale";
@@ -410,8 +413,8 @@ public final class OptionsForm {
         return on ? "on" : "off";
     }
 
-    private static String textValue(Optional<String> text) {
-        return text.map(TextFormat::escapeControl).orElse("server default");
+    private static String textValue(@Nullable String text) {
+        return text == null ? "server default" : TextFormat.escapeControl(text);
     }
 
     /** The line that the locale or the time zone is typed in, over the popup. */
@@ -427,7 +430,7 @@ public final class OptionsForm {
         Rect inner = block.inner(popup);
         Panels.clear(frame, popup);
         frame.renderWidget(block, popup);
-        LineInput.Visible visible = input.visible(inner.width());
+        LineInput.Visible visible = Objects.requireNonNull(input).visible(inner.width());
         frame.renderWidget(Paragraph.from(Line.from(visible.text())), inner);
         frame.setCursorPosition(inner.x() + visible.cursorColumn(), inner.y());
     }

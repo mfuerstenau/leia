@@ -18,6 +18,7 @@ import io.github.mfuerstenau.leia.protocol.knn.KnnRecallMiss;
 import io.github.mfuerstenau.leia.protocol.knn.KnnRecallResult;
 import io.github.mfuerstenau.leia.protocol.knn.KnnRecallTarget;
 import io.github.mfuerstenau.leia.protocol.knn.StartKnnRecallParams;
+import io.github.mfuerstenau.leia.tui.Optionals;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.Form;
@@ -26,9 +27,11 @@ import io.github.mfuerstenau.leia.tui.widgets.Selection;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The recall check of the search screen's KNN mode (ADR 0086), run as a backend job: for the line's
@@ -41,16 +44,16 @@ public final class KnnRecall {
     private final StartKnnRecallParams params;
 
     /** Empty until the backend has started the job. */
-    private OptionalLong jobId = OptionalLong.empty();
+    private @Nullable Long jobId;
 
     /** Whether the job runs: until its outcome, a failure or a cancel. */
     private boolean running = true;
 
     private long checked;
-    private KnnRecallResult result;
+    private @Nullable KnnRecallResult result;
 
     /** Why the check could not start, failed, or was stopped; or null. */
-    private String error;
+    private @Nullable String error;
 
     private int selected;
     private final TableState table = new TableState();
@@ -70,12 +73,12 @@ public final class KnnRecall {
     }
 
     public void started(long jobId) {
-        this.jobId = OptionalLong.of(jobId);
+        this.jobId = jobId;
     }
 
     /** The job to poll, while it runs. */
     public OptionalLong job() {
-        return running ? jobId : OptionalLong.empty();
+        return running ? Optionals.optionalLong(jobId) : OptionalLong.empty();
     }
 
     /** The job, started or not, while it runs: to cancel. */
@@ -124,7 +127,10 @@ public final class KnnRecall {
 
     /** The selected worst target of a sample. */
     Optional<KnnRecallTarget> selectedTarget() {
-        return sampled() && selected < rowCount() ? Optional.of(result.worst().get(selected)) : Optional.empty();
+        KnnRecallResult found = result;
+        return found != null && sampled() && selected < rowCount()
+                ? Optional.of(found.worst().get(selected))
+                : Optional.empty();
     }
 
     /** The selected missed document of a single target. */
@@ -162,8 +168,8 @@ public final class KnnRecall {
         if (sampled()) {
             int docWidth = Math.max(
                     3,
-                    Selection.numberWidth(
-                            result.worst().stream().mapToLong(t -> t.docId().orElse(0))));
+                    Selection.numberWidth(Objects.requireNonNull(result).worst().stream()
+                            .mapToLong(t -> t.docId().orElse(0))));
             header = Row.from(right("Doc", docWidth), right("Recall", 6), Cell.from("Missed"));
             for (KnnRecallTarget target : result.worst()) {
                 rows.add(Row.from(
