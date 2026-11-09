@@ -10,7 +10,7 @@ The lane is done: on new code the gate passes, and the accepted rules are whitel
 
 ## Optional only as a return type
 
-Goal: every module follows the rule in `AGENTS.md`, "Code conventions". `Optional*` is not used as a method parameter or field type, record components included. Optional inputs are overloads or JSpecify's `@Nullable`, with the exception of `leia-protocol`'s records (hard rule 3). `leia-client` is done. It sets the pattern:
+Goal: every module follows the rule in `AGENTS.md`, "Code conventions". `Optional*` is not used as a method parameter or field type, record components included. Optional inputs are overloads or JSpecify's `@Nullable`, with the exception of `leia-protocol`'s records (hard rule 3). `leia-client`, `leia-app` and `leia-tui` are done. `leia-client` set the pattern:
 - records keep their components, now `@Nullable`, and their accessors become nullable;
 - `OptionalInt` and `OptionalLong` become `Integer` and `Long`;
 - `Optional` stays as a return type and for locals;
@@ -18,8 +18,7 @@ Goal: every module follows the rule in `AGENTS.md`, "Code conventions". `Optiona
 
 Each module is one task, its callers included. The counts are from a regex scan of 2026-11-09 (parameters, fields and components, main + tests) and are approximate. Watch the AssertJ pitfalls: `isEmpty()` and `contains(x)` still compile on a `String` or `List` but mean something else; use `isNull()` and `isEqualTo(x)`.
 
-- [ ] **leia-tui** (~150 in 38 files). Screen state and the `App`/`Session` API, such as `App(…, Optional<Path> home, …)`, and `Tui.Start`. It takes the `Optional.ofNullable(…)` adapters that the `leia-client` and `leia-app` changes left at its call sites.
-- [ ] **leia-server** (~100 in 33 files, half of them in tests). Handlers, `CurrentIndex`, `ServerRuntimes`, `JarChain`, `LeiaBackend.start(Optional<…>, …)`. `RuntimeResults` maps from the runtime records and to the protocol records, which keep their `Optional`s.
+- [ ] **leia-server** (~100 in 33 files, half of them in tests). Handlers, `CurrentIndex`, `ServerRuntimes`, `JarChain`, `LeiaBackend.start(Optional<…>, …)`. `RuntimeResults` maps from the runtime records and to the protocol records, which keep their `Optional`s. leia-tui's `Optionals` (`optionalInt`, `optionalLong`, `orNull`) is a candidate to share, though leia-server can't see leia-tui.
 - [ ] **leia-mcp** (~180 in 27 files). Decide first: the tool records are wire records, and `Schemas` derives *required* from `Optional*` (as hard rule 3 does for the protocol). Either exempt them in `AGENTS.md` as the protocol is, or teach `Schemas` and Jackson to read `@Nullable`. The latter needs JSpecify at runtime, since a compile-only annotation is invisible to reflection, and so a NOTICE line and a `tools.json` review. The rest of `McpServer`, `Jobs` and the tools follows the rule either way.
 - [ ] **leia-runtime** (~95 in 15 files). Decide first: its records cross the runtimes' class loaders as the protocol records cross the API. Either exempt them in `AGENTS.md`, or change them and every runtime that builds them (`leia-lucene3/5/7/9/10`, `RuntimeResults`), and bump `LuceneRuntime.API_VERSION`. JSpecify would be `compileOnlyApi` there, and `compileOnly` in the runtime modules, so that `adapterJarCheck` stays clean.
 - [ ] **leia-core** (~130 in 42 files). The Lucene 10 library's own records and methods; `leia-lucene10` maps them.

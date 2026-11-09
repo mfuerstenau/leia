@@ -23,6 +23,7 @@ import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
 import io.github.mfuerstenau.leia.protocol.search.ValueHighlight;
+import io.github.mfuerstenau.leia.tui.Optionals;
 import io.github.mfuerstenau.leia.tui.Osc52;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
@@ -39,7 +40,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
-import java.util.OptionalLong;
+import org.jspecify.annotations.Nullable;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.TokenStreamLocation;
 import tools.jackson.databind.DeserializationFeature;
@@ -144,12 +145,12 @@ public final class Viewer {
             } catch (IllegalArgumentException e) {
                 throw new IllegalArgumentException("Key/value: " + e.getMessage());
             }
-            return new Split(items, keyValue.isEmpty() ? Optional.empty() : Optional.of(keyValue));
+            return new Split(items, keyValue.isEmpty() ? null : keyValue);
         }
     }
 
     /** {@link Delimiters} with their escapes resolved. */
-    record Split(String items, Optional<String> keyValue) {}
+    record Split(String items, @Nullable String keyValue) {}
 
     /** {@code typed} with its escapes resolved; throws with what is wrong otherwise. */
     static String unescape(String typed) {
@@ -299,7 +300,7 @@ public final class Viewer {
         private Content content;
 
         /** The whole value's length in bytes, while only the cut value is in. */
-        private OptionalLong fullLength;
+        private @Nullable Long fullLength;
 
         private boolean fetching;
 
@@ -312,7 +313,7 @@ public final class Viewer {
         /** How many matches the value has; more than {@code matches} if not all are known. */
         private int matchCount;
 
-        private Value(int stored, String kind, Content content, OptionalLong fullLength) {
+        private Value(int stored, String kind, Content content, @Nullable Long fullLength) {
             this.stored = stored;
             this.kind = kind;
             this.content = content;
@@ -348,20 +349,18 @@ public final class Viewer {
                                     .putDouble(Double.parseDouble(text))
                                     .array());
             };
-            return new Value(index, storedType(value.type()), content, value.fullLength());
+            return new Value(index, storedType(value.type()), content, Optionals.orNull(value.fullLength()));
         }
 
         /** A byte string from doc values of type {@code kind}. */
         public static Value docValue(String kind, BytesValue value) {
-            return new Value(
-                    -1, kind + " doc value", Content.fromWire(value.value(), value.binary()), OptionalLong.empty());
+            return new Value(-1, kind + " doc value", Content.fromWire(value.value(), value.binary()), null);
         }
 
         /** A number from doc values of type {@code kind}, shown as {@code text}. */
         public static Value docValueNumber(String kind, long number, String text) {
             byte[] bytes = ByteBuffer.allocate(8).putLong(number).array();
-            return new Value(
-                    -1, kind + " doc value", new Content(Content.Kind.NUMBER, text, bytes), OptionalLong.empty());
+            return new Value(-1, kind + " doc value", new Content(Content.Kind.NUMBER, text, bytes), null);
         }
 
         /** A KNN vector: a component to a line, and the bytes of each component, big-endian. */
@@ -375,7 +374,7 @@ public final class Viewer {
                     -1,
                     Overview.vectorEncoding(vector.encoding()) + " vector",
                     new Content(Content.Kind.NUMBER, text, bytes.array()),
-                    OptionalLong.empty());
+                    null);
         }
 
         String kind() {
@@ -388,7 +387,7 @@ public final class Viewer {
 
         /** The size of the whole value in bytes. */
         private long size() {
-            return fullLength.orElse(content.bytes().length);
+            return fullLength != null ? fullLength : content.bytes().length;
         }
 
         /** Whether the value is a JSON object or array, or the beginning of one if it is cut. */
@@ -398,7 +397,7 @@ public final class Viewer {
             }
             String start = content.text().stripLeading();
             return (start.startsWith("{") || start.startsWith("["))
-                    && (fullLength.isPresent() || jsonError(content.text()).isEmpty());
+                    && (fullLength != null || jsonError(content.text()).isEmpty());
         }
     }
 
@@ -671,7 +670,7 @@ public final class Viewer {
     /** Fetches the shown value whole, if it is cut and not fetched yet. */
     public Optional<Event> fetch() {
         Value value = values.get(current);
-        if (value.stored < 0 || value.fullLength.isEmpty() || value.fetching || value.error != null) {
+        if (value.stored < 0 || value.fullLength == null || value.fetching || value.error != null) {
             return Optional.empty();
         }
         value.fetching = true;
@@ -893,7 +892,7 @@ public final class Viewer {
      */
     private Optional<Event> copy() {
         Value value = values.get(current);
-        if (value.fullLength.isPresent()) {
+        if (value.fullLength != null) {
             message = "Not copied: the whole value is not in.";
             return Optional.empty();
         }
@@ -969,7 +968,7 @@ public final class Viewer {
             // Two rows of context above the match.
             scroll = Math.max(matchRows.get(matchIndex) - 2, 0);
             toMatch = false;
-        } else if (value.fullLength.isEmpty() || value.error != null) {
+        } else if (value.fullLength == null || value.error != null) {
             // Otherwise the match is past the cut: once the whole value is in.
             toMatch = false;
         }
@@ -983,9 +982,9 @@ public final class Viewer {
         if (value.error != null) {
             return "Cut; cannot fetch it whole: " + value.error;
         }
-        if (value.fullLength.isPresent()) {
+        if (value.fullLength != null) {
             return "Cut at " + TextFormat.size(value.content.bytes().length) + " of "
-                    + TextFormat.size(value.fullLength.getAsLong()) + "; fetching it whole…";
+                    + TextFormat.size(value.fullLength) + "; fetching it whole…";
         }
         if (shown != null && shown.notice() != null) {
             return shown.notice();
@@ -1208,8 +1207,8 @@ public final class Viewer {
         List<String> items = splitAll(text, split.items());
         String detail = items.size() == 1 ? "1 item" : items.size() + " items";
         List<List<Segment>> lines = new ArrayList<>();
-        Optional<String> keyValues = split.keyValue();
-        if (keyValues.isEmpty()) {
+        String keyValue = split.keyValue();
+        if (keyValue == null) {
             String number = "%" + Integer.toString(items.size()).length() + "d  ";
             for (int i = 0; i < items.size(); i++) {
                 lines.add(List.of(
@@ -1218,7 +1217,6 @@ public final class Viewer {
             }
             return new Formatted(lines, detail, null);
         }
-        String keyValue = keyValues.get();
         // Each item's key, and its value; null for an item without one.
         List<String[]> pairs = new ArrayList<>();
         for (String item : items) {

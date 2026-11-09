@@ -9,7 +9,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -22,14 +21,14 @@ class PathCompletionTest {
 
     @Test
     void expandsTheHomeDirectory() {
-        Optional<Path> home = Optional.of(Path.of("/home/me"));
+        Path home = Path.of("/home/me");
 
         assertThat(PathCompletion.expandHome("~", home))
                 .isEqualTo(Path.of("/home/me").toString());
         assertThat(PathCompletion.expandHome("~/idx", home)).isEqualTo(Path.of("/home/me") + "/idx");
         assertThat(PathCompletion.expandHome("~other/idx", home)).isEqualTo("~other/idx");
         assertThat(PathCompletion.expandHome("/data/~", home)).isEqualTo("/data/~");
-        assertThat(PathCompletion.expandHome("~/idx", Optional.empty())).isEqualTo("~/idx");
+        assertThat(PathCompletion.expandHome("~/idx", null)).isEqualTo("~/idx");
     }
 
     @Test
@@ -40,18 +39,17 @@ class PathCompletionTest {
         Files.writeString(tmp.resolve("prod.txt"), "");
         String base = tmp + SEPARATOR;
 
-        assertThat(PathCompletion.complete(base + "o", Optional.empty()))
+        assertThat(PathCompletion.complete(base + "o", null))
                 .isEqualTo(new Completion(base + "orders" + SEPARATOR, base, List.of()));
-        assertThat(PathCompletion.complete(base + "pr", Optional.empty()))
+        assertThat(PathCompletion.complete(base + "pr", null))
                 .isEqualTo(new Completion(
                         base + "product",
                         base,
                         List.of(new Candidate("production", true), new Candidate("products", true))));
-        assertThat(PathCompletion.complete(base + "x", Optional.empty()))
-                .isEqualTo(new Completion(base + "x", base, List.of()));
-        assertThat(PathCompletion.complete(base + ".", Optional.empty()))
+        assertThat(PathCompletion.complete(base + "x", null)).isEqualTo(new Completion(base + "x", base, List.of()));
+        assertThat(PathCompletion.complete(base + ".", null))
                 .isEqualTo(new Completion(base + ".hidden" + SEPARATOR, base, List.of()));
-        assertThat(PathCompletion.complete(base, Optional.empty()).candidates())
+        assertThat(PathCompletion.complete(base, null).candidates())
                 .extracting(Candidate::name)
                 .containsExactly("orders", "production", "products");
     }
@@ -63,7 +61,7 @@ class PathCompletionTest {
         Files.writeString(tmp.resolve("lucene.txt"), "");
         String base = tmp + SEPARATOR;
 
-        assertThat(PathCompletion.completeWithFiles(base + "lu", Optional.empty(), name -> name.endsWith(".jar")))
+        assertThat(PathCompletion.completeWithFiles(base + "lu", null, name -> name.endsWith(".jar")))
                 .isEqualTo(new Completion(base + "lucene.jar", base, List.of()));
     }
 
@@ -76,16 +74,16 @@ class PathCompletionTest {
         Files.writeString(tmp.resolve("alpine.txt"), "");
         String base = tmp + SEPARATOR;
 
-        assertThat(PathCompletion.matches(base + "al", Optional.empty(), name -> name.endsWith(".jar")))
+        assertThat(PathCompletion.matches(base + "al", null, name -> name.endsWith(".jar")))
                 .containsExactly(
                         new Candidate("alpha", true), new Candidate("alpine.jar", false), new Candidate("alps", true));
-        assertThat(PathCompletion.matches(base, Optional.empty(), name -> false))
+        assertThat(PathCompletion.matches(base, null, name -> false))
                 .extracting(Candidate::name)
                 .containsExactly("alpha", "alps", "beta");
-        assertThat(PathCompletion.matches(base + ".h", Optional.empty(), name -> false))
+        assertThat(PathCompletion.matches(base + ".h", null, name -> false))
                 .extracting(Candidate::name)
                 .containsExactly(".hat", ".hidden");
-        assertThat(PathCompletion.matches(base + "nope" + SEPARATOR + "x", Optional.empty(), name -> false))
+        assertThat(PathCompletion.matches(base + "nope" + SEPARATOR + "x", null, name -> false))
                 .isEmpty();
         assertThat(new Candidate("alpha", true).text()).isEqualTo("alpha" + SEPARATOR);
         assertThat(new Candidate("a.jar", false).text()).isEqualTo("a.jar");
@@ -97,9 +95,8 @@ class PathCompletionTest {
     void completesUnderTheHomeDirectoryButKeepsTheTilde() throws IOException {
         Files.createDirectory(tmp.resolve("indexes"));
 
-        assertThat(PathCompletion.complete("~", Optional.of(tmp)))
-                .isEqualTo(new Completion("~" + SEPARATOR, "", List.of()));
-        assertThat(PathCompletion.complete("~/ind", Optional.of(tmp)))
+        assertThat(PathCompletion.complete("~", tmp)).isEqualTo(new Completion("~" + SEPARATOR, "", List.of()));
+        assertThat(PathCompletion.complete("~/ind", tmp))
                 .isEqualTo(new Completion("~/indexes" + SEPARATOR, "~/", List.of()));
     }
 

@@ -386,20 +386,21 @@ public final class Main {
         mirrors.problems().forEach(problem -> LOG.warning(() -> "Mirror left out: " + problem));
         MirrorSettings mirrorSettings = new MirrorSettings(
                 mirrors.problems(), platform.mirrorWriteFile().orElse(null));
-        Optional<RuntimeService> runtimes = platform.runtimesInstallDir()
+        RuntimeService runtimes = platform.runtimesInstallDir()
                 .map(dir -> new RuntimeService(
                         new RuntimeInstall(dir, mirrors.mirrors(), Main.class.getClassLoader(), localCaches(platform)),
-                        mirrorSettings));
+                        mirrorSettings))
+                .orElse(null);
         return Tui.run(
                 new Tui.Start(
                         platform,
-                        Optional.ofNullable(cli.indexPath()),
+                        cli.indexPath(),
                         cli.noReader() ? OpenMode.DIRECTORY_ONLY : OpenMode.READER,
                         cli.directory(),
                         runtimeFolders,
                         defaultJars,
                         themes,
-                        Optional.ofNullable(theme),
+                        theme,
                         backend,
                         leiaLog,
                         runtimes,

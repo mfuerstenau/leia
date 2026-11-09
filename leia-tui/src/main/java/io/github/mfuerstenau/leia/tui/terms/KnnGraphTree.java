@@ -12,6 +12,7 @@ import io.github.mfuerstenau.leia.protocol.knn.KnnGraphShape;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The HNSW graphs of a KNN vector field on the terms screen (ADR 0085): a row per segment and, below
@@ -56,7 +57,9 @@ final class KnnGraphTree {
 
         boolean expanded;
         boolean loading;
-        Optional<String> error = Optional.empty();
+
+        @Nullable
+        String error;
 
         Level(int segment, int level, int total) {
             this.segment = segment;
@@ -69,12 +72,12 @@ final class KnnGraphTree {
         }
 
         boolean more() {
-            return nodes.size() < total && error.isEmpty();
+            return nodes.size() < total && error == null;
         }
 
         void loaded(GetKnnGraphNodesResult result) {
             loading = false;
-            error = Optional.empty();
+            error = null;
             nodes.addAll(result.nodes());
             expanded = true;
         }
@@ -136,7 +139,7 @@ final class KnnGraphTree {
     /** The graphs; null if they could not be fetched. */
     final GetKnnGraphResult graph;
 
-    final Optional<String> error;
+    final @Nullable String error;
 
     final List<Segment> segments;
 
@@ -149,13 +152,14 @@ final class KnnGraphTree {
     final List<Shown> path = new ArrayList<>();
 
     /** Why the last node asked for could not be fetched; cleared by the next one. */
-    Optional<String> nodeError = Optional.empty();
+    @Nullable
+    String nodeError;
 
     KnnGraphTree(long serial, String field, GetKnnGraphResult graph) {
         this.serial = serial;
         this.field = field;
         this.graph = graph;
-        this.error = Optional.empty();
+        this.error = null;
         this.segments = graph.segments().stream().map(Segment::new).toList();
     }
 
@@ -163,7 +167,7 @@ final class KnnGraphTree {
         this.serial = serial;
         this.field = field;
         this.graph = null;
-        this.error = Optional.of(error);
+        this.error = error;
         this.segments = List.of();
     }
 

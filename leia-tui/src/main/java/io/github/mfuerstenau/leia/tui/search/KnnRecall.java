@@ -18,6 +18,7 @@ import io.github.mfuerstenau.leia.protocol.knn.KnnRecallMiss;
 import io.github.mfuerstenau.leia.protocol.knn.KnnRecallResult;
 import io.github.mfuerstenau.leia.protocol.knn.KnnRecallTarget;
 import io.github.mfuerstenau.leia.protocol.knn.StartKnnRecallParams;
+import io.github.mfuerstenau.leia.tui.Optionals;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.Form;
@@ -29,6 +30,7 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The recall check of the search screen's KNN mode (ADR 0086), run as a backend job: for the line's
@@ -41,7 +43,7 @@ public final class KnnRecall {
     private final StartKnnRecallParams params;
 
     /** Empty until the backend has started the job. */
-    private OptionalLong jobId = OptionalLong.empty();
+    private @Nullable Long jobId;
 
     /** Whether the job runs: until its outcome, a failure or a cancel. */
     private boolean running = true;
@@ -70,12 +72,12 @@ public final class KnnRecall {
     }
 
     public void started(long jobId) {
-        this.jobId = OptionalLong.of(jobId);
+        this.jobId = jobId;
     }
 
     /** The job to poll, while it runs. */
     public OptionalLong job() {
-        return running ? jobId : OptionalLong.empty();
+        return running ? Optionals.optionalLong(jobId) : OptionalLong.empty();
     }
 
     /** The job, started or not, while it runs: to cancel. */

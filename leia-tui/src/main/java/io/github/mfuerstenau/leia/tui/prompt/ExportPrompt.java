@@ -28,6 +28,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The export prompts: of the terms screen (ADR 0022), for the file that the terms of a field are
@@ -104,12 +105,12 @@ public final class ExportPrompt {
     private boolean busy;
 
     /** The directory that {@code ~} stands for. */
-    private final Optional<Path> home;
+    private final @Nullable Path home;
 
     /** The directory a relative path is resolved against. */
-    private final Optional<Path> cwd;
+    private final @Nullable Path cwd;
 
-    private ExportPrompt(Kind kind, String file, Optional<Path> home, Optional<Path> cwd) {
+    private ExportPrompt(Kind kind, String file, @Nullable Path home, @Nullable Path cwd) {
         this.kind = kind;
         this.input = new LineInput(file);
         this.home = home;
@@ -117,7 +118,7 @@ public final class ExportPrompt {
     }
 
     /** The prompt for the terms of {@code field}, prefilled with {@code terms_<field>_<UTC time>.out}. */
-    public static ExportPrompt terms(String field, Optional<Path> home, Optional<Path> cwd) {
+    public static ExportPrompt terms(String field, @Nullable Path home, @Nullable Path cwd) {
         return new ExportPrompt(
                 new TermsKind(field, TermDelimiter.TAB, TermExportFormat.LUKE),
                 defaultFile(field, System.currentTimeMillis()),
@@ -131,7 +132,7 @@ public final class ExportPrompt {
      * writes into {@code indexDirs}.
      */
     public static ExportPrompt document(
-            int docId, List<String> indexDirs, boolean rebuilds, Optional<Path> home, Optional<Path> cwd) {
+            int docId, List<String> indexDirs, boolean rebuilds, @Nullable Path home, @Nullable Path cwd) {
         return new ExportPrompt(
                 new DocumentKind(docId, rebuilds, List.copyOf(indexDirs), rebuilds),
                 DocumentExport.defaultFile(docId),
@@ -269,7 +270,7 @@ public final class ExportPrompt {
     /** The typed path with {@code ~} expanded, against the working directory if it is relative. */
     private Path resolved() {
         Path typed = Path.of(PathCompletion.expandHome(input.text().strip(), home));
-        return cwd.isPresent() && !typed.isAbsolute() ? cwd.get().resolve(typed) : typed;
+        return cwd != null && !typed.isAbsolute() ? cwd.resolve(typed) : typed;
     }
 
     /** Draws the popup, centered in {@code area}. */

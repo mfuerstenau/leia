@@ -14,8 +14,8 @@ import io.github.mfuerstenau.leia.tui.widgets.Selection;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.function.Predicate;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The drop-down of the names that Tab found, under the input of a path prompt: one row for each,
@@ -26,7 +26,7 @@ public final class CompletionList {
     /** The list shows at most this many rows. */
     public static final int MAX_ROWS = 8;
 
-    private final Optional<Path> home;
+    private final @Nullable Path home;
     private final Predicate<String> file;
 
     /** The directory part of the input that the names follow. */
@@ -39,7 +39,7 @@ public final class CompletionList {
     private int top;
 
     /** {@code completion} has more than one candidate; {@code file} says which files are listed. */
-    public CompletionList(PathCompletion.Completion completion, Optional<Path> home, Predicate<String> file) {
+    public CompletionList(PathCompletion.Completion completion, @Nullable Path home, Predicate<String> file) {
         this.home = home;
         this.file = file;
         this.base = completion.base();

@@ -35,6 +35,7 @@ import org.apache.lucene.document.StringField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.store.FSDirectory;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -78,7 +79,7 @@ class TuiTest {
 
     @Test
     void exitsAfterTheFirstFrameWithTheStartupTimes() throws Exception {
-        int status = Tui.run(start(Optional.of(index().toString())), print(out), print(err), true, terminal());
+        int status = Tui.run(start(index().toString()), print(out), print(err), true, terminal());
 
         assertThat(status).isZero();
         assertThat(out.toString(StandardCharsets.UTF_8)).matches("terminal ready \\d+ ms, first frame \\d+ ms\\R");
@@ -91,7 +92,7 @@ class TuiTest {
         QuittingBackend terminal = new QuittingBackend();
 
         int status = Tui.run(
-                start(Optional.of(index().toString())),
+                start(index().toString()),
                 print(out),
                 print(err),
                 false,
@@ -109,11 +110,7 @@ class TuiTest {
         QuittingBackend terminal = new QuittingBackend();
 
         int status = Tui.run(
-                start(Optional.empty()),
-                print(out),
-                print(err),
-                false,
-                TuiConfig.builder().backend(terminal));
+                start(null), print(out), print(err), false, TuiConfig.builder().backend(terminal));
 
         assertThat(status).isZero();
         assertThat(terminal.quitTyped).isTrue();
@@ -145,7 +142,7 @@ class TuiTest {
         }
     }
 
-    private Tui.Start start(Optional<String> indexPath) {
+    private Tui.Start start(@Nullable String indexPath) {
         return new Tui.Start(
                 platform,
                 indexPath,
@@ -154,10 +151,10 @@ class TuiTest {
                 RuntimesDirs.none(),
                 DefaultJars.none(),
                 Tui.themes(platform),
-                Optional.empty(),
+                null,
                 backend,
                 new LeiaLog.Opened(print(OutputStream.nullOutputStream()), LogBuffer.detached()),
-                Optional.empty(),
+                null,
                 Instant.now());
     }
 

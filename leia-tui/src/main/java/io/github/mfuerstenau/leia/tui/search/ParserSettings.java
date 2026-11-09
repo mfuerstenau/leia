@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The query parser options of the search screen (ADR 0011, ADR 0026, ADR 0035): the options both
@@ -27,19 +28,25 @@ public final class ParserSettings {
     static final int MAX_FUZZY_EDITS = 2;
 
     /**
-     * A point field and the type its values are read as; an empty type leaves the field to text.
+     * A point field and the type its values are read as; a null type leaves the field to text.
      *
      * @param bytes 4 or 8
      */
-    record PointSetting(String field, int bytes, Optional<PointType> pointType) {}
+    record PointSetting(String field, int bytes, @Nullable PointType pointType) {}
 
     boolean allowLeadingWildcard;
     int phraseSlop;
     int fuzzyPrefixLength;
     boolean enablePositionIncrements = true;
-    Optional<DateResolution> dateResolution = Optional.empty();
-    Optional<String> locale = Optional.empty();
-    Optional<String> timeZone = Optional.empty();
+
+    @Nullable
+    DateResolution dateResolution;
+
+    @Nullable
+    String locale;
+
+    @Nullable
+    String timeZone;
 
     /** The resolutions of single fields, which win over {@link #dateResolution}. */
     final Map<String, DateResolution> fieldDateResolutions = new HashMap<>();
@@ -79,8 +86,8 @@ public final class ParserSettings {
                 continue;
             }
             switch (field.pointNumBytes()) {
-                case 4 -> points.add(new PointSetting(field.name(), 4, Optional.of(PointType.INT)));
-                case 8 -> points.add(new PointSetting(field.name(), 8, Optional.of(PointType.LONG)));
+                case 4 -> points.add(new PointSetting(field.name(), 4, PointType.INT));
+                case 8 -> points.add(new PointSetting(field.name(), 8, PointType.LONG));
                 default -> {}
             }
         }
@@ -111,13 +118,13 @@ public final class ParserSettings {
                 phraseSlop,
                 fuzzyPrefixLength,
                 enablePositionIncrements,
-                dateResolution,
+                Optional.ofNullable(dateResolution),
                 dateFields.stream()
                         .filter(fieldDateResolutions::containsKey)
                         .map(field -> new FieldDateResolution(field, fieldDateResolutions.get(field)))
                         .toList(),
-                locale,
-                timeZone);
+                Optional.ofNullable(locale),
+                Optional.ofNullable(timeZone));
     }
 
     public int fuzzyMaxEdits() {
@@ -135,8 +142,8 @@ public final class ParserSettings {
     /** The point fields with a type, as {@code startSearch} takes them. */
     public List<PointField> pointFields() {
         return points.stream()
-                .filter(point -> point.pointType().isPresent())
-                .map(point -> new PointField(point.field(), point.pointType().get()))
+                .filter(point -> point.pointType() != null)
+                .map(point -> new PointField(point.field(), point.pointType()))
                 .toList();
     }
 
@@ -164,13 +171,19 @@ public final class ParserSettings {
         if (classic && autoGeneratePhraseQueries) {
             changed.add("auto phrases");
         }
-        dateResolution.ifPresent(resolution -> changed.add("dates " + resolution.name()));
+        if (dateResolution != null) {
+            changed.add("dates " + dateResolution.name());
+        }
         options()
                 .fieldDateResolutions()
                 .forEach(field -> changed.add("dates " + TextFormat.escapeControl(field.field()) + ":"
                         + field.resolution().name()));
-        locale.ifPresent(value -> changed.add("locale " + TextFormat.escapeControl(value)));
-        timeZone.ifPresent(value -> changed.add("zone " + TextFormat.escapeControl(value)));
+        if (locale != null) {
+            changed.add("locale " + TextFormat.escapeControl(locale));
+        }
+        if (timeZone != null) {
+            changed.add("zone " + TextFormat.escapeControl(timeZone));
+        }
         return changed;
     }
 
@@ -184,8 +197,8 @@ public final class ParserSettings {
                 .collect(Collectors.joining(" · "));
     }
 
-    static String typeName(Optional<PointType> pointType) {
-        return pointType.map(Enum::name).orElse("text");
+    static String typeName(@Nullable PointType pointType) {
+        return pointType == null ? "text" : pointType.name();
     }
 
     @Override

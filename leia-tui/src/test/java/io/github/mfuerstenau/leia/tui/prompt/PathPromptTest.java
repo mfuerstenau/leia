@@ -17,7 +17,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -27,7 +26,7 @@ class PathPromptTest {
     Path tmp;
 
     private static PathPrompt prompt(String input) {
-        return new PathPrompt(input, Optional.empty());
+        return new PathPrompt(input, null);
     }
 
     private static void typed(PathPrompt prompt, String text) {

@@ -6,25 +6,26 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The theme chosen last (ADR 0095), bundled or the user's own (ADR 0096), kept as its id on one line of a file in the platform's config
  * folder, beside the default folder of jars. Read from the first config folder that has one, system-wide ones included, and
  * written to the user's own (ADR 0122).
  *
- * @param file where the theme is read from; empty reads it nowhere
- * @param writeFile where the theme is written; empty keeps it nowhere
+ * @param file where the theme is read from; null reads it nowhere
+ * @param writeFile where the theme is written; null keeps it nowhere
  */
-public record ThemeFile(Optional<Path> file, Optional<Path> writeFile) {
+public record ThemeFile(@Nullable Path file, @Nullable Path writeFile) {
 
     /** A theme file that is read and written in one place. */
-    public ThemeFile(Optional<Path> file) {
+    public ThemeFile(@Nullable Path file) {
         this(file, file);
     }
 
     /** A theme file that keeps nothing. */
     public static ThemeFile none() {
-        return new ThemeFile(Optional.empty(), Optional.empty());
+        return new ThemeFile(null, null);
     }
 
     /**
@@ -32,12 +33,11 @@ public record ThemeFile(Optional<Path> file, Optional<Path> writeFile) {
      * isn't among them, is none.
      */
     public Optional<Theme> load(Themes themes) {
-        if (file.isEmpty()) {
+        if (file == null) {
             return Optional.empty();
         }
         try {
-            return themes.find(
-                    Files.readString(file.get(), StandardCharsets.UTF_8).strip());
+            return themes.find(Files.readString(file, StandardCharsets.UTF_8).strip());
         } catch (IOException _) {
             return Optional.empty();
         }
@@ -48,10 +48,10 @@ public record ThemeFile(Optional<Path> file, Optional<Path> writeFile) {
      * theme is a convenience, and the TUI has nowhere to report it.
      */
     public void save(Theme theme) {
-        if (writeFile.isEmpty()) {
+        Path target = writeFile;
+        if (target == null) {
             return;
         }
-        Path target = writeFile.get();
         Path temporary = target.resolveSibling(
                 target.getFileName() + "." + ProcessHandle.current().pid() + ".tmp");
         try {
@@ -75,9 +75,9 @@ public record ThemeFile(Optional<Path> file, Optional<Path> writeFile) {
      * the caller checked to be among them; then {@code NO_COLOR} (no-color.org: set and not empty
      * means {@code mono}); then this file; then {@code dark}.
      */
-    public Theme resolve(Optional<Theme> option, String noColor, Themes themes) {
-        if (option.isPresent()) {
-            return option.get();
+    public Theme resolve(@Nullable Theme option, String noColor, Themes themes) {
+        if (option != null) {
+            return option;
         }
         if (noColor != null && !noColor.isEmpty()) {
             return themes.find(Themes.MONO).orElseThrow();

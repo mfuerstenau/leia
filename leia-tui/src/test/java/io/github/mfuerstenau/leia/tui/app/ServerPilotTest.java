@@ -54,7 +54,7 @@ class ServerPilotTest {
                 LeiaBackend.start(Optional.of(testFile("leia.test.runtimes")), List.of(), List.of(server))) {
             App app = new App(
                             backend.call(Methods.VERSION, new VersionParams()).get(),
-                            Optional.empty(),
+                            null,
                             History.inMemory(),
                             DirectoryImpl.FS)
                     .withCwd(tmp);

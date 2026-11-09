@@ -85,6 +85,7 @@ import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders.Known;
+import io.github.mfuerstenau.leia.tui.Optionals;
 import io.github.mfuerstenau.leia.tui.about.AboutWindow;
 import io.github.mfuerstenau.leia.tui.about.RuntimeLines;
 import io.github.mfuerstenau.leia.tui.analysis.Analysis;
@@ -124,10 +125,12 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.logging.Level;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The application state: what is on screen and what a key does. It makes no calls itself: {@link
@@ -176,7 +179,7 @@ public final class App {
     private final VersionResult version;
 
     /** The directory that {@code ~} stands for in the prompt. */
-    private final Optional<Path> home;
+    private final @Nullable Path home;
 
     /** The recently opened paths, for the prompt (ADR 0020). */
     private final History history;
@@ -271,13 +274,13 @@ public final class App {
      */
     private record Back(
             Screen screen,
-            Optional<Terms.Mark> terms,
-            Optional<Documents.Mark> documents,
-            Optional<Search.Mark> search,
-            Optional<Commits.Mark> commits) {
+            Terms.@Nullable Mark terms,
+            Documents.@Nullable Mark documents,
+            Search.@Nullable Mark search,
+            Commits.@Nullable Mark commits) {
 
         Back withoutMarks() {
-            return new Back(screen, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
+            return new Back(screen, null, null, null, null);
         }
     }
 
@@ -326,13 +329,13 @@ public final class App {
     private Level logFilter = log.logged();
 
     /** Where the log is written to, for the about screen; empty if it is dropped. */
-    private Optional<Path> logFile = Optional.empty();
+    private @Nullable Path logFile;
 
     /** Whether an open, reopen or close runs. */
     private boolean busy;
 
     /** The directory that a relative export path is resolved against. */
-    private Optional<Path> cwd = Optional.empty();
+    private @Nullable Path cwd;
 
     /** Where to export the terms of a field (ADR 0022) or a document (ADR 0030) to, while it is asked; or null. */
     private ExportPrompt exportPrompt;
@@ -365,7 +368,7 @@ public final class App {
     /** The id of the next export. */
     private long nextExportId = 1;
 
-    public App(VersionResult version, Optional<Path> home, History history, DirectoryImpl directory) {
+    public App(VersionResult version, @Nullable Path home, History history, DirectoryImpl directory) {
         this.version = version;
         this.home = home;
         this.history = history;
@@ -374,7 +377,7 @@ public final class App {
 
     /** Resolves relative export paths against {@code cwd}. */
     public App withCwd(Path cwd) {
-        this.cwd = Optional.of(cwd);
+        this.cwd = cwd;
         return this;
     }
 
@@ -408,7 +411,7 @@ public final class App {
      * The log window shows the records of {@code log}, from the level it logs at, and the about
      * screen says that {@code file} has them too.
      */
-    public App withLog(LogBuffer log, Optional<Path> file) {
+    public App withLog(LogBuffer log, @Nullable Path file) {
         this.log = log;
         this.logFilter = log.logged();
         this.logFile = file;
@@ -463,7 +466,7 @@ public final class App {
      */
     public Optional<Action> opened(
             GetIndexStatsResult stats, List<SkippedIndex> skipped, Set<Feature> features, String luceneRuntime) {
-        return opened(stats, skipped, features, luceneRuntime, Optional.empty());
+        return opened(stats, skipped, features, luceneRuntime, null);
     }
 
     /**
@@ -476,7 +479,7 @@ public final class App {
             List<SkippedIndex> skipped,
             Set<Feature> features,
             String luceneRuntime,
-            Optional<String> server) {
+            @Nullable String server) {
         history.add(stats.path());
         overview = new Overview(stats, topN).withSkipped(skipped);
         forgetScans();
@@ -487,11 +490,11 @@ public final class App {
                 stats.indexes().stream().map(IndexCommitStats::path).toList(),
                 skipped.stream().map(SkippedIndex::path).toList(),
                 features,
-                readByTheNewestLucene(luceneRuntime) && server.isEmpty()
-                        ? Optional.empty()
-                        : Optional.of("Lucene " + stats.indexes().getFirst().createdVersionMajor() + ".x, read with "
+                readByTheNewestLucene(luceneRuntime) && server == null
+                        ? null
+                        : "Lucene " + stats.indexes().getFirst().createdVersionMajor() + ".x, read with "
                                 + luceneRuntime
-                                + server.map(name -> " (" + name + ")").orElse("")));
+                                + (server == null ? "" : " (" + server + ")"));
         if (!supports(screen)) {
             screen = Screen.OVERVIEW;
         }
@@ -555,7 +558,7 @@ public final class App {
                 result.indexes().stream().map(IndexEntry::path).toList(),
                 result.skipped().stream().map(SkippedIndex::path).toList(),
                 result.features(),
-                Optional.empty());
+                null);
         commits = new Commits(indexNames(opened), false);
         check = new Check(result.path(), opened.supports(Feature.CHECK_LEVELS), opened.supports(Feature.CHECK_THREADS));
         analysis.indexChanged(List.of(), autoStopWordsReason(), false);
@@ -706,7 +709,7 @@ public final class App {
 
     /** The backend stopped the jobs of the closed index. */
     public void closed() {
-        analysis.indexChanged(List.of(), Optional.of(AutoStopWordsForm.NO_INDEX), false);
+        analysis.indexChanged(List.of(), AutoStopWordsForm.NO_INDEX, false);
         opened = null;
         overview = null;
         commits = null;
@@ -730,26 +733,26 @@ public final class App {
     /** What the shown screen has to fetch first, if anything. */
     private Optional<Action> initialRequest() {
         if (screen == Screen.COMMITS && commits != null) {
-            return commitsAction(commits.initialRequest());
+            return commits.initialRequest().flatMap(this::commitsAction);
         }
         if (screen == Screen.TERMS && terms != null) {
-            return termsAction(terms.initialRequest());
+            return terms.initialRequest().flatMap(this::termsAction);
         }
         if (screen == Screen.DOCUMENTS && documents != null) {
-            return documentsAction(documents.initialRequest());
+            return documentsAction(documents.initialRequest().orElse(null));
         }
         if (screen == Screen.ANALYSIS) {
-            return analysisAction(analysis.initialRequest());
+            return analysisAction(analysis.initialRequest().orElse(null));
         }
         if (screen == Screen.CHECK && check != null) {
-            return checkAction(check.initialRequest());
+            return check.initialRequest().flatMap(this::checkAction);
         }
         return Optional.empty();
     }
 
     /** Turns what the check screen needs into an action. */
-    private Optional<Action> checkAction(Optional<Check.Request> request) {
-        return request.flatMap(next -> switch (next) {
+    private Optional<Action> checkAction(Check.Request request) {
+        return switch (request) {
             case Check.Request.Start start ->
                 Optional.of(new Action.StartCheck(start.checkId(), start.level(), start.threads(), start.only()));
             case Check.Request.LoadTargets _ -> Optional.of(new Action.LoadCheckTargets());
@@ -758,7 +761,7 @@ public final class App {
                 notice = new Notice.NotSupported(unsupported.what(), "not for " + oldLucene());
                 yield Optional.empty();
             }
-        });
+        };
     }
 
     /**
@@ -766,20 +769,25 @@ public final class App {
      * screen's analysis, which a key may have changed, such as dropping a field's analyzer or the
      * auto stop words (ADR 0039).
      */
-    private Optional<Action> analysisAction(Optional<Analysis.Request> request) {
+    private Optional<Action> analysisAction(Analysis.@Nullable Request request) {
         syncAnalyzer();
-        return request.map(next -> switch (next) {
-            case Analysis.Request.Components _ -> {
-                analysisCalls++;
-                yield new Action.LoadAnalysisComponents();
-            }
-            case Analysis.Request.Analyze analyze -> {
-                analysisCalls++;
-                yield new Action.Analyze(analyze.params());
-            }
-            case Analysis.Request.StartAutoStopWords start -> new Action.StartAutoStopWords(start.id(), start.params());
-            case Analysis.Request.CancelAutoStopWords cancel -> new Action.CancelAutoStopWords(cancel.jobId());
-        });
+        if (request == null) {
+            return Optional.empty();
+        }
+        return Optional.of(
+                switch (request) {
+                    case Analysis.Request.Components _ -> {
+                        analysisCalls++;
+                        yield new Action.LoadAnalysisComponents();
+                    }
+                    case Analysis.Request.Analyze analyze -> {
+                        analysisCalls++;
+                        yield new Action.Analyze(analyze.params());
+                    }
+                    case Analysis.Request.StartAutoStopWords start ->
+                        new Action.StartAutoStopWords(start.id(), start.params());
+                    case Analysis.Request.CancelAutoStopWords cancel -> new Action.CancelAutoStopWords(cancel.jobId());
+                });
     }
 
     /** The search screen parses and likes with the analysis screen's analysis. */
@@ -791,7 +799,7 @@ public final class App {
 
     /** The job of the search for auto stop words {@code id} has started (ADR 0039). */
     public Optional<Action> autoStopWordsStarted(long id, long jobId) {
-        return analysisAction(analysis.autoStopWordsStarted(id, jobId));
+        return analysisAction(analysis.autoStopWordsStarted(id, jobId).orElse(null));
     }
 
     public void autoStopWordsProgress(long id, GetAutoStopWordsResult result) {
@@ -855,7 +863,7 @@ public final class App {
         if (result.jars().isEmpty() || !analysis.hasComponents()) {
             return Optional.empty();
         }
-        return analysisAction(Optional.of(new Analysis.Request.Components()));
+        return analysisAction(new Analysis.Request.Components());
     }
 
     public void addJarsFailed(String error) {
@@ -992,21 +1000,21 @@ public final class App {
     public Optional<Action> analyzed(String text, AnalyzeResult result) {
         analysisCalls--;
         analysis.analyzed(text, result);
-        return analysisAction(analysis.initialRequest());
+        return analysisAction(analysis.initialRequest().orElse(null));
     }
 
     public Optional<Action> analyzeFailed(String error) {
         analysisCalls--;
         analysis.analyzeFailed(error);
-        return analysisAction(analysis.initialRequest());
+        return analysisAction(analysis.initialRequest().orElse(null));
     }
 
     /**
      * Turns what the commits screen needs into an action; a segment's documents switch to the
      * documents screen, pinned to the segment (ADR 0051), if the open reader has it.
      */
-    private Optional<Action> commitsAction(Optional<Commits.Request> request) {
-        return request.flatMap(next -> switch (next) {
+    private Optional<Action> commitsAction(Commits.Request request) {
+        return switch (request) {
             case Commits.Request.LoadList list -> Optional.of(new Action.LoadCommits(list.index()));
             case Commits.Request.LoadCommit commit ->
                 Optional.of(new Action.LoadCommit(commit.index(), commit.generation()));
@@ -1021,14 +1029,16 @@ public final class App {
                     yield Optional.<Action>empty();
                 }
                 jump(Screen.DOCUMENTS);
-                yield documentsAction(Optional.of(documents.showSegment(segment.get())));
+                yield documentsAction(documents.showSegment(segment.get()));
             }
-        });
+        };
     }
 
     /** Shows the commits of the index directory at {@code index}. Returns the selected commit to fetch. */
     public Optional<Action> commitsLoaded(int index, GetCommitsResult result) {
-        return commits == null ? Optional.empty() : commitsAction(commits.commitsLoaded(index, result));
+        return commits == null
+                ? Optional.empty()
+                : commits.commitsLoaded(index, result).flatMap(this::commitsAction);
     }
 
     public void commitsFailed(int index, String error) {
@@ -1053,8 +1063,8 @@ public final class App {
      * Turns what the terms screen needs into an action; a document to show switches to the documents
      * screen, and an export opens its prompt.
      */
-    private Optional<Action> termsAction(Optional<Terms.Request> request) {
-        return request.flatMap(next -> switch (next) {
+    private Optional<Action> termsAction(Terms.Request request) {
+        return switch (request) {
             case Terms.Request.LoadTerms load ->
                 Optional.of(new Action.LoadTerms(load.field(), load.from(), load.more()));
             case Terms.Request.LoadPostings load ->
@@ -1099,7 +1109,7 @@ public final class App {
                     yield Optional.<Action>empty();
                 }
                 jump(Screen.SEARCH);
-                yield searchAction(search.termQuery(searched.field(), searched.term()));
+                yield search.termQuery(searched.field(), searched.term()).flatMap(this::searchAction);
             }
             case Terms.Request.Export asked -> {
                 if (export != null) {
@@ -1110,15 +1120,15 @@ public final class App {
                 yield Optional.<Action>empty();
             }
             case Terms.Request.Unsupported unsupported -> notSupported(unsupported.what());
-        });
+        };
     }
 
     /**
      * Turns what the search screen needs into an action; a document or value to show, or a filter to
      * browse, switches to the documents screen.
      */
-    private Optional<Action> searchAction(Optional<Search.Request> request) {
-        return request.flatMap(next -> switch (next) {
+    private Optional<Action> searchAction(Search.Request request) {
+        return switch (request) {
             case Search.Request.Start start ->
                 Optional.of(new Action.StartSearch(start.searchId(), start.params(), start.cancel()));
             case Search.Request.Explain explain ->
@@ -1135,7 +1145,7 @@ public final class App {
                 if (documents == null) {
                     yield Optional.<Action>empty();
                 }
-                documents.showSearchHit(document.docId(), search.matchesQuery());
+                documents.showSearchHit(document.docId(), search.matchesQuery().orElse(null));
                 jump(Screen.DOCUMENTS);
                 yield loadDocument(document.docId());
             }
@@ -1143,15 +1153,16 @@ public final class App {
                 if (documents == null) {
                     yield Optional.<Action>empty();
                 }
-                documents.showSearchHit(view.docId(), search.matchesQuery());
+                documents.showSearchHit(view.docId(), search.matchesQuery().orElse(null));
                 jump(Screen.DOCUMENTS);
-                Optional<Action> action = documentsAction(documents.viewMatches(
-                        view.docId(), view.field(), view.index(), view.spans(), view.matchCount()));
+                Optional<Action> action = documentsAction(documents
+                        .viewMatches(view.docId(), view.field(), view.index(), view.spans(), view.matchCount())
+                        .orElse(null));
                 documents.forgetUnsentMatches();
                 yield action;
             }
             case Search.Request.Unsupported unsupported -> notSupported(unsupported.what());
-        });
+        };
     }
 
     /** Whether the search screen runs a search, an explanation or a regex scan. */
@@ -1159,18 +1170,21 @@ public final class App {
         return search != null && search.running();
     }
 
-    private static Optional<Action> cancelSearchJob(OptionalLong job) {
-        return job.isPresent() ? Optional.of(new Action.CancelSearch(List.of(job.getAsLong()))) : Optional.empty();
+    private static Optional<Action> cancelSearchJob(@Nullable Long job) {
+        return job != null ? Optional.of(new Action.CancelSearch(List.of(job))) : Optional.empty();
     }
 
     /** The job of search {@code searchId} has started; the job of a search that is gone is cancelled. */
     public Optional<Action> searchStarted(long searchId, long jobId) {
-        return cancelSearchJob(search == null ? OptionalLong.of(jobId) : search.searchStarted(searchId, jobId));
+        return cancelSearchJob(
+                search == null ? Long.valueOf(jobId) : Optionals.orNull(search.searchStarted(searchId, jobId)));
     }
 
     /** Shows the progress of search {@code searchId}, or its hits. Returns the next page to fetch, or the document to step to. */
     public Optional<Action> searchProgress(long searchId, GetSearchResult result) {
-        return search == null ? Optional.empty() : searchAction(search.searchProgress(searchId, result));
+        return search == null
+                ? Optional.empty()
+                : search.searchProgress(searchId, result).flatMap(this::searchAction);
     }
 
     public void searchFailed(long searchId, String error) {
@@ -1181,7 +1195,8 @@ public final class App {
 
     /** The job of explanation {@code explainId} has started; the job of one that is gone is cancelled. */
     public Optional<Action> explainStarted(long explainId, long jobId) {
-        return cancelSearchJob(search == null ? OptionalLong.of(jobId) : search.explainStarted(explainId, jobId));
+        return cancelSearchJob(
+                search == null ? Long.valueOf(jobId) : Optionals.orNull(search.explainStarted(explainId, jobId)));
     }
 
     public void explainProgress(long explainId, GetExplainResult result) {
@@ -1198,12 +1213,15 @@ public final class App {
 
     /** The job of highlight {@code highlightId} has started; the job of one that is gone is cancelled. */
     public Optional<Action> highlightStarted(long highlightId, long jobId) {
-        return cancelSearchJob(search == null ? OptionalLong.of(jobId) : search.highlightStarted(highlightId, jobId));
+        return cancelSearchJob(
+                search == null ? Long.valueOf(jobId) : Optionals.orNull(search.highlightStarted(highlightId, jobId)));
     }
 
     /** Takes the matches of highlight {@code highlightId}; once they are in, views the value with them. */
     public Optional<Action> highlightProgress(long highlightId, GetHighlightResult result) {
-        return search == null ? Optional.empty() : searchAction(search.highlightProgress(highlightId, result));
+        return search == null
+                ? Optional.empty()
+                : search.highlightProgress(highlightId, result).flatMap(this::searchAction);
     }
 
     public void highlightFailed(long highlightId, String error) {
@@ -1214,7 +1232,8 @@ public final class App {
 
     /** The job of regex scan {@code scanId} has started; the job of one that is gone is cancelled. */
     public Optional<Action> storedScanStarted(long scanId, long jobId) {
-        return cancelSearchJob(search == null ? OptionalLong.of(jobId) : search.storedScanStarted(scanId, jobId));
+        return cancelSearchJob(
+                search == null ? Long.valueOf(jobId) : Optionals.orNull(search.storedScanStarted(scanId, jobId)));
     }
 
     public void storedScanProgress(long scanId, GetStoredScanResult result) {
@@ -1231,7 +1250,8 @@ public final class App {
 
     /** The job of recall check {@code recallId} has started; the job of one that is gone is cancelled. */
     public Optional<Action> knnRecallStarted(long recallId, long jobId) {
-        return cancelSearchJob(search == null ? OptionalLong.of(jobId) : search.knnRecallStarted(recallId, jobId));
+        return cancelSearchJob(
+                search == null ? Long.valueOf(jobId) : Optionals.orNull(search.knnRecallStarted(recallId, jobId)));
     }
 
     public void knnRecallProgress(long recallId, GetKnnRecallResult result) {
@@ -1258,7 +1278,8 @@ public final class App {
         Optional<Documents.Locate> locate = documents.filterToLocate(docId);
         documents.want(docId);
         documentFetches++;
-        return Optional.of(new Action.LoadDocument(docId, List.copyOf(cancel), locate, matches));
+        return Optional.of(
+                new Action.LoadDocument(docId, List.copyOf(cancel), locate.orElse(null), matches.orElse(null)));
     }
 
     /**
@@ -1271,7 +1292,7 @@ public final class App {
             return Optional.empty();
         }
         jump(Screen.DOCUMENTS);
-        return documentsAction(Optional.of(documents.startFilter(label, params, startDoc)));
+        return documentsAction(documents.startFilter(label, params, startDoc));
     }
 
     /**
@@ -1282,24 +1303,25 @@ public final class App {
         if (documents == null) {
             return Optional.empty();
         }
-        return documentsAction(documents.filterToRebuild().map(Documents.Request.class::cast));
+        return documentsAction(
+                documents.filterToRebuild().map(Documents.Request.class::cast).orElse(null));
     }
 
     /** Hands the filter of the documents screen, once it is built, to the terms screen, which marks its postings with it (ADR 0032). */
     private void syncTermsFilter() {
         if (terms != null) {
-            terms.setFilter(documents != null ? documents.filterId() : OptionalLong.empty());
+            terms.setFilter(documents != null ? Optionals.orNull(documents.filterId()) : null);
         }
     }
 
     /** Turns what the documents screen needs into an action; a search or an analysis switches to that screen. */
-    private Optional<Action> documentsAction(Optional<Documents.Request> request) {
+    private Optional<Action> documentsAction(Documents.@Nullable Request request) {
         // A key or a step may have built, failed or cleared the filter.
         syncTermsFilter();
-        if (request.isEmpty() || documents == null) {
+        if (request == null || documents == null) {
             return Optional.empty();
         }
-        return switch (request.get()) {
+        return switch (request) {
             case Documents.Request.Document document -> loadDocument(document.docId());
             case Documents.Request.TermVector load -> {
                 documentFetches++;
@@ -1336,56 +1358,57 @@ public final class App {
             }
             case Documents.Request.Step step
             when step.walk() == Documents.Walk.TERM_DOCS ->
-                terms == null ? Optional.empty() : termsAction(terms.step(step.forward()));
+                terms == null ? Optional.empty() : terms.step(step.forward()).flatMap(this::termsAction);
             case Documents.Request.Analyze analyze -> {
                 jump(Screen.ANALYSIS);
                 yield analysisAction(
-                        analysis.analyzeValue("doc " + analyze.docId() + " · " + analyze.field(), analyze.text()));
+                        analysis.analyzeValue("doc " + analyze.docId() + " · " + analyze.field(), analyze.text())
+                                .orElse(null));
             }
             case Documents.Request.Step step ->
-                search == null ? Optional.empty() : searchAction(search.step(step.forward()));
+                search == null ? Optional.empty() : search.step(step.forward()).flatMap(this::searchAction);
             case Documents.Request.MoreLikeThis like -> {
                 if (search == null) {
                     yield Optional.<Action>empty();
                 }
                 jump(Screen.SEARCH);
-                yield searchAction(search.moreLikeThis(like.docId()));
+                yield search.moreLikeThis(like.docId()).flatMap(this::searchAction);
             }
             case Documents.Request.SearchKnn knn -> {
                 if (search == null) {
                     yield Optional.<Action>empty();
                 }
                 jump(Screen.SEARCH);
-                yield searchAction(search.knnQuery(knn.field(), knn.docId()));
+                yield search.knnQuery(knn.field(), knn.docId()).flatMap(this::searchAction);
             }
             case Documents.Request.SearchDocValues values -> {
                 if (search == null) {
                     yield Optional.<Action>empty();
                 }
                 jump(Screen.SEARCH);
-                yield searchAction(
-                        search.docValuesQuery(values.field(), values.number(), values.hex(), values.values()));
+                yield search.docValuesQuery(values.field(), values.number(), values.hex(), values.values())
+                        .flatMap(this::searchAction);
             }
             case Documents.Request.ShowCommit show -> {
                 if (commits == null) {
                     yield Optional.<Action>empty();
                 }
                 jump(Screen.COMMITS);
-                yield commitsAction(commits.showSegment(show.index(), show.segment()));
+                yield commits.showSegment(show.index(), show.segment()).flatMap(this::commitsAction);
             }
             case Documents.Request.BrowseTerms browse -> {
                 if (terms == null) {
                     yield Optional.<Action>empty();
                 }
                 jump(Screen.TERMS);
-                yield termsAction(terms.show(browse.field(), browse.term(), browse.points()));
+                yield terms.show(browse.field(), browse.term(), browse.points()).flatMap(this::termsAction);
             }
             case Documents.Request.BrowseGraph browse -> {
                 if (terms == null) {
                     yield Optional.<Action>empty();
                 }
                 jump(Screen.TERMS);
-                yield termsAction(terms.showNode(browse.field(), browse.docId()));
+                yield terms.showNode(browse.field(), browse.docId()).flatMap(this::termsAction);
             }
             case Documents.Request.GoTo _ -> {
                 goMenu = new GoMenu(documents.jumps());
@@ -1409,12 +1432,13 @@ public final class App {
         if (next.isEmpty()) {
             next = documents.positionsRequest();
         }
-        return documentsAction(next.isPresent() ? next : documents.openPendingView());
+        return documentsAction(next.or(documents::openPendingView).orElse(null));
     }
 
     /** The job of document matches {@code matchesId} has started; the job of ones that are gone is cancelled. */
     public Optional<Action> documentMatchesStarted(long matchesId, long jobId) {
-        return cancelSearchJob(documents == null ? OptionalLong.of(jobId) : documents.matchesStarted(matchesId, jobId));
+        return cancelSearchJob(
+                documents == null ? Long.valueOf(jobId) : Optionals.orNull(documents.matchesStarted(matchesId, jobId)));
     }
 
     public void documentMatchesProgress(long matchesId, GetHighlightResult result) {
@@ -1531,7 +1555,7 @@ public final class App {
         if (documents != null && documents.filterStarted(serial, jobId)) {
             return Optional.empty();
         }
-        return Optional.of(new Action.ClearFilter(OptionalLong.of(jobId), OptionalLong.empty()));
+        return Optional.of(new Action.ClearFilter(jobId, null));
     }
 
     /**
@@ -1539,7 +1563,9 @@ public final class App {
      * document to show once it is built.
      */
     public Optional<Action> filterProgress(long serial, GetFilterResult result) {
-        return documents == null ? Optional.empty() : documentsAction(documents.filterProgress(serial, result));
+        return documents == null
+                ? Optional.empty()
+                : documentsAction(documents.filterProgress(serial, result).orElse(null));
     }
 
     /** Building filter {@code serial}, or locating a document in it, failed. */
@@ -1552,7 +1578,7 @@ public final class App {
 
     /** Takes what {@code stepFilter} found. Returns the document to show, if any. */
     public Optional<Action> filterStepped(
-            long serial, StepFilterParams params, FilterStep step, Optional<FilterMatch> found) {
+            long serial, StepFilterParams params, FilterStep step, @Nullable FilterMatch found) {
         documentFetches--;
         return filterFound(serial, params, step, found);
     }
@@ -1567,15 +1593,16 @@ public final class App {
      * Takes what {@code stepFilter} found for a document being loaded, which is counted with the
      * document (ADR 0031).
      */
-    public void filterLocated(long serial, StepFilterParams params, Optional<FilterMatch> found) {
+    public void filterLocated(long serial, StepFilterParams params, @Nullable FilterMatch found) {
         filterFound(serial, params, FilterStep.LOCATE, found);
     }
 
     private Optional<Action> filterFound(
-            long serial, StepFilterParams params, FilterStep step, Optional<FilterMatch> found) {
+            long serial, StepFilterParams params, FilterStep step, @Nullable FilterMatch found) {
         return documents == null
                 ? Optional.empty()
-                : documentsAction(documents.filterStepped(serial, params, step, found));
+                : documentsAction(
+                        documents.filterStepped(serial, params, step, found).orElse(null));
     }
 
     /** Starts the export the prompt asks for: the prompt says "Exporting…" until it has started. */
@@ -1626,7 +1653,7 @@ public final class App {
 
     /** The file as it would be typed: below the working directory, relative to it. */
     private String shownPath(String path) {
-        return cwd.map(dir -> Overview.relative(dir.toString(), path)).orElse(path);
+        return cwd == null ? path : Overview.relative(cwd.toString(), path);
     }
 
     private void forgetExport() {
@@ -1731,31 +1758,37 @@ public final class App {
 
     /** Shows a page of terms. Returns what the terms screen needs next. */
     public Optional<Action> termsLoaded(Action.LoadTerms load, GetTermsResult result) {
-        return terms == null ? Optional.empty() : termsAction(terms.termsLoaded(request(load), result));
+        return terms == null
+                ? Optional.empty()
+                : terms.termsLoaded(request(load), result).flatMap(this::termsAction);
     }
 
     public Optional<Action> termsFailed(Action.LoadTerms load, String error) {
-        return terms == null ? Optional.empty() : termsAction(terms.termsFailed(request(load), error));
+        return terms == null
+                ? Optional.empty()
+                : terms.termsFailed(request(load), error).flatMap(this::termsAction);
     }
 
     /** Shows a page of postings. Returns what the terms screen needs next. */
     public Optional<Action> postingsLoaded(Action.LoadPostings load, GetPostingsResult result) {
-        return terms == null ? Optional.empty() : termsAction(terms.postingsLoaded(request(load), result));
+        return terms == null
+                ? Optional.empty()
+                : terms.postingsLoaded(request(load), result).flatMap(this::termsAction);
     }
 
     /** Shows the BKD tree of a point field. Returns what the keys held for it ask for. */
     public Optional<Action> pointTreeLoaded(Action.LoadPointTree load, GetPointTreeResult result) {
         return terms == null
                 ? Optional.empty()
-                : termsAction(
-                        terms.pointTreeLoaded(new Terms.Request.LoadPointTree(load.field(), load.serial()), result));
+                : terms.pointTreeLoaded(new Terms.Request.LoadPointTree(load.field(), load.serial()), result)
+                        .flatMap(this::termsAction);
     }
 
     public Optional<Action> pointTreeFailed(Action.LoadPointTree load, String error) {
         return terms == null
                 ? Optional.empty()
-                : termsAction(
-                        terms.pointTreeFailed(new Terms.Request.LoadPointTree(load.field(), load.serial()), error));
+                : terms.pointTreeFailed(new Terms.Request.LoadPointTree(load.field(), load.serial()), error)
+                        .flatMap(this::termsAction);
     }
 
     /** Shows a cell of a BKD tree. */
@@ -1784,14 +1817,15 @@ public final class App {
     public Optional<Action> knnGraphLoaded(Action.LoadKnnGraph load, GetKnnGraphResult result) {
         return terms == null
                 ? Optional.empty()
-                : termsAction(
-                        terms.knnGraphLoaded(new Terms.Request.LoadKnnGraph(load.field(), load.serial()), result));
+                : terms.knnGraphLoaded(new Terms.Request.LoadKnnGraph(load.field(), load.serial()), result)
+                        .flatMap(this::termsAction);
     }
 
     public Optional<Action> knnGraphFailed(Action.LoadKnnGraph load, String error) {
         return terms == null
                 ? Optional.empty()
-                : termsAction(terms.knnGraphFailed(new Terms.Request.LoadKnnGraph(load.field(), load.serial()), error));
+                : terms.knnGraphFailed(new Terms.Request.LoadKnnGraph(load.field(), load.serial()), error)
+                        .flatMap(this::termsAction);
     }
 
     /** Shows a page of a level's nodes. */
@@ -1960,11 +1994,11 @@ public final class App {
         }
         Optional<FieldTerms> scanned = result.terms();
         if (scanned.isPresent()) {
-            overview.setScan(scan.field(), Optional.of(FieldScan.done(scanned.get(), scan.topN())));
+            overview.setScan(scan.field(), FieldScan.done(scanned.get(), scan.topN()));
             scan = null;
             return startNextScan();
         }
-        overview.setScan(scan.field(), Optional.of(new FieldScan.Running(result.termsScanned())));
+        overview.setScan(scan.field(), new FieldScan.Running(result.termsScanned()));
         return Optional.empty();
     }
 
@@ -1974,7 +2008,7 @@ public final class App {
             return Optional.empty();
         }
         if (overview != null) {
-            overview.setScan(scan.field(), Optional.of(new FieldScan.Failed(error)));
+            overview.setScan(scan.field(), new FieldScan.Failed(error));
         }
         scan = null;
         return startNextScan();
@@ -1987,9 +2021,9 @@ public final class App {
     private Optional<Action> cancelScans() {
         Long jobId = scan.jobId();
         if (overview != null) {
-            overview.setScan(scan.field(), Optional.empty());
+            overview.setScan(scan.field(), null);
             for (String field : queue) {
-                overview.setScan(field, Optional.empty());
+                overview.setScan(field, null);
             }
         }
         forgetScans();
@@ -2006,7 +2040,7 @@ public final class App {
             return Optional.empty();
         }
         storedFieldsScan = new RunningStoredFields(nextScanId++, null);
-        overview.setStoredFields(Optional.of(new StoredFieldsState.Running(0)));
+        overview.setStoredFields(new StoredFieldsState.Running(0));
         return Optional.of(new Action.StartStoredFieldsScan(storedFieldsScan.id()));
     }
 
@@ -2059,7 +2093,7 @@ public final class App {
         }
         Optional<StoredFields> fields = result.fields();
         if (fields.isPresent()) {
-            overview.setStoredFields(Optional.of(new StoredFieldsState.Done(fields.get())));
+            overview.setStoredFields(new StoredFieldsState.Done(fields.get()));
             storedFieldsScan = null;
             if (search != null) {
                 search.storedFieldsKnown(
@@ -2067,7 +2101,7 @@ public final class App {
             }
             return Optional.empty();
         }
-        overview.setStoredFields(Optional.of(new StoredFieldsState.Running(result.docsScanned())));
+        overview.setStoredFields(new StoredFieldsState.Running(result.docsScanned()));
         return Optional.empty();
     }
 
@@ -2077,7 +2111,7 @@ public final class App {
             return Optional.empty();
         }
         if (overview != null) {
-            overview.setStoredFields(Optional.of(new StoredFieldsState.Failed(error)));
+            overview.setStoredFields(new StoredFieldsState.Failed(error));
         }
         storedFieldsScan = null;
         notice = new Notice.StoredFieldsFailed(error);
@@ -2088,7 +2122,7 @@ public final class App {
     private Optional<Action> cancelStoredFields() {
         Long jobId = storedFieldsScan.jobId();
         if (overview != null) {
-            overview.setStoredFields(Optional.empty());
+            overview.setStoredFields(null);
         }
         storedFieldsScan = null;
         return jobId == null ? Optional.empty() : Optional.of(new Action.CancelScan(jobId));
@@ -2101,7 +2135,7 @@ public final class App {
             return Optional.empty();
         }
         for (String field : fields) {
-            overview.setScan(field, Optional.of(new FieldScan.Queued()));
+            overview.setScan(field, new FieldScan.Queued());
             queue.addLast(field);
         }
         return scan != null ? Optional.empty() : startNextScan();
@@ -2113,7 +2147,7 @@ public final class App {
             return Optional.empty();
         }
         if (overview != null) {
-            overview.setScan(field, Optional.of(new FieldScan.Running(0)));
+            overview.setScan(field, new FieldScan.Running(0));
         }
         scan = new RunningScan(nextScanId++, field, topN, null);
         return Optional.of(new Action.StartScan(scan.id(), field, topN));
@@ -2176,7 +2210,7 @@ public final class App {
             return Optional.empty();
         }
         jump(Screen.SEARCH);
-        return searchAction(search.termQuery(top.get().field(), top.get().term()));
+        return search.termQuery(top.get().field(), top.get().term()).flatMap(this::searchAction);
     }
 
     /** Enter on the overview: the docs of the selected top term, or else a scan of the selected field. */
@@ -2192,7 +2226,7 @@ public final class App {
             return Optional.empty();
         }
         jump(Screen.TERMS);
-        return termsAction(terms.browse(top.get().field(), top.get().term()));
+        return terms.browse(top.get().field(), top.get().term()).flatMap(this::termsAction);
     }
 
     public Optional<Action> handleKey(KeyEvent key) {
@@ -2292,10 +2326,11 @@ public final class App {
         }
         return switch (screen) {
             case OVERVIEW -> overview != null ? overviewJump(to) : Optional.empty();
-            case DOCUMENTS -> documents != null ? documentsAction(documents.jump(to)) : Optional.empty();
-            case TERMS -> terms != null ? termsAction(terms.jump(to)) : Optional.empty();
-            case COMMITS -> commits != null ? commitsAction(commits.jump(to)) : Optional.empty();
-            case SEARCH -> search != null ? searchAction(search.jump(to)) : Optional.empty();
+            case DOCUMENTS ->
+                documents != null ? documentsAction(documents.jump(to).orElse(null)) : Optional.empty();
+            case TERMS -> terms != null ? terms.jump(to).flatMap(this::termsAction) : Optional.empty();
+            case COMMITS -> commits != null ? commits.jump(to).flatMap(this::commitsAction) : Optional.empty();
+            case SEARCH -> search != null ? search.jump(to).flatMap(this::searchAction) : Optional.empty();
             case ANALYSIS, CHECK -> Optional.empty();
         };
     }
@@ -2396,7 +2431,8 @@ public final class App {
                     "Read with",
                     opened.noReader()
                             ? "nothing: opened without a reader"
-                            : opened.oldLucene().orElse("Lucene " + NEWEST_LUCENE_MAJOR + " (leia-lucene10)")));
+                            : Objects.requireNonNullElse(
+                                    opened.oldLucene(), "Lucene " + NEWEST_LUCENE_MAJOR + " (leia-lucene10)")));
         }
         return lines;
     }
@@ -2470,10 +2506,10 @@ public final class App {
 
     private Optional<Action> screenPromptKey(KeyEvent key) {
         return switch (screen) {
-            case TERMS -> termsAction(terms.handleKey(key));
-            case DOCUMENTS -> documentsAction(documents.handleKey(key));
-            case ANALYSIS -> analysisAction(analysis.handleKey(key));
-            case SEARCH -> searchAction(search.handleKey(key));
+            case TERMS -> terms.handleKey(key).flatMap(this::termsAction);
+            case DOCUMENTS -> documentsAction(documents.handleKey(key).orElse(null));
+            case ANALYSIS -> analysisAction(analysis.handleKey(key).orElse(null));
+            case SEARCH -> search.handleKey(key).flatMap(this::searchAction);
             default -> Optional.empty();
         };
     }
@@ -2501,7 +2537,7 @@ public final class App {
             return documents.stopRebuild().stream().boxed().findFirst().map(Action.CancelReconstruct::new);
         }
         if (screen == Screen.DOCUMENTS && documents != null && documents.filterBuilding()) {
-            return documentsAction(documents.clearFilter());
+            return documentsAction(documents.clearFilter().orElse(null));
         }
         if (screen == Screen.CHECK && checking()) {
             // A job that hasn't started yet is cancelled once it starts.
@@ -2629,22 +2665,22 @@ public final class App {
             return overviewKey(key);
         }
         if (screen == Screen.COMMITS && commits != null) {
-            return commitsAction(commits.handleKey(key));
+            return commits.handleKey(key).flatMap(this::commitsAction);
         }
         if (screen == Screen.TERMS && terms != null) {
-            return termsAction(terms.handleKey(key));
+            return terms.handleKey(key).flatMap(this::termsAction);
         }
         if (screen == Screen.DOCUMENTS && documents != null) {
-            return documentsAction(documents.handleKey(key));
+            return documentsAction(documents.handleKey(key).orElse(null));
         }
         if (screen == Screen.ANALYSIS) {
-            return analysisAction(analysis.handleKey(key));
+            return analysisAction(analysis.handleKey(key).orElse(null));
         }
         if (screen == Screen.SEARCH && search != null) {
-            return searchAction(search.handleKey(key));
+            return search.handleKey(key).flatMap(this::searchAction);
         }
         if (screen == Screen.CHECK && check != null) {
-            return checkAction(check.handleKey(key));
+            return check.handleKey(key).flatMap(this::checkAction);
         }
         return Optional.empty();
     }
@@ -2697,12 +2733,13 @@ public final class App {
 
     /** The old Lucene of the open index, such as {@code Lucene 2.x}, or {@code this index}. */
     private String oldLucene() {
-        return opened.oldLucene().map(old -> old.substring(0, old.indexOf(','))).orElse("this index");
+        String old = opened.oldLucene();
+        return old == null ? "this index" : old.substring(0, old.indexOf(','));
     }
 
     /** Why the open index can't find auto stop words; empty if it can (ADR 0039). */
-    private Optional<String> autoStopWordsReason() {
-        return opened.supports(Feature.AUTO_STOP_WORDS) ? Optional.empty() : Optional.of(reason());
+    private @Nullable String autoStopWordsReason() {
+        return opened.supports(Feature.AUTO_STOP_WORDS) ? null : reason();
     }
 
     /** The tab line says that the index lacks {@code what} until the next key; nothing goes to the backend. */
@@ -2770,10 +2807,10 @@ public final class App {
                                 .isPresent();
         back.push(new Back(
                 screen,
-                leavesTerms && terms != null ? Optional.of(terms.mark()) : Optional.empty(),
-                leavesDocuments ? Optional.of(documents.mark()) : Optional.empty(),
-                leavesSearch && search != null ? Optional.of(search.mark()) : Optional.empty(),
-                screen == Screen.COMMITS && commits != null ? Optional.of(commits.mark()) : Optional.empty()));
+                leavesTerms && terms != null ? terms.mark() : null,
+                leavesDocuments ? documents.mark() : null,
+                leavesSearch && search != null ? search.mark() : null,
+                screen == Screen.COMMITS && commits != null ? commits.mark() : null));
         if (back.size() > BACK_DEPTH) {
             back.removeLast();
         }
@@ -2795,16 +2832,16 @@ public final class App {
 
     /** Shows the screen of {@code to} again as it was, with what it fetches. */
     private Optional<Action> restore(Back to) {
-        if (terms != null) {
-            to.terms().ifPresent(terms::restore);
+        if (terms != null && to.terms() != null) {
+            terms.restore(to.terms());
         }
-        if (commits != null) {
-            to.commits().ifPresent(commits::restore);
+        if (commits != null && to.commits() != null) {
+            commits.restore(to.commits());
         }
         Optional<Search.Request.Cancel> searchCancel =
-                search != null ? to.search().flatMap(search::restore) : Optional.empty();
-        Optional<Action> document = documents != null
-                ? to.documents().map(documents::restore).flatMap(this::documentsAction)
+                search != null && to.search() != null ? search.restore(to.search()) : Optional.empty();
+        Optional<Action> document = documents != null && to.documents() != null
+                ? documentsAction(documents.restore(to.documents()).orElse(null))
                 : Optional.empty();
         leaving(to.screen());
         screen = to.screen();
@@ -2817,7 +2854,7 @@ public final class App {
                         new Action.LoadDocument(load.docId(), List.copyOf(cancel), load.locate(), load.matches()));
             }
             if (document.isEmpty()) {
-                return searchAction(searchCancel.map(Search.Request.class::cast));
+                return searchCancel.flatMap(this::searchAction);
             }
         }
         return document.isPresent() ? document : initialRequest();
@@ -3047,8 +3084,8 @@ public final class App {
         lines.addAll(RuntimeLines.runtimes(runtimes, runtimeFolders));
         lines.add(Line.from(
                 "No index open. Press o to open one, 6 to try an analyzer, X to add jars, or D to download runtimes."));
-        lines.add(Line.from("L shows the log"
-                + logFile.map(file -> ", which is written to " + file + " too").orElse("") + "."));
+        lines.add(Line.from(
+                "L shows the log" + (logFile == null ? "" : ", which is written to " + logFile + " too") + "."));
         Block block = bordered(" leia ");
         Rect inner = block.inner(body);
         frame.renderWidget(block, body);
@@ -3210,12 +3247,12 @@ public final class App {
      */
     private static Line marker(Opened opened) {
         int count = opened.indexes().size();
-        Optional<String> oldLucene = opened.oldLucene();
+        String oldLucene = opened.oldLucene();
         String text;
         if (opened.noReader()) {
             text = count == 1 ? "no reader" : "no reader, " + count + INDEXES;
-        } else if (oldLucene.isPresent()) {
-            text = oldLucene.get();
+        } else if (oldLucene != null) {
+            text = oldLucene;
         } else if (count > 1) {
             text = count + INDEXES;
         } else {

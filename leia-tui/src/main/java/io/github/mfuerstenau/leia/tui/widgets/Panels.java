@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /** The panels that the screens are made of, and how their parts are styled. */
 public final class Panels {
@@ -114,10 +115,10 @@ public final class Panels {
      * The row after the last one of a paged list: {@code …} while there are more, or why the next
      * page failed. Empty otherwise.
      */
-    public static Optional<Row> tailRow(boolean more, Optional<String> error) {
+    public static Optional<Row> tailRow(boolean more, @Nullable String error) {
         String text;
-        if (error.isPresent()) {
-            text = "Cannot read more: " + error.get();
+        if (error != null) {
+            text = "Cannot read more: " + error;
         } else if (more) {
             text = "…";
         } else {

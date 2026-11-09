@@ -97,7 +97,7 @@ class AnalyzerFormTest {
 
     /** ← cycles back from standard to custom. */
     private static AnalyzerForm customForm() {
-        AnalyzerForm form = new AnalyzerForm(new AnalyzerSettings(), Optional.of(components()));
+        AnalyzerForm form = new AnalyzerForm(new AnalyzerSettings(), components());
         press(form, key(KeyCode.LEFT));
         return form;
     }
@@ -170,7 +170,7 @@ class AnalyzerFormTest {
 
     @Test
     void takesATypedNameThatIsNotListed() {
-        AnalyzerForm form = new AnalyzerForm(new AnalyzerSettings(), Optional.empty());
+        AnalyzerForm form = new AnalyzerForm(new AnalyzerSettings(), null);
         press(form, key(KeyCode.LEFT));
         form.select(new Row.Add(Section.TOKEN_FILTERS));
         press(form, key(KeyCode.UP));
@@ -268,7 +268,7 @@ class AnalyzerFormTest {
 
     @Test
     void picksAPresetByItsSimpleName() {
-        AnalyzerForm form = new AnalyzerForm(new AnalyzerSettings(), Optional.of(components()));
+        AnalyzerForm form = new AnalyzerForm(new AnalyzerSettings(), components());
         press(form, key(' '));
         AnalyzerSettings settings = applied(form);
         assertThat(settings.text()).isEqualTo("EnglishAnalyzer");
@@ -316,7 +316,7 @@ class AnalyzerFormTest {
 
     /** The preset form, with {@code EnglishAnalyzer}. */
     private static AnalyzerForm presetForm() {
-        AnalyzerForm form = new AnalyzerForm(new AnalyzerSettings(), Optional.of(components()));
+        AnalyzerForm form = new AnalyzerForm(new AnalyzerSettings(), components());
         press(form, key(' '));
         form.draft().preset = "org.apache.lucene.analysis.x.EnglishAnalyzer";
         return form;
@@ -419,7 +419,7 @@ class AnalyzerFormTest {
                         new Row.TokenLimit());
 
         // Without the list, the rows that any preset may have are there, and the backend judges.
-        AnalyzerForm unlisted = new AnalyzerForm(applied(form), Optional.empty());
+        AnalyzerForm unlisted = new AnalyzerForm(applied(form), null);
         assertThat(unlisted.rows())
                 .containsExactly(
                         new Row.KindRow(),
@@ -444,7 +444,7 @@ class AnalyzerFormTest {
                 AnalyzerSettings.words(List.of()),
                 AnalyzerSettings.words(List.of("a", "b")),
                 AnalyzerSettings.wordFile("/x"))) {
-            assertThat(AnalyzerSettings.parseWordSet(AnalyzerSettings.wordSetInput(Optional.of(set))))
+            assertThat(AnalyzerSettings.parseWordSet(AnalyzerSettings.wordSetInput(set)))
                     .hasValue(set);
         }
     }
@@ -461,7 +461,7 @@ class AnalyzerFormTest {
 
     @Test
     void wrapsAnyAnalyzerInShinglesAndATokenLimit() {
-        AnalyzerForm form = new AnalyzerForm(new AnalyzerSettings(), Optional.of(components()));
+        AnalyzerForm form = new AnalyzerForm(new AnalyzerSettings(), components());
         assertThat(form.rows()).containsExactly(new Row.KindRow(), new Row.ShinglesRow(), new Row.TokenLimit());
         assertThat(render(form)).contains("Wrappers", "Shingles        off");
 
@@ -542,7 +542,7 @@ class AnalyzerFormTest {
         assertThat(applied(form).text()).isEqualTo("DutchAnalyzer · stem overrides file /etc/stemdict.txt");
 
         // A preset that doesn't take them drops them.
-        form = new AnalyzerForm(applied(form), Optional.of(components()));
+        form = new AnalyzerForm(applied(form), components());
         form.select(new Row.Preset());
         press(form, key(' '));
         typed(form, "White");
@@ -592,7 +592,7 @@ class AnalyzerFormTest {
         assertThat(form.draft().japanese.mode()).isEmpty();
 
         // Korean drops the Japanese options.
-        form = new AnalyzerForm(applied(form), Optional.of(components()));
+        form = new AnalyzerForm(applied(form), components());
         form.select(new Row.Preset());
         press(form, key(' '));
         typed(form, "Korean");
@@ -617,7 +617,7 @@ class AnalyzerFormTest {
         AnalyzerSettings japanese = new AnalyzerSettings();
         japanese.kind = Kind.PRESET;
         japanese.preset = AnalyzerSettings.JAPANESE_ANALYZER;
-        AnalyzerForm unlisted = new AnalyzerForm(japanese, Optional.empty());
+        AnalyzerForm unlisted = new AnalyzerForm(japanese, null);
         assertThat(unlisted.rows()).contains(new Row.JapaneseModeRow()).doesNotContain(new Row.DecompoundMode());
     }
 
@@ -660,7 +660,7 @@ class AnalyzerFormTest {
         assertThat(form.draft().collation.locale()).isEmpty();
 
         // Another preset drops the collation, and has no collation rows.
-        form = new AnalyzerForm(applied(form), Optional.of(components()));
+        form = new AnalyzerForm(applied(form), components());
         form.select(new Row.Preset());
         press(form, key(' '));
         typed(form, "JapaneseCompletion");
@@ -685,7 +685,7 @@ class AnalyzerFormTest {
         AnalyzerSettings icu = new AnalyzerSettings();
         icu.kind = Kind.PRESET;
         icu.preset = "org.apache.lucene.analysis.icu.ICUCollationKeyAnalyzer";
-        assertThat(new AnalyzerForm(icu, Optional.empty()).rows()).contains(new Row.Strength());
+        assertThat(new AnalyzerForm(icu, null).rows()).contains(new Row.Strength());
     }
 
     @Test
@@ -700,7 +700,8 @@ class AnalyzerFormTest {
         }
         for (String text : List.of("a=b, c=d", "@/x", "-")) {
             Optional<StemDictionary> dictionary = AnalyzerSettings.parseStemDictionary(text);
-            assertThat(AnalyzerSettings.parseStemDictionary(AnalyzerSettings.stemDictionaryInput(dictionary)))
+            assertThat(AnalyzerSettings.parseStemDictionary(
+                            AnalyzerSettings.stemDictionaryInput(dictionary.orElse(null))))
                     .isEqualTo(dictionary);
         }
 

@@ -40,7 +40,7 @@ class ExportPromptTest {
 
     @Test
     void exportsADocumentToAFileOrTheClipboard() {
-        ExportPrompt prompt = ExportPrompt.document(7, List.of(), true, Optional.empty(), Optional.of(dir));
+        ExportPrompt prompt = ExportPrompt.document(7, List.of(), true, null, dir);
         assertThat(prompt.input()).isEqualTo("doc-7.json");
         String screen = render(prompt);
         assertThat(screen).contains("Export document 7 as JSON").contains("Tab terms and points: on");
@@ -57,7 +57,7 @@ class ExportPromptTest {
 
     @Test
     void anIndexThatCantRebuildExportsWithoutTermsAndPoints() {
-        ExportPrompt prompt = ExportPrompt.document(7, List.of(), false, Optional.empty(), Optional.of(dir));
+        ExportPrompt prompt = ExportPrompt.document(7, List.of(), false, null, dir);
         assertThat(render(prompt)).contains("Terms and points: off").doesNotContain("Tab terms");
 
         prompt.handleKey(key(KeyCode.TAB));
@@ -68,7 +68,7 @@ class ExportPromptTest {
     @Test
     void resolvesTheHomeDirectoryAndRelativePaths() throws IOException {
         Path home = Files.createDirectories(dir.resolve("home"));
-        ExportPrompt prompt = ExportPrompt.document(1, List.of(), true, Optional.of(home), Optional.of(dir));
+        ExportPrompt prompt = ExportPrompt.document(1, List.of(), true, home, dir);
         clear(prompt);
         typed(prompt, "~/d.json");
 
@@ -84,7 +84,7 @@ class ExportPromptTest {
     @Test
     void asksBeforeOverwritingAFile() throws IOException {
         Files.writeString(dir.resolve("d.json"), "old");
-        ExportPrompt prompt = ExportPrompt.document(1, List.of(), true, Optional.empty(), Optional.of(dir));
+        ExportPrompt prompt = ExportPrompt.document(1, List.of(), true, null, dir);
         clear(prompt);
         typed(prompt, "d.json");
 
@@ -104,8 +104,7 @@ class ExportPromptTest {
 
     @Test
     void doesNotWriteADocumentIntoAnIndexDirectory() {
-        ExportPrompt prompt =
-                ExportPrompt.document(1, List.of(dir.toString()), true, Optional.empty(), Optional.of(dir));
+        ExportPrompt prompt = ExportPrompt.document(1, List.of(dir.toString()), true, null, dir);
 
         assertThat(prompt.handleKey(key(KeyCode.ENTER))).isEqualTo(new ExportPrompt.Nothing());
         assertThat(prompt.error())
@@ -115,7 +114,7 @@ class ExportPromptTest {
 
     @Test
     void ignoresKeysWhileBusyAndShowsErrors() {
-        ExportPrompt prompt = ExportPrompt.document(1, List.of(), true, Optional.empty(), Optional.of(dir));
+        ExportPrompt prompt = ExportPrompt.document(1, List.of(), true, null, dir);
         prompt.setBusy();
         assertThat(prompt.handleKey(key(KeyCode.ESCAPE))).isEqualTo(new ExportPrompt.Nothing());
         assertThat(render(prompt)).contains("Exporting…");
@@ -134,7 +133,7 @@ class ExportPromptTest {
     @Test
     void resolvesTheTermsPathAndCyclesTheDelimiter() throws IOException {
         Path home = Files.createDirectories(dir.resolve("home"));
-        ExportPrompt prompt = ExportPrompt.terms("body", Optional.of(home), Optional.of(dir));
+        ExportPrompt prompt = ExportPrompt.terms("body", home, dir);
         assertThat(prompt.input()).startsWith("terms_body_");
         assertThat(render(prompt)).contains("Export the terms of body", "Tab delimiter: tab");
         clear(prompt);
@@ -162,7 +161,7 @@ class ExportPromptTest {
 
     @Test
     void ctrlFTogglesTheTermsFormat() {
-        ExportPrompt prompt = ExportPrompt.terms("body", Optional.empty(), Optional.of(dir));
+        ExportPrompt prompt = ExportPrompt.terms("body", null, dir);
         assertThat(render(prompt)).contains("Ctrl+F format: Luke", "Ctrl+F format");
         clear(prompt);
         typed(prompt, "t.out");
@@ -180,7 +179,7 @@ class ExportPromptTest {
     @Test
     void asksBeforeOverwritingATermsFile() throws IOException {
         Files.writeString(dir.resolve("t.out"), "old");
-        ExportPrompt prompt = ExportPrompt.terms("body", Optional.empty(), Optional.of(dir));
+        ExportPrompt prompt = ExportPrompt.terms("body", null, dir);
         clear(prompt);
         typed(prompt, "t.out");
 
@@ -198,7 +197,7 @@ class ExportPromptTest {
 
     @Test
     void theTermsPromptHasNoCopy() {
-        ExportPrompt prompt = ExportPrompt.terms("body", Optional.empty(), Optional.empty());
+        ExportPrompt prompt = ExportPrompt.terms("body", null, null);
         assertThat(prompt.handleKey(ctrl('y'))).isEqualTo(new ExportPrompt.Nothing());
         assertThat(render(prompt)).contains("Enter export   Tab delimiter   Ctrl+F format   Esc cancel");
     }

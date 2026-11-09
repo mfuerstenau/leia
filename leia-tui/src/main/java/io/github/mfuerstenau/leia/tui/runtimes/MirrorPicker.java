@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The list of mirrors in the window of {@code D} (ADR 0124), to choose the one to download from, or
@@ -58,7 +59,7 @@ final class MirrorPicker {
     private final Map<URI, String> failed;
     private int cursor;
     private LineInput input;
-    private Optional<String> problem = Optional.empty();
+    private @Nullable String problem;
 
     /**
      * @param mirrors the mirrors, in order
@@ -99,7 +100,7 @@ final class MirrorPicker {
         }
         if (key.isChar('u') || (key.code() == KeyCode.ENTER && cursor == mirrors.size())) {
             input = new LineInput("https://");
-            problem = Optional.empty();
+            problem = null;
             return new Nothing();
         }
         if (key.code() == KeyCode.ENTER) {
@@ -115,27 +116,27 @@ final class MirrorPicker {
     private Result typed(KeyEvent key) {
         if (key.code() == KeyCode.ESCAPE) {
             input = null;
-            problem = Optional.empty();
+            problem = null;
             return new Nothing();
         }
         if (key.code() == KeyCode.ENTER) {
             String url = input.text().strip();
-            problem = Mirrors.check(url);
-            if (problem.isPresent()) {
+            problem = Mirrors.check(url).orElse(null);
+            if (problem != null) {
                 return new Nothing();
             }
             input = null;
             return new Chosen(Mirror.of(URI.create(url), Mirror.Origin.TYPED));
         }
         if (input.handleKey(key, LineInput::wordStart) == LineInput.Edit.CHANGED) {
-            problem = Optional.empty();
+            problem = null;
         }
         return new Nothing();
     }
 
     /** Draws the list, and below it the URL being typed and why it was refused. */
     void render(Frame frame, Rect area, String title) {
-        int inputHeight = input == null ? 0 : 3 + (problem.isPresent() ? 1 : 0);
+        int inputHeight = input == null ? 0 : 3 + (problem != null ? 1 : 0);
         List<Rect> parts = Layout.vertical()
                 .constraints(Constraint.fill(), Constraint.length(inputHeight))
                 .split(area);
@@ -163,9 +164,10 @@ final class MirrorPicker {
         LineInput.Visible visible = input.visible(fieldInner.width());
         frame.renderWidget(Paragraph.from(Line.from(visible.text())), fieldInner);
         frame.setCursorPosition(fieldInner.x() + visible.cursorColumn(), fieldInner.y());
-        problem.ifPresent(text -> frame.renderWidget(
-                Paragraph.from(Line.styled(text, Palette.current().error())),
-                new Rect(inputArea.x(), inputArea.y() + 3, inputArea.width(), 1)));
+        Optional.ofNullable(problem)
+                .ifPresent(text -> frame.renderWidget(
+                        Paragraph.from(Line.styled(text, Palette.current().error())),
+                        new Rect(inputArea.x(), inputArea.y() + 3, inputArea.width(), 1)));
     }
 
     private Line row(int i) {
@@ -201,6 +203,6 @@ final class MirrorPicker {
 
     /** Why the typed URL was refused. */
     Optional<String> problem() {
-        return problem;
+        return Optional.ofNullable(problem);
     }
 }

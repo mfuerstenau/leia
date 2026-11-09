@@ -84,7 +84,7 @@ class SessionPilotTest {
         VersionResult version =
                 backend.call(Methods.VERSION, new VersionParams()).get();
         historyFile = tmp.resolve("state").resolve("history");
-        app = new App(version, Optional.empty(), History.load(historyFile), DirectoryImpl.FS).withCwd(tmp);
+        app = new App(version, null, History.load(historyFile), DirectoryImpl.FS).withCwd(tmp);
         Session session = new Session(app, backend);
         test = TuiTestRunner.runTest(
                 (event, runner) -> handle(session, event, runner),

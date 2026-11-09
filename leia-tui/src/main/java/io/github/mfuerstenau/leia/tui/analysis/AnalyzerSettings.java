@@ -18,6 +18,7 @@ import io.github.mfuerstenau.leia.protocol.analysis.Shingles;
 import io.github.mfuerstenau.leia.protocol.analysis.StandardAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.StemDictionary;
 import io.github.mfuerstenau.leia.protocol.analysis.WordSet;
+import io.github.mfuerstenau.leia.tui.Optionals;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import java.util.ArrayList;
 import java.util.List;
@@ -28,6 +29,7 @@ import java.util.OptionalInt;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The current analyzer (ADR 0014): the analysis screen tries it, and the search screen parses
@@ -104,17 +106,21 @@ public final class AnalyzerSettings {
     /** The preset's class name. */
     String preset = DEFAULT_PRESET;
 
-    /** The preset's stop words; empty for its default ones. */
-    Optional<WordSet> stopwords = Optional.empty();
+    /** The preset's stop words; null for its default ones. */
+    @Nullable
+    WordSet stopwords;
 
-    /** The preset's stem exclusions; empty for none. */
-    Optional<WordSet> stemExclusion = Optional.empty();
+    /** The preset's stem exclusions; null for none. */
+    @Nullable
+    WordSet stemExclusion;
 
-    /** The preset's longest token; empty for its default. */
-    OptionalInt maxTokenLength = OptionalInt.empty();
+    /** The preset's longest token; null for its default. */
+    @Nullable
+    Integer maxTokenLength;
 
-    /** The preset's stem overrides; empty for its default ones. */
-    Optional<StemDictionary> stemOverride = Optional.empty();
+    /** The preset's stem overrides; null for its default ones. */
+    @Nullable
+    StemDictionary stemOverride;
 
     /** {@code JapaneseAnalyzer}'s options; sent only when one is set. */
     JapaneseOptions japanese = noJapanese();
@@ -133,12 +139,16 @@ public final class AnalyzerSettings {
 
     AnalysisComponent tokenizer = component("standard");
     List<AnalysisComponent> tokenFilters = new ArrayList<>(List.of(component("lowercase")));
-    Optional<String> configDir = Optional.empty();
 
-    /** The wrappers of any kind; empty for none. */
-    Optional<Shingles> shingles = Optional.empty();
+    @Nullable
+    String configDir;
 
-    Optional<LimitTokenCount> limitTokenCount = Optional.empty();
+    /** The wrappers of any kind; null for none. */
+    @Nullable
+    Shingles shingles;
+
+    @Nullable
+    LimitTokenCount limitTokenCount;
 
     /** The standard analyzer; {@code EnglishAnalyzer} as the preset; the standard chain as the custom one. */
     public AnalyzerSettings() {
@@ -194,10 +204,10 @@ public final class AnalyzerSettings {
             case PRESET ->
                 presetAnalyzer = Optional.of(new PresetAnalyzer(
                         preset,
-                        stopwords,
-                        stemExclusion,
-                        maxTokenLength,
-                        stemOverride,
+                        Optional.ofNullable(stopwords),
+                        Optional.ofNullable(stemExclusion),
+                        Optionals.optionalInt(maxTokenLength),
+                        Optional.ofNullable(stemOverride),
                         japanese.equals(noJapanese()) ? Optional.empty() : Optional.of(japanese),
                         korean.equals(noKorean()) ? Optional.empty() : Optional.of(korean),
                         collation.equals(noCollation()) ? Optional.empty() : Optional.of(collation),
@@ -206,7 +216,14 @@ public final class AnalyzerSettings {
                                 : Optional.of(japaneseCompletion)));
             case CUSTOM -> custom = Optional.of(chain());
         }
-        return new Analyzer(standard, presetAnalyzer, custom, shingles, limitTokenCount, List.of(), List.of());
+        return new Analyzer(
+                standard,
+                presetAnalyzer,
+                custom,
+                Optional.ofNullable(shingles),
+                Optional.ofNullable(limitTokenCount),
+                List.of(),
+                List.of());
     }
 
     /** The default analyzer as a request sends it: the standard one, without wrappers. */
@@ -215,12 +232,13 @@ public final class AnalyzerSettings {
     }
 
     CustomAnalyzer chain() {
-        return new CustomAnalyzer(List.copyOf(charFilters), tokenizer, List.copyOf(tokenFilters), configDir);
+        return new CustomAnalyzer(
+                List.copyOf(charFilters), tokenizer, List.copyOf(tokenFilters), Optional.ofNullable(configDir));
     }
 
     /** Whether this is the default: the standard analyzer, without wrappers. */
     public boolean isStandard() {
-        return kind == Kind.STANDARD && shingles.isEmpty() && limitTokenCount.isEmpty();
+        return kind == Kind.STANDARD && shingles == null && limitTokenCount == null;
     }
 
     public boolean isCustom() {
@@ -228,10 +246,10 @@ public final class AnalyzerSettings {
     }
 
     Optional<WordSet> wordSet(WordSetKind which) {
-        return which == WordSetKind.STOPWORDS ? stopwords : stemExclusion;
+        return Optional.ofNullable(which == WordSetKind.STOPWORDS ? stopwords : stemExclusion);
     }
 
-    void setWordSet(WordSetKind which, Optional<WordSet> set) {
+    void setWordSet(WordSetKind which, @Nullable WordSet set) {
         if (which == WordSetKind.STOPWORDS) {
             stopwords = set;
         } else {
@@ -247,7 +265,8 @@ public final class AnalyzerSettings {
         };
     }
 
-    void setUserDictionary(Language language, Optional<String> path) {
+    void setUserDictionary(Language language, @Nullable String userDictionary) {
+        Optional<String> path = Optional.ofNullable(userDictionary);
         switch (language) {
             case JAPANESE -> japanese = new JapaneseOptions(path, japanese.mode(), japanese.stopTags());
             case KOREAN ->
@@ -267,7 +286,8 @@ public final class AnalyzerSettings {
         };
     }
 
-    void setStopTags(Language language, Optional<WordSet> tags) {
+    void setStopTags(Language language, @Nullable WordSet stopTags) {
+        Optional<WordSet> tags = Optional.ofNullable(stopTags);
         switch (language) {
             case JAPANESE -> japanese = new JapaneseOptions(japanese.userDictionary(), japanese.mode(), tags);
             case KOREAN ->
@@ -290,9 +310,12 @@ public final class AnalyzerSettings {
                     case PRESET -> presetText();
                     case CUSTOM -> chainText();
                 });
-        shingles.ifPresent(s -> text.append(" · shingles ").append(shingleSizeText(s)));
-        limitTokenCount.ifPresent(limit ->
-                text.append(" · at most ").append(limit.maxTokenCount()).append(" tokens"));
+        if (shingles != null) {
+            text.append(" · shingles ").append(shingleSizeText(shingles));
+        }
+        if (limitTokenCount != null) {
+            text.append(" · at most ").append(limitTokenCount.maxTokenCount()).append(" tokens");
+        }
         return text.toString();
     }
 
@@ -303,8 +326,12 @@ public final class AnalyzerSettings {
                     .ifPresent(set ->
                             text.append(" · ").append(which.noun).append(' ').append(wordSetText(set)));
         }
-        maxTokenLength.ifPresent(length -> text.append(" · token length ").append(length));
-        stemOverride.ifPresent(dictionary -> text.append(" · stem overrides ").append(stemDictionaryText(dictionary)));
+        if (maxTokenLength != null) {
+            text.append(" · token length ").append(maxTokenLength);
+        }
+        if (stemOverride != null) {
+            text.append(" · stem overrides ").append(stemDictionaryText(stemOverride));
+        }
         for (Language language : Language.values()) {
             userDictionary(language)
                     .ifPresent(path -> text.append(" · user dictionary ").append(TextFormat.escapeControl(path)));
@@ -339,9 +366,7 @@ public final class AnalyzerSettings {
                 .flatMap(s -> s)
                 .map(AnalyzerSettings::componentText)
                 .collect(Collectors.joining(" › "));
-        return configDir
-                .map(dir -> text + " · config " + TextFormat.escapeControl(dir))
-                .orElse(text);
+        return configDir == null ? text : text + " · config " + TextFormat.escapeControl(configDir);
     }
 
     @Override
@@ -349,17 +374,17 @@ public final class AnalyzerSettings {
         return other instanceof AnalyzerSettings that
                 && kind == that.kind
                 && preset.equals(that.preset)
-                && stopwords.equals(that.stopwords)
-                && stemExclusion.equals(that.stemExclusion)
-                && maxTokenLength.equals(that.maxTokenLength)
-                && stemOverride.equals(that.stemOverride)
+                && Objects.equals(stopwords, that.stopwords)
+                && Objects.equals(stemExclusion, that.stemExclusion)
+                && Objects.equals(maxTokenLength, that.maxTokenLength)
+                && Objects.equals(stemOverride, that.stemOverride)
                 && japanese.equals(that.japanese)
                 && korean.equals(that.korean)
                 && collation.equals(that.collation)
                 && japaneseCompletion.equals(that.japaneseCompletion)
                 && chain().equals(that.chain())
-                && shingles.equals(that.shingles)
-                && limitTokenCount.equals(that.limitTokenCount);
+                && Objects.equals(shingles, that.shingles)
+                && Objects.equals(limitTokenCount, that.limitTokenCount);
     }
 
     @Override
@@ -393,16 +418,16 @@ public final class AnalyzerSettings {
     }
 
     /** The text that edits a word set: the words, {@code -} for no words, {@code @} and the path for a file, or blank for none. */
-    static String wordSetInput(Optional<WordSet> set) {
-        if (set.isEmpty()) {
+    static String wordSetInput(@Nullable WordSet set) {
+        if (set == null) {
             return "";
         }
-        Optional<List<String>> listed = set.get().words();
+        Optional<List<String>> listed = set.words();
         if (listed.isPresent()) {
             List<String> words = listed.get();
             return words.isEmpty() ? "-" : String.join(", ", words);
         }
-        return set.get().file().map(file -> "@" + file).orElse("");
+        return set.file().map(file -> "@" + file).orElse("");
     }
 
     /** Splits at commas and white space, as Rust's {@code split(|c| c == ',' || c.is_whitespace())}. */
@@ -470,11 +495,11 @@ public final class AnalyzerSettings {
     }
 
     /** The text that edits stem overrides: {@code word=stem} pairs, {@code -} for none, {@code @} and the path for a file, or blank for the default. */
-    static String stemDictionaryInput(Optional<StemDictionary> dictionary) {
-        if (dictionary.isEmpty()) {
+    static String stemDictionaryInput(@Nullable StemDictionary dictionary) {
+        if (dictionary == null) {
             return "";
         }
-        Optional<Map<String, String>> listed = dictionary.get().entries();
+        Optional<Map<String, String>> listed = dictionary.entries();
         if (listed.isPresent()) {
             Map<String, String> entries = listed.get();
             if (entries.isEmpty()) {
@@ -485,7 +510,7 @@ public final class AnalyzerSettings {
                             .map(entry -> entry.getKey() + "=" + entry.getValue())
                             .collect(Collectors.joining(", "));
         }
-        return dictionary.get().file().map(file -> "@" + file).orElse("");
+        return dictionary.file().map(file -> "@" + file).orElse("");
     }
 
     /**

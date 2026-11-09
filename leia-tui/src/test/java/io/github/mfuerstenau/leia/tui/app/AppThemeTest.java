@@ -20,7 +20,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
@@ -46,7 +45,7 @@ class AppThemeTest {
     }
 
     private static App app() {
-        return new App(VERSION, Optional.empty(), History.inMemory(), DirectoryImpl.FS);
+        return new App(VERSION, null, History.inMemory(), DirectoryImpl.FS);
     }
 
     private static Theme bundled(String id) {
@@ -55,7 +54,7 @@ class AppThemeTest {
 
     @Test
     void tOnTheStartScreenCyclesTheThemesAndSavesThem() {
-        ThemeFile themeFile = new ThemeFile(Optional.of(dir.resolve("theme")));
+        ThemeFile themeFile = new ThemeFile(dir.resolve("theme"));
         App app = app().withThemes(Themes.bundled(), themeFile);
         assertThat(TestScreens.render(app::render, 160, 30)).contains("T theme");
 
@@ -89,7 +88,7 @@ class AppThemeTest {
         try (var nord = Themes.class.getResourceAsStream("nord.theme")) {
             Files.copy(nord, themesDir.resolve("solar.theme"));
         }
-        App app = app().withThemes(Themes.bundled().withUserDir(Optional.of(themesDir)), ThemeFile.none());
+        App app = app().withThemes(Themes.bundled().withUserDir(themesDir), ThemeFile.none());
         Palette.use(bundled("solarized-light"));
 
         app.handleKey(key('T'));
@@ -104,7 +103,7 @@ class AppThemeTest {
     void aRefusedUserThemeIsNamedOnTheStartScreenOnce() throws Exception {
         Path themesDir = Files.createDirectories(dir.resolve("themes"));
         Files.writeString(themesDir.resolve("old.theme"), "base = none\n");
-        App app = app().withThemes(Themes.bundled().withUserDir(Optional.of(themesDir)), ThemeFile.none());
+        App app = app().withThemes(Themes.bundled().withUserDir(themesDir), ThemeFile.none());
 
         assertThat(TestScreens.render(app::render, 200, 30))
                 .contains("Theme left out: ")

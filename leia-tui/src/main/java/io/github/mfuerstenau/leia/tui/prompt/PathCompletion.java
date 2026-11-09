@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
+import org.jspecify.annotations.Nullable;
 
 /** Completes typed paths, and expands {@code ~} in them: typed paths have no shell to do it. */
 public final class PathCompletion {
@@ -62,13 +63,13 @@ public final class PathCompletion {
     }
 
     /** Replaces a leading {@code ~} with {@code home}. */
-    public static String expandHome(String path, Optional<Path> home) {
-        if (!path.startsWith("~") || home.isEmpty()) {
+    public static String expandHome(String path, @Nullable Path home) {
+        if (!path.startsWith("~") || home == null) {
             return path;
         }
         String rest = path.substring(1);
         if (rest.isEmpty() || isSeparator(rest.charAt(0))) {
-            return home.get() + rest;
+            return home + rest;
         }
         return path;
     }
@@ -79,7 +80,7 @@ public final class PathCompletion {
      * and returned as candidates. Hidden directories only match a component that starts with
      * {@code .}.
      */
-    public static Completion complete(String input, Optional<Path> home) {
+    public static Completion complete(String input, @Nullable Path home) {
         return completeWithFiles(input, home, name -> false);
     }
 
@@ -87,9 +88,9 @@ public final class PathCompletion {
      * Completes as {@link #complete} does, and to the files whose name {@code file} accepts too. A
      * file that is the one match is completed without a separator.
      */
-    public static Completion completeWithFiles(String input, Optional<Path> home, Predicate<String> file) {
+    public static Completion completeWithFiles(String input, @Nullable Path home, Predicate<String> file) {
         String dir = base(input);
-        if (input.equals("~") && home.isPresent()) {
+        if (input.equals("~") && home != null) {
             return new Completion("~" + File.separator, dir, List.of());
         }
         List<Candidate> matches = matches(input, home, file);
@@ -116,7 +117,7 @@ public final class PathCompletion {
      * of {@code input}, sorted by name. Hidden ones only match a component that starts with {@code
      * .}. Empty if the directory can't be listed.
      */
-    public static List<Candidate> matches(String input, Optional<Path> home, Predicate<String> file) {
+    public static List<Candidate> matches(String input, @Nullable Path home, Predicate<String> file) {
         String dir = base(input);
         String prefix = input.substring(dir.length());
         try {

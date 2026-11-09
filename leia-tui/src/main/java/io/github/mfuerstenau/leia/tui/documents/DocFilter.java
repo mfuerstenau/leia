@@ -4,10 +4,11 @@ import io.github.mfuerstenau.leia.protocol.filter.FilterMatch;
 import io.github.mfuerstenau.leia.protocol.filter.FilterResult;
 import io.github.mfuerstenau.leia.protocol.filter.GetFilterResult;
 import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
+import io.github.mfuerstenau.leia.tui.Optionals;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.OptionalLong;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A filter that narrows the documents screen to the documents that match a query (ADR 0031) or a
@@ -60,8 +61,8 @@ public final class DocFilter {
     public record Built(long filterId, int startDoc, FilterStep step) {}
 
     private sealed interface State {
-        /** The backend finds the matches; {@code jobId} is empty until it has started the job. */
-        record Building(OptionalLong jobId, long searched) implements State {}
+        /** The backend finds the matches; {@code jobId} is null until it has started the job. */
+        record Building(@Nullable Long jobId, long searched) implements State {}
 
         /** @param timedOut for a pattern, the values skipped for taking too long, whose documents may be missing */
         record Ready(long filterId, int matchCount, long timedOut) implements State {}
@@ -69,8 +70,8 @@ public final class DocFilter {
         record Failed(String error) implements State {}
     }
 
-    /** The document last located, and which match it is: empty if it doesn't match. */
-    private record Located(int docId, OptionalInt index) {}
+    /** The document last located, and which match it is: null if it doesn't match. */
+    private record Located(int docId, @Nullable Integer index) {}
 
     private final long serial;
 
@@ -89,7 +90,7 @@ public final class DocFilter {
      */
     private final boolean rebuilt;
 
-    private State state = new State.Building(OptionalLong.empty(), 0);
+    private State state = new State.Building(null, 0);
 
     /** Or null. */
     private Located located;
@@ -130,14 +131,15 @@ public final class DocFilter {
 
     /** What to build the filter from again after a reopen, until the job is started. */
     public Optional<StartFilterParams> toRebuild() {
-        boolean pending =
-                state instanceof State.Building building && building.jobId().isEmpty();
+        boolean pending = state instanceof State.Building building && building.jobId() == null;
         return rebuilt && pending ? Optional.of(params) : Optional.empty();
     }
 
     /** The job that builds the filter, while it runs. */
     public OptionalLong jobId() {
-        return state instanceof State.Building building ? building.jobId() : OptionalLong.empty();
+        return state instanceof State.Building building
+                ? Optionals.optionalLong(building.jobId())
+                : OptionalLong.empty();
     }
 
     /** The filter the backend keeps, once it is built. */
@@ -151,7 +153,7 @@ public final class DocFilter {
 
     public void started(long jobId) {
         if (state instanceof State.Building building) {
-            state = new State.Building(OptionalLong.of(jobId), building.searched());
+            state = new State.Building(jobId, building.searched());
         }
     }
 
@@ -181,8 +183,8 @@ public final class DocFilter {
     }
 
     /** Takes what {@code stepFilter} found from {@code fromDoc} for a {@code step}. */
-    public Stepped stepped(int fromDoc, boolean forward, FilterStep step, Optional<FilterMatch> found) {
-        return stepped(fromDoc, forward, step, found, Optional.empty());
+    public Stepped stepped(int fromDoc, boolean forward, FilterStep step, @Nullable FilterMatch found) {
+        return stepped(fromDoc, forward, step, found, null);
     }
 
     /**
@@ -190,29 +192,21 @@ public final class DocFilter {
      * within} a range, if one is given: a match outside it is no match.
      */
     public Stepped stepped(
-            int fromDoc, boolean forward, FilterStep step, Optional<FilterMatch> found, Optional<Range> within) {
+            int fromDoc, boolean forward, FilterStep step, @Nullable FilterMatch found, @Nullable Range within) {
         if (step == FilterStep.LOCATE) {
-            located = new Located(
-                    fromDoc,
-                    found.filter(match -> match.docId() == fromDoc)
-                            .map(match -> OptionalInt.of(match.index()))
-                            .orElse(OptionalInt.empty()));
+            located = new Located(fromDoc, found != null && found.docId() == fromDoc ? found.index() : null);
             return new Stepped.Nothing();
         }
-        Optional<FilterMatch> inside = found.filter(
-                match -> within.map(range -> range.contains(match.docId())).orElse(true));
-        if (inside.isPresent()) {
-            located = new Located(
-                    inside.get().docId(), OptionalInt.of(inside.get().index()));
-            return new Stepped.Show(inside.get().docId());
+        if (found != null && (within == null || within.contains(found.docId()))) {
+            located = new Located(found.docId(), found.index());
+            return new Stepped.Show(found.docId());
         }
         if (step == FilterStep.NEAREST && forward) {
             return new Stepped.LookBack(fromDoc);
         }
         // Without matches, the title says so already.
         if (!(state instanceof State.Ready ready && ready.matchCount() == 0)) {
-            note = (forward ? "no next match" : "no previous match")
-                    + within.map(range -> " in " + range.name()).orElse("");
+            note = (forward ? "no next match" : "no previous match") + (within == null ? "" : " in " + within.name());
         }
         return new Stepped.Nothing();
     }
@@ -257,8 +251,8 @@ public final class DocFilter {
     /** Which match document {@code docId} is, if it was located, or else how many there are. */
     private String matchesText(State.Ready ready, int docId) {
         if (located != null && located.docId() == docId) {
-            return located.index().isPresent()
-                    ? (located.index().getAsInt() + 1) + " of " + ready.matchCount()
+            return located.index() != null
+                    ? (located.index() + 1) + " of " + ready.matchCount()
                     : "not a match, " + ready.matchCount() + " in all";
         }
         return ready.matchCount() == 1 ? "1 match" : ready.matchCount() + " matches";

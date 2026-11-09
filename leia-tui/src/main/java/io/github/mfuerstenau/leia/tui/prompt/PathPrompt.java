@@ -20,6 +20,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The open-index prompt: a one-line path editor with directory completion and the recent paths,
@@ -43,7 +44,7 @@ public final class PathPrompt {
     public record Cancel() implements Event {}
 
     private final LineInput input;
-    private final Optional<Path> home;
+    private final @Nullable Path home;
 
     /** The drop-down of the directories that the last Tab found, if it found more than one; else null. */
     private CompletionList list;
@@ -72,7 +73,7 @@ public final class PathPrompt {
     private record Browsing(String typed, int position) {}
 
     /** {@code home} is the directory that {@code ~} stands for. */
-    public PathPrompt(String input, Optional<Path> home) {
+    public PathPrompt(String input, @Nullable Path home) {
         this.input = new LineInput(input);
         this.home = home;
     }

@@ -41,6 +41,7 @@ import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
 import io.github.mfuerstenau.leia.protocol.search.StartHighlightParams;
 import io.github.mfuerstenau.leia.protocol.search.TermQuery;
 import io.github.mfuerstenau.leia.protocol.search.ValueHighlight;
+import io.github.mfuerstenau.leia.tui.Optionals;
 import io.github.mfuerstenau.leia.tui.TestFilters;
 import io.github.mfuerstenau.leia.tui.TestScreens;
 import io.github.mfuerstenau.leia.tui.analysis.AnalysisSettings;
@@ -61,6 +62,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 /** The tests of {@code documents.rs}, ported, and what the asynchronous calls add. */
@@ -88,12 +90,13 @@ class DocumentsTest {
     }
 
     private static DocumentField field(
-            String name, OptionalLong norm, List<StoredValue> stored, Optional<DocValues> docValues, boolean vector) {
-        return new DocumentField(name, norm, stored, docValues, vector, Optional.empty());
+            String name, @Nullable Long norm, List<StoredValue> stored, @Nullable DocValues docValues, boolean vector) {
+        return new DocumentField(
+                name, Optionals.optionalLong(norm), stored, Optional.ofNullable(docValues), vector, Optional.empty());
     }
 
     private static DocumentField empty(String name) {
-        return field(name, OptionalLong.empty(), List.of(), Optional.empty(), false);
+        return field(name, null, List.of(), null, false);
     }
 
     private static StoredValue string(String value) {
@@ -111,18 +114,18 @@ class DocumentsTest {
                 deleted,
                 List.of(string("doc-" + docId)),
                 List.of(string("red blue\nred"), string("second")),
-                Optional.of(rankValues()));
+                rankValues());
     }
 
     private static GetDocumentResult document(
-            int docId, boolean deleted, List<StoredValue> id, List<StoredValue> body, Optional<DocValues> rank) {
+            int docId, boolean deleted, List<StoredValue> id, List<StoredValue> body, @Nullable DocValues rank) {
         return new GetDocumentResult(
                 docId,
                 deleted,
                 List.of(
-                        field("id", OptionalLong.empty(), id, Optional.empty(), false),
-                        field("body", OptionalLong.of(3), body, Optional.empty(), true),
-                        field("rank", OptionalLong.empty(), List.of(), rank, false),
+                        field("id", null, id, null, false),
+                        field("body", 3L, body, null, true),
+                        field("rank", null, List.of(), rank, false),
                         empty("extra")));
     }
 
@@ -437,10 +440,10 @@ class DocumentsTest {
                 false,
                 List.of(string("doc-0")),
                 List.of(),
-                Optional.of(new DocValues(
+                new DocValues(
                         DocValuesType.SORTED_SET,
                         List.of(),
-                        List.of(new BytesValue("ab", false), new BytesValue("ff00", true))))));
+                        List.of(new BytesValue("ab", false), new BytesValue("ff00", true)))));
         documents.handleKey(key(KeyCode.DOWN));
         documents.handleKey(key(KeyCode.DOWN));
 
@@ -471,7 +474,7 @@ class DocumentsTest {
                 4,
                 false,
                 List.of(
-                        field("id", OptionalLong.empty(), List.of(string("doc-4")), Optional.empty(), false),
+                        field("id", null, List.of(string("doc-4")), null, false),
                         new DocumentField(
                                 "vec",
                                 OptionalLong.empty(),
@@ -655,7 +658,7 @@ class DocumentsTest {
                         new StoredValue(StoredType.LONG, "7", false),
                         new StoredValue(StoredType.BINARY, "ff00", true),
                         string("red blue\nred")),
-                Optional.of(rankValues())));
+                rankValues()));
         documents.handleKey(key(KeyCode.DOWN));
         assertThat(documents.jump(Jump.ANALYSIS)).hasValue(new Request.Analyze(2, "body", "red blue\nred"));
         // rank has no stored value; the viewer analyzes its doc values.
@@ -725,7 +728,7 @@ class DocumentsTest {
                         string("red blue\nred"),
                         new StoredValue(
                                 StoredType.STRING, "second", false, OptionalLong.of(70_000), OptionalLong.of(70_000))),
-                Optional.of(rankValues()));
+                rankValues());
     }
 
     @Test
@@ -757,7 +760,7 @@ class DocumentsTest {
                         Optional.empty(),
                         Optional.empty()),
                 new HighlightOptions(3, true, new AnalysisSettings().analyzer()));
-        documents.showSearchHit(0, Optional.of(query));
+        documents.showSearchHit(0, query);
         List<Long> cancel = new ArrayList<>();
         Documents.MatchesStart start = documents.matchesFor(0, cancel).orElseThrow();
         assertThat(start.params())
@@ -801,7 +804,7 @@ class DocumentsTest {
         assertThat(render(documents, 140, 30)).contains("matches in 1");
 
         // A term hit forgets them.
-        documents.showHit(new TermHit("id", new BytesValue("doc-0", false), 0, 0, 1, OptionalInt.empty()));
+        documents.showHit(new TermHit("id", new BytesValue("doc-0", false), 0, 0, 1, null));
         assertThat(render(documents, 140, 30)).doesNotContain("matches");
     }
 
@@ -835,7 +838,7 @@ class DocumentsTest {
     @Test
     void endsAValueCutAfterItsFirstCharactersWithAnEllipsis() {
         Documents documents = documents();
-        documents.loaded(document(0, false, List.of(string("x".repeat(1999) + "yz")), List.of(), Optional.empty()));
+        documents.loaded(document(0, false, List.of(string("x".repeat(1999) + "yz")), List.of(), null));
         documents.handleKey(key(KeyCode.TAB));
         documents.handleKey(key(KeyCode.END));
 
@@ -849,7 +852,7 @@ class DocumentsTest {
     void showsTheBeginningOfALongValue() {
         Documents documents = documents();
         String lines = IntStream.rangeClosed(1, 30).mapToObj(n -> "line " + n).collect(Collectors.joining("\n"));
-        documents.loaded(document(0, false, List.of(string(lines)), List.of(), Optional.empty()));
+        documents.loaded(document(0, false, List.of(string(lines)), List.of(), null));
         documents.handleKey(key(KeyCode.TAB));
         documents.handleKey(key(KeyCode.PAGE_DOWN));
 
@@ -867,8 +870,7 @@ class DocumentsTest {
                 false,
                 List.of(new StoredValue(StoredType.BINARY, "ff00", true)),
                 List.of(),
-                Optional.of(
-                        new DocValues(DocValuesType.SORTED_SET, List.of(), List.of(new BytesValue("a\tb", false))))));
+                new DocValues(DocValuesType.SORTED_SET, List.of(), List.of(new BytesValue("a\tb", false)))));
 
         assertThat(render(documents, 140, 30)).contains("binary  0xff00", "dv: a\\tb");
     }
@@ -974,7 +976,7 @@ class DocumentsTest {
     }
 
     private static TermHit hit(String field, int docId, int index) {
-        return new TermHit(field, new BytesValue("red", false), docId, index, 3, OptionalInt.of(2));
+        return new TermHit(field, new BytesValue("red", false), docId, index, 3, 2);
     }
 
     @Test
@@ -1056,7 +1058,7 @@ class DocumentsTest {
         Documents documents = documents();
         documents.loaded(document(0));
         assertThat(documents.startFilter("red", filterParams(false), 2))
-                .isEqualTo(new Request.StartFilter(1, filterParams(false), OptionalLong.empty(), OptionalLong.empty()));
+                .isEqualTo(new Request.StartFilter(1, filterParams(false), null, null));
         assertThat(documents.filterStarted(1, 9)).isTrue();
         assertThat(documents.filterJob()).hasValue(9);
 
@@ -1067,7 +1069,7 @@ class DocumentsTest {
         assertThat(documents.filterProgress(1, built(9, 2))).isEqualTo(step(9, 2, true, FilterStep.NEAREST));
         assertThat(documents.filterJob()).isEmpty();
         StepFilterParams params = new StepFilterParams(9, 2, true);
-        assertThat(documents.filterStepped(1, params, FilterStep.NEAREST, Optional.of(new FilterMatch(3, 1))))
+        assertThat(documents.filterStepped(1, params, FilterStep.NEAREST, new FilterMatch(3, 1)))
                 .isEqualTo(load(3));
         documents.loaded(document(3));
         assertThat(documents.filterToLocate(3)).isEmpty();
@@ -1083,8 +1085,7 @@ class DocumentsTest {
         // A document shown some other way is located.
         assertThat(documents.filterToLocate(4)).contains(new Documents.Locate(1, 9));
 
-        assertThat(documents.handleKey(key('b')))
-                .contains(new Request.ClearFilter(OptionalLong.empty(), OptionalLong.of(9)));
+        assertThat(documents.handleKey(key('b'))).contains(new Request.ClearFilter(null, 9L));
         assertThat(documents.filtered()).isFalse();
         assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEqualTo(load(4));
     }
@@ -1096,24 +1097,21 @@ class DocumentsTest {
         documents.startFilter("red", filterParams(false), 0);
         documents.filterStarted(1, 9);
         documents.filterProgress(1, built(9, 5));
-        documents.filterStepped(
-                1, new StepFilterParams(9, 0, true), FilterStep.NEAREST, Optional.of(new FilterMatch(1, 1)));
+        documents.filterStepped(1, new StepFilterParams(9, 0, true), FilterStep.NEAREST, new FilterMatch(1, 1));
         documents.loaded(document(1));
 
         assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEqualTo(step(9, 2, true, FilterStep.MOVE));
         assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEmpty();
         assertThat(documents.handleKey(key(KeyCode.LEFT))).isEmpty();
-        assertThat(documents.filterStepped(
-                        1, new StepFilterParams(9, 2, true), FilterStep.MOVE, Optional.of(new FilterMatch(3, 2))))
+        assertThat(documents.filterStepped(1, new StepFilterParams(9, 2, true), FilterStep.MOVE, new FilterMatch(3, 2)))
                 .isEqualTo(load(3));
         assertThat(documents.queuedStep()).isEmpty();
         documents.loaded(document(3));
         assertThat(documents.queuedStep()).isEqualTo(step(9, 4, true, FilterStep.MOVE));
         // Nothing further on: the next queued step goes on from the same document.
-        assertThat(documents.filterStepped(1, new StepFilterParams(9, 4, true), FilterStep.MOVE, Optional.empty()))
+        assertThat(documents.filterStepped(1, new StepFilterParams(9, 4, true), FilterStep.MOVE, null))
                 .isEqualTo(step(9, 2, false, FilterStep.MOVE));
-        documents.filterStepped(
-                1, new StepFilterParams(9, 2, false), FilterStep.MOVE, Optional.of(new FilterMatch(1, 1)));
+        documents.filterStepped(1, new StepFilterParams(9, 2, false), FilterStep.MOVE, new FilterMatch(1, 1));
         documents.loaded(document(1));
         assertThat(documents.queuedStep()).isEmpty();
         assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEqualTo(step(9, 2, true, FilterStep.MOVE));
@@ -1137,7 +1135,7 @@ class DocumentsTest {
         documents.startFilter("red", filterParams(false), 0);
         documents.filterStarted(1, 9);
         assertThat(documents.startFilter("blue", filterParams(true), 0))
-                .isEqualTo(new Request.StartFilter(2, filterParams(true), OptionalLong.of(9), OptionalLong.empty()));
+                .isEqualTo(new Request.StartFilter(2, filterParams(true), 9L, null));
         // The job of the replaced filter is not wanted any more, nor is what it reports.
         assertThat(documents.filterStarted(1, 11)).isFalse();
         documents.filterFailed(1, "too late");
@@ -1147,10 +1145,9 @@ class DocumentsTest {
         assertThat(render(documents, 100, 20)).contains("filter blue, deleted too: Invalid query: oops");
         assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEqualTo(load(2));
         // What the replaced filter found is ignored.
-        assertThat(documents.filterStepped(1, new StepFilterParams(9, 0, true), FilterStep.MOVE, Optional.empty()))
+        assertThat(documents.filterStepped(1, new StepFilterParams(9, 0, true), FilterStep.MOVE, null))
                 .isEmpty();
-        assertThat(documents.handleKey(key('b')))
-                .contains(new Request.ClearFilter(OptionalLong.empty(), OptionalLong.empty()));
+        assertThat(documents.handleKey(key('b'))).contains(new Request.ClearFilter(null, null));
     }
 
     @Test
@@ -1164,8 +1161,7 @@ class DocumentsTest {
 
         Documents reopened = documents.reopened(List.of(schema("id", 0)), 5, List.of());
 
-        assertThat(reopened.filterToRebuild())
-                .contains(new Request.StartFilter(2, filterParams(false), OptionalLong.empty(), OptionalLong.empty()));
+        assertThat(reopened.filterToRebuild()).contains(new Request.StartFilter(2, filterParams(false), null, null));
         // The old index's job is gone.
         assertThat(reopened.filterProgress(1, built(9, 2))).isEmpty();
         assertThat(reopened.filterStarted(2, 12)).isTrue();
@@ -1175,7 +1171,7 @@ class DocumentsTest {
         assertThat(reopened.filterProgress(2, built(12, 2)))
                 .contains(new Request.StepFilter(2, new StepFilterParams(12, 1, true), FilterStep.LOCATE));
         assertThat(reopened.filterStepped(
-                        2, new StepFilterParams(12, 1, true), FilterStep.LOCATE, Optional.of(new FilterMatch(1, 0))))
+                        2, new StepFilterParams(12, 1, true), FilterStep.LOCATE, new FilterMatch(1, 0)))
                 .isEmpty();
         assertThat(render(reopened, 100, 20)).contains("filter red: 1 of 2");
     }
@@ -1256,20 +1252,20 @@ class DocumentsTest {
                 5);
         documents.loaded(document(0));
         assertThat(documents.jumps()).contains(new GoMenu.Target(Jump.TERMS, "terms of id"));
-        assertThat(documents.jump(Jump.TERMS)).hasValue(new Request.BrowseTerms("id", Optional.empty(), false));
+        assertThat(documents.jump(Jump.TERMS)).hasValue(new Request.BrowseTerms("id", null, false));
 
         // From a hit of the terms screen, its field opens at its term; another field doesn't.
         documents.showHit(hit("body", 2, 1));
         documents.loaded(document(2));
         assertThat(documents.jump(Jump.TERMS))
-                .hasValue(new Request.BrowseTerms("body", Optional.of(new BytesValue("red", false)), false));
+                .hasValue(new Request.BrowseTerms("body", new BytesValue("red", false), false));
         documents.handleKey(key(KeyCode.UP));
-        assertThat(documents.jump(Jump.TERMS)).hasValue(new Request.BrowseTerms("id", Optional.empty(), false));
+        assertThat(documents.jump(Jump.TERMS)).hasValue(new Request.BrowseTerms("id", null, false));
 
         // A field with points and no terms opens its points; one with neither says so.
         documents.handleKey(key(KeyCode.DOWN));
         documents.handleKey(key(KeyCode.DOWN));
-        assertThat(documents.jump(Jump.TERMS)).hasValue(new Request.BrowseTerms("rank", Optional.empty(), true));
+        assertThat(documents.jump(Jump.TERMS)).hasValue(new Request.BrowseTerms("rank", null, true));
         documents.handleKey(key(KeyCode.DOWN));
         assertThat(documents.jump(Jump.TERMS)).isEmpty();
         assertThat(render(documents, 100, 20)).contains("extra has no terms");
@@ -1329,28 +1325,24 @@ class DocumentsTest {
         documents.startFilter("red", filterParams(false), 0);
         documents.filterStarted(1, 9);
         documents.filterProgress(1, built(9, 3));
-        documents.filterStepped(
-                1, new StepFilterParams(9, 0, true), FilterStep.NEAREST, Optional.of(new FilterMatch(0, 0)));
+        documents.filterStepped(1, new StepFilterParams(9, 0, true), FilterStep.NEAREST, new FilterMatch(0, 0));
         documents.loaded(document(0));
         documents.handleKey(key('P'));
 
         // The next match is in another segment: none in this one.
         assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEqualTo(step(9, 1, true, FilterStep.MOVE));
-        assertThat(documents.filterStepped(
-                        1, new StepFilterParams(9, 1, true), FilterStep.MOVE, Optional.of(new FilterMatch(3, 1))))
+        assertThat(documents.filterStepped(1, new StepFilterParams(9, 1, true), FilterStep.MOVE, new FilterMatch(3, 1)))
                 .isEmpty();
         assertThat(render(documents, 100, 20)).contains("filter red: 1 of 3 · no next match in _0");
 
         // > goes to the next segment's first match; one without any shows its first document.
         assertThat(documents.handleKey(key('>'))).isEqualTo(step(9, 2, true, FilterStep.MOVE));
-        assertThat(documents.filterStepped(
-                        1, new StepFilterParams(9, 2, true), FilterStep.MOVE, Optional.of(new FilterMatch(3, 1))))
+        assertThat(documents.filterStepped(1, new StepFilterParams(9, 2, true), FilterStep.MOVE, new FilterMatch(3, 1)))
                 .isEqualTo(load(2));
         documents.loaded(document(2));
         assertThat(render(documents, 100, 20)).contains("segment _1 ");
         assertThat(documents.handleKey(key('>'))).isEqualTo(step(9, 3, true, FilterStep.MOVE));
-        assertThat(documents.filterStepped(
-                        1, new StepFilterParams(9, 3, true), FilterStep.MOVE, Optional.of(new FilterMatch(4, 2))))
+        assertThat(documents.filterStepped(1, new StepFilterParams(9, 3, true), FilterStep.MOVE, new FilterMatch(4, 2)))
                 .isEqualTo(load(4));
     }
 
@@ -1391,7 +1383,7 @@ class DocumentsTest {
 
         // left segment _0, then each way another screen shows a document, or b starts a filter.
         List<Runnable> shows = List.of(
-                () -> documents.showSearchHit(1, Optional.empty()),
+                () -> documents.showSearchHit(1, null),
                 () -> documents.showPoint("id"),
                 () -> documents.showHit(hit("body", 1, 0)),
                 () -> documents.startFilter("red", filterParams(false), 1));
@@ -1412,23 +1404,20 @@ class DocumentsTest {
         documents.startFilter("red", filterParams(false), 0);
         documents.filterStarted(2, 9);
         documents.filterProgress(2, built(9, 3));
-        documents.filterStepped(
-                2, new StepFilterParams(9, 0, true), FilterStep.NEAREST, Optional.of(new FilterMatch(0, 0)));
+        documents.filterStepped(2, new StepFilterParams(9, 0, true), FilterStep.NEAREST, new FilterMatch(0, 0));
         documents.loaded(document(0));
         documents.handleKey(key('P'));
         documents.handleKey(key(KeyCode.RIGHT));
-        documents.filterStepped(
-                2, new StepFilterParams(9, 1, true), FilterStep.MOVE, Optional.of(new FilterMatch(3, 1)));
+        documents.filterStepped(2, new StepFilterParams(9, 1, true), FilterStep.MOVE, new FilterMatch(3, 1));
         assertThat(render(documents, 100, 20)).contains("no next match in _0");
         documents.showSegment(documents.segment(1, "_0").orElseThrow());
         documents.loaded(document(3));
         assertThat(render(documents, 100, 20)).contains("segment _0 ").doesNotContain("no next match");
 
         documents.handleKey(key(KeyCode.RIGHT));
-        documents.filterStepped(
-                2, new StepFilterParams(9, 4, true), FilterStep.MOVE, Optional.of(new FilterMatch(5, 2)));
+        documents.filterStepped(2, new StepFilterParams(9, 4, true), FilterStep.MOVE, new FilterMatch(5, 2));
         assertThat(render(documents, 100, 20)).contains("no next match in _0");
-        documents.showSearchHit(3, Optional.empty());
+        documents.showSearchHit(3, null);
         assertThat(render(documents, 100, 20)).doesNotContain("no next match");
     }
 
@@ -1539,8 +1528,8 @@ class DocumentsTest {
                 0,
                 false,
                 List.of(
-                        field("id", OptionalLong.empty(), List.of(string("doc-0")), Optional.empty(), false),
-                        field("price", OptionalLong.empty(), List.of(string("12.5")), Optional.empty(), false))));
+                        field("id", null, List.of(string("doc-0")), null, false),
+                        field("price", null, List.of(string("12.5")), null, false))));
         documents.handleKey(key(KeyCode.DOWN));
         assertThat(render(documents, 140, 50)).contains("Rebuilt     I rebuilds the points it was indexed with");
 

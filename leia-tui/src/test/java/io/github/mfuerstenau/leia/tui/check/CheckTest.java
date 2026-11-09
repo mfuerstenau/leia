@@ -17,9 +17,9 @@ import io.github.mfuerstenau.leia.tui.TestScreens;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.stream.IntStream;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 /** The tests of {@code check.rs}, ported, and what the ids add. */
@@ -104,16 +104,14 @@ class CheckTest {
         assertThat(check.keys().text()).isEqualTo(" ⏎ check all   Space mark   a mark all   r list again");
         assertThat(TestScreens.allKeys(check.keys())).doesNotContain("l level");
         assertThat(check.handleKey(key('l'))).contains(new Check.Request.Unsupported("Level"));
-        assertThat(check.handleKey(key(KeyCode.ENTER)))
-                .contains(new Check.Request.Start(1, OptionalInt.empty(), OptionalInt.empty(), Optional.empty()));
+        assertThat(check.handleKey(key(KeyCode.ENTER))).contains(new Check.Request.Start(1, null, null, null));
     }
 
     @Test
     void enterStartsACheckAtTheChosenLevel() {
         Check check = new Check("/data", true, false);
         assertThat(check.handleKey(key('l'))).isEmpty();
-        assertThat(check.handleKey(key(KeyCode.ENTER)))
-                .contains(new Check.Request.Start(1, OptionalInt.of(2), OptionalInt.empty(), Optional.empty()));
+        assertThat(check.handleKey(key(KeyCode.ENTER))).contains(new Check.Request.Start(1, 2, null, null));
         assertThat(check.running()).isTrue();
         assertThat(check.job()).isEmpty();
         // No second check while one runs, and the level stays.
@@ -307,7 +305,7 @@ class CheckTest {
         return check;
     }
 
-    private static Optional<List<CheckTarget>> only(Check check) {
+    private static @Nullable List<CheckTarget> only(Check check) {
         return ((Check.Request.Start) check.handleKey(key(KeyCode.ENTER)).orElseThrow()).only();
     }
 
@@ -332,7 +330,7 @@ class CheckTest {
     void nothingMarkedChecksEverything() {
         Check check = loaded();
         assertThat(check.keys().text()).contains("⏎ check all");
-        assertThat(only(check)).isEmpty();
+        assertThat(only(check)).isNull();
     }
 
     @Test
@@ -348,7 +346,7 @@ class CheckTest {
         check.handleKey(key('j'));
         check.handleKey(key(' '));
         assertThat(render(check, 80, 40)).contains("[-] a", "    [x] _0", "    [ ] _1", "    [x] _2");
-        assertThat(only(check)).contains(List.of(new CheckTarget("/data/a", Optional.of(List.of("_0", "_2")))));
+        assertThat(only(check)).isEqualTo(List.of(new CheckTarget("/data/a", Optional.of(List.of("_0", "_2")))));
     }
 
     @Test
@@ -366,7 +364,7 @@ class CheckTest {
         check.handleKey(key(' '));
         assertThat(render(check, 80, 40)).contains("[x] b");
         assertThat(only(check))
-                .contains(List.of(
+                .isEqualTo(List.of(
                         new CheckTarget("/data/a", Optional.empty()), new CheckTarget("/data/b", Optional.empty())));
     }
 
@@ -391,7 +389,7 @@ class CheckTest {
         check.targetsLoaded(new GetCheckTargetsResult(List.of(target("/data/c", true))));
         assertThat(render(check, 100, 40)).contains("[ ] c (skipped when opened): no segments* file found");
         check.handleKey(key(' '));
-        assertThat(only(check)).contains(List.of(new CheckTarget("/data/c", Optional.empty())));
+        assertThat(only(check)).isEqualTo(List.of(new CheckTarget("/data/c", Optional.empty())));
     }
 
     @Test
@@ -401,7 +399,7 @@ class CheckTest {
         check.handleKey(key('r'));
         check.targetsLoaded(new GetCheckTargetsResult(
                 List.of(target("/data/a", false, "_0", "_2"), target("/data/b", true, "_0"))));
-        assertThat(only(check)).contains(List.of(new CheckTarget("/data/a", Optional.empty())));
+        assertThat(only(check)).isEqualTo(List.of(new CheckTarget("/data/a", Optional.empty())));
     }
 
     @Test
@@ -412,7 +410,7 @@ class CheckTest {
         check.handleKey(key(' '));
         check.handleKey(key('a'));
         check.cancel();
-        assertThat(only(check)).isEmpty();
+        assertThat(only(check)).isNull();
     }
 
     @Test
@@ -425,8 +423,7 @@ class CheckTest {
             assertThat(render(check, 100, 40)).contains("· " + TextFormat.count(threads, "thread") + ")");
         }
         assertThat(render(check, 100, 40)).contains("Check (level 1, checksums · 1 thread)");
-        assertThat(check.handleKey(key(KeyCode.ENTER)))
-                .contains(new Check.Request.Start(1, OptionalInt.of(1), OptionalInt.of(1), Optional.empty()));
+        assertThat(check.handleKey(key(KeyCode.ENTER))).contains(new Check.Request.Start(1, 1, 1, null));
         // The title follows the keys after a check, as it does before one.
         check.cancel();
         check.handleKey(key('t'));
@@ -442,8 +439,7 @@ class CheckTest {
         Check check = new Check("/data", true, false, 6);
         assertThat(TestScreens.allKeys(check.keys())).doesNotContain("t threads");
         assertThat(check.handleKey(key('t'))).contains(new Check.Request.Unsupported("Threads"));
-        assertThat(check.handleKey(key(KeyCode.ENTER)))
-                .contains(new Check.Request.Start(1, OptionalInt.of(1), OptionalInt.empty(), Optional.empty()));
+        assertThat(check.handleKey(key(KeyCode.ENTER))).contains(new Check.Request.Start(1, 1, null, null));
     }
 
     @Test
@@ -504,8 +500,7 @@ class CheckTest {
     void aCheckStartedBeforeTheTargetsLoadedStillRuns() {
         Check check = new Check("/data", true, true, 6);
         check.initialRequest();
-        assertThat(check.handleKey(key(KeyCode.ENTER)))
-                .contains(new Check.Request.Start(1, OptionalInt.of(1), OptionalInt.of(6), Optional.empty()));
+        assertThat(check.handleKey(key(KeyCode.ENTER))).contains(new Check.Request.Start(1, 1, 6, null));
         // The outcome shows as before, with no list to merge it into.
         check.progress(1, progress(List.of(), new CheckIndexResult(List.of(broken("/data/b")), 50)));
         assertThat(render(check, 100, 40))

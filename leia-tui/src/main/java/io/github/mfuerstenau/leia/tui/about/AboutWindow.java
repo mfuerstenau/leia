@@ -22,6 +22,7 @@ import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The window that {@code ?} opens on any screen, with two tabs (ADR 0120). Keys, the first, lists
@@ -82,7 +83,7 @@ public final class AboutWindow {
     /** How many rows the content had in the last frame, for scrolling. */
     private int total = 1;
 
-    private Optional<String> message = Optional.empty();
+    private @Nullable String message;
 
     /**
      * A window with {@code keys}, those of {@code screen}, and on leia {@code version}, with {@code
@@ -106,7 +107,7 @@ public final class AboutWindow {
     }
 
     public Event handleKey(KeyEvent key) {
-        message = Optional.empty();
+        message = null;
         switch (key.code()) {
             case ESCAPE -> {
                 return new Close();
@@ -132,7 +133,7 @@ public final class AboutWindow {
                     case 'G' -> scrollTo(Integer.MAX_VALUE);
                     case 'y' -> {
                         if (tab == Tab.ABOUT) {
-                            message = Optional.of("Copied " + About.URL + " (OSC 52).");
+                            message = "Copied " + About.URL + " (OSC 52).";
                             return new Copy(About.URL);
                         }
                     }
@@ -259,8 +260,9 @@ public final class AboutWindow {
             return;
         }
         List<Line> footer = new ArrayList<>();
-        message.ifPresent(text ->
-                footer.add(Line.from(Span.styled(" " + text, Palette.current().muted()))));
+        Optional.ofNullable(message)
+                .ifPresent(text -> footer.add(
+                        Line.from(Span.styled(" " + text, Palette.current().muted()))));
         footer.addAll(KeyLegend.lines(tab == Tab.KEYS ? KEYS_TAB_KEYS : ABOUT_TAB_KEYS, inner.width()));
         int footerHeight = Math.min(footer.size(), Math.max(inner.height() / 3, 1));
         List<Rect> parts = Layout.vertical()

@@ -14,7 +14,6 @@ import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Optional;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -36,7 +35,7 @@ class JarsPopupTest {
     }
 
     private static JarsPopup popup() {
-        return new JarsPopup(DefaultJars.none(), RuntimesDirs.none(), Optional.empty());
+        return new JarsPopup(DefaultJars.none(), RuntimesDirs.none(), null);
     }
 
     private static AddJarsResult result(List<String> jars, List<String> alreadyLoaded) {
@@ -48,8 +47,8 @@ class JarsPopupTest {
         Path home = Path.of("/home/me");
         Path dir = home.resolve(".config/leia/jars");
         Path runtimes = Path.of("/opt/leia/runtimes");
-        JarsPopup popup = new JarsPopup(
-                new DefaultJars(dir, DefaultJars.State.LOADED), RuntimesDirs.of(runtimes), Optional.of(home));
+        JarsPopup popup =
+                new JarsPopup(new DefaultJars(dir, DefaultJars.State.LOADED), RuntimesDirs.of(runtimes), home);
         assertThat(render(popup, 100, 20)).contains("Listing the jars…");
         assertThat(popup.waiting()).isTrue();
 
@@ -76,7 +75,7 @@ class JarsPopupTest {
         JarsPopup popup = new JarsPopup(
                 new DefaultJars(Path.of("/cfg/leia/jars"), DefaultJars.State.SKIPPED),
                 RuntimesDirs.of(Path.of("/opt/leia/runtimes")),
-                Optional.empty());
+                null);
         popup.jarsLoaded(List.of());
 
         String screen = render(popup, 100, 12);

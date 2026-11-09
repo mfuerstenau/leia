@@ -91,6 +91,7 @@ import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.stream.Collectors;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The search screen (ADR 0010 to ADR 0014): a query line, the hits of the last query, and a details
@@ -267,7 +268,7 @@ public final class Search {
         final List<Hit> hits;
 
         /** The terms a More-Like-This query chose, best first. */
-        final Optional<List<LikeTerm>> moreLikeThisTerms;
+        final @Nullable List<LikeTerm> moreLikeThisTerms;
 
         /** Whether more hits may follow: the last page was full. */
         boolean more;
@@ -282,7 +283,7 @@ public final class Search {
             this.relation = results.totalHitsRelation();
             this.tookMillis = results.tookMillis();
             this.hits = new ArrayList<>(results.hits());
-            this.moreLikeThisTerms = results.moreLikeThisTerms();
+            this.moreLikeThisTerms = results.moreLikeThisTerms().orElse(null);
             this.more = more;
         }
 
@@ -1002,7 +1003,7 @@ public final class Search {
         if (dvField.isEmpty() || input.text().isBlank()) {
             return Optional.empty();
         }
-        Optional<DocValuesNumber> encoding = numberField() ? Optional.of(number) : Optional.empty();
+        DocValuesNumber encoding = numberField() ? number : null;
         return Optional.of(query(
                 null, null, null, null, DocValuesSyntax.query(dvField.get().name(), encoding, hex, input.text())));
     }
@@ -2409,7 +2410,7 @@ public final class Search {
             cells.add(Cell.from(Line.from(fieldSpans(hit, isSource))));
             rows.add(Row.from(cells.toArray(Cell[]::new)));
         }
-        tailRow(list.more, Optional.ofNullable(list.error)).ifPresent(rows::add);
+        tailRow(list.more, list.error).ifPresent(rows::add);
         List<Cell> header = new ArrayList<>(List.of(Cell.from("#"), Cell.from("Doc"), Cell.from("    Score")));
         List<Constraint> widths = new ArrayList<>(
                 List.of(Constraint.length(rankWidth), Constraint.length(docWidth), Constraint.length(9)));
@@ -2581,9 +2582,8 @@ public final class Search {
         lines.add(Line.empty());
         Optional<MoreLikeThisQuery> source = submitted.params.query().moreLikeThis();
         if (source.isPresent()) {
-            if (list.moreLikeThisTerms.isPresent()
-                    && !list.moreLikeThisTerms.get().isEmpty()) {
-                lines.addAll(likeTermLines(list.moreLikeThisTerms.get()));
+            if (list.moreLikeThisTerms != null && !list.moreLikeThisTerms.isEmpty()) {
+                lines.addAll(likeTermLines(list.moreLikeThisTerms));
                 lines.add(Line.empty());
             }
             OptionalInt docId = source.get().docId();

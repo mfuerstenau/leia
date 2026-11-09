@@ -38,9 +38,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The check screen (ADR 0022, ADR 0093): runs Lucene's {@code CheckIndex} on the indexes of the open
@@ -71,8 +71,11 @@ public final class Check {
          * on this many threads, or all the processors, of the indexes and segments of {@code only},
          * or of everything, and report back with {@link #started} or {@link #failed}.
          */
-        record Start(long checkId, OptionalInt level, OptionalInt threads, Optional<List<CheckTarget>> only)
-                implements Request {}
+        record Start(
+                long checkId,
+                @Nullable Integer level,
+                @Nullable Integer threads,
+                @Nullable List<CheckTarget> only) implements Request {}
 
         /** Fetch the indexes with their segments, and report back with {@link #targetsLoaded} or {@link #targetsFailed}. */
         record LoadTargets() implements Request {}
@@ -322,9 +325,9 @@ public final class Check {
             focus = Focus.OUTPUT;
             return Optional.of(new Request.Start(
                     id,
-                    levels ? OptionalInt.of(level) : OptionalInt.empty(),
-                    threadsSupported ? OptionalInt.of(threads) : OptionalInt.empty(),
-                    only()));
+                    levels ? Integer.valueOf(level) : null,
+                    threadsSupported ? Integer.valueOf(threads) : null,
+                    only().orElse(null)));
         }
         if (key.isChar('l') && !levels) {
             return Optional.of(new Request.Unsupported("Level"));

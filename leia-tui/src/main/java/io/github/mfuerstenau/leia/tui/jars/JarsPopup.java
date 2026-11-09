@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The jars popup (ADR 0024): lists the loaded jars, the default folder and the folder of runtimes
@@ -57,7 +58,7 @@ public final class JarsPopup {
     private final RuntimesDirs runtimeFolders;
 
     /** The directory that {@code ~} stands for. */
-    private final Optional<Path> home;
+    private final @Nullable Path home;
 
     /** The loaded jars; null until they are fetched, or if they couldn't be. */
     private List<String> jars;
@@ -88,7 +89,7 @@ public final class JarsPopup {
     /** How many jars the list showed when it was last drawn. */
     private int page = 1;
 
-    public JarsPopup(DefaultJars defaultJars, RuntimesDirs runtimeFolders, Optional<Path> home) {
+    public JarsPopup(DefaultJars defaultJars, RuntimesDirs runtimeFolders, @Nullable Path home) {
         this.defaultJars = defaultJars;
         this.runtimeFolders = runtimeFolders;
         this.home = home;
@@ -373,8 +374,8 @@ public final class JarsPopup {
 
     /** {@code path} with the home directory as {@code ~}. */
     private String shorten(Path path) {
-        if (home.isPresent() && path.startsWith(home.get())) {
-            Path rest = home.get().relativize(path);
+        if (home != null && path.startsWith(home)) {
+            Path rest = home.relativize(path);
             return rest.toString().isEmpty() ? "~" : "~" + File.separator + rest;
         }
         return path.toString();

@@ -27,7 +27,6 @@ import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -390,7 +389,7 @@ class ViewerTest {
     }
 
     private static Split split(String items, String keyValue) {
-        return new Split(items, Optional.ofNullable(keyValue));
+        return new Split(items, keyValue);
     }
 
     @Test

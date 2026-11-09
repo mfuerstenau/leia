@@ -39,6 +39,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The window that downloads runtimes inside leia (ADR 0080), opened with {@code D} on the start
@@ -112,7 +113,7 @@ public final class RuntimeWindow {
     private String planError;
     private int cursor;
     private int detailsScroll;
-    private Optional<String> hint = Optional.empty();
+    private @Nullable String hint;
     private InstallJob job;
     private RuntimeInstall.Outcome outcome;
     private List<Line> loadLines = List.of();
@@ -344,7 +345,7 @@ public final class RuntimeWindow {
     }
 
     private Event choose(KeyEvent key) {
-        hint = Optional.empty();
+        hint = null;
         if (key.code() == KeyCode.ESCAPE || key.isChar('q')) {
             return new Close();
         }
@@ -369,7 +370,7 @@ public final class RuntimeWindow {
 
     private Event startChosen() {
         if (checked.isEmpty() && refreshed().isEmpty()) {
-            hint = Optional.of(offered.isEmpty() ? "Nothing to download; Esc closes" : NOTHING_CHECKED);
+            hint = offered.isEmpty() ? "Nothing to download; Esc closes" : NOTHING_CHECKED;
             return new Nothing();
         }
         return start();
@@ -385,7 +386,7 @@ public final class RuntimeWindow {
             return;
         }
         String folder = present.get(cursor - offered.size()).known().folder();
-        hint = Optional.of(folder + " is " + stateWord(folder) + "; there is nothing to download for it");
+        hint = folder + " is " + stateWord(folder) + "; there is nothing to download for it";
     }
 
     /** Scrolls the details, or moves the cursor. */
@@ -567,8 +568,9 @@ public final class RuntimeWindow {
                     yield KeyLegend.lines(picker.keys() + (picker.typing() ? "" : "   Esc back"), width);
                 }
                 List<Line> footer = new ArrayList<>();
-                hint.ifPresent(text -> footer.add(
-                        Line.from(Span.styled(" " + text, Palette.current().warning()))));
+                Optional.ofNullable(hint)
+                        .ifPresent(text -> footer.add(Line.from(
+                                Span.styled(" " + text, Palette.current().warning()))));
                 String keys = CHOOSE_KEYS;
                 if (plan.runtimes().isEmpty()) {
                     keys = present.isEmpty() ? CLOSE_KEYS : VIEW_KEYS;
