@@ -14,6 +14,7 @@ import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.util.BytesRef;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Rebuilds the terms and points a document was indexed with, field by field (ADR 0029, ADR 0041).
@@ -132,7 +133,7 @@ public final class Reconstruct {
      * The postings to scan for a field of the document's segment: none if the field isn't indexed
      * there, or its term vector in the document is read instead.
      */
-    private static Terms postings(SegmentDoc segmentDoc, String name) throws IOException {
+    private static @Nullable Terms postings(SegmentDoc segmentDoc, String name) throws IOException {
         LeafReader leaf = segmentDoc.leaf();
         FieldInfo info = leaf.getFieldInfos().fieldInfo(name);
         if (info == null || info.getIndexOptions() == IndexOptions.NONE) {

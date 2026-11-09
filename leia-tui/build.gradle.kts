@@ -16,6 +16,8 @@ dependencies {
     implementation(project(":leia-protocol"))
     // What every frontend shares: the values' decoding and more (ADR 0126).
     implementation(project(":leia-client"))
+    // @Nullable and @NullMarked (ADR 0127): annotations only.
+    compileOnly(libs.jspecify)
     // The viewer checks JSON with it, and the document export writes it (ADR 0034 §10).
     implementation(platform(libs.jackson.bom))
     implementation(libs.jackson.databind)

@@ -89,7 +89,7 @@ public final class AutoStopWordsForm {
     /** The field whose words are listed; null for none. */
     private @Nullable String listed;
 
-    private String message;
+    private @Nullable String message;
 
     /**
      * @param fields the indexed fields of the open index
@@ -357,10 +357,14 @@ public final class AutoStopWordsForm {
     }
 
     private boolean hasField(String field) {
-        return found.fields().stream().anyMatch(words -> words.field().equals(field));
+        return found != null
+                && found.fields().stream().anyMatch(words -> words.field().equals(field));
     }
 
     private List<String> words(String field) {
+        if (found == null) {
+            return List.of();
+        }
         return found.fields().stream()
                 .filter(words -> words.field().equals(field))
                 .findFirst()

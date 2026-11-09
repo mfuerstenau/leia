@@ -9,7 +9,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -85,8 +84,10 @@ public record AnalysisSettings(
 
     /** The stop words of {@code field}; none if it has none. */
     public List<String> stopWords(String field) {
-        return Stream.ofNullable(stopWords)
-                .flatMap(found -> found.fields().stream())
+        if (stopWords == null) {
+            return List.of();
+        }
+        return stopWords.fields().stream()
                 .filter(words -> words.field().equals(field))
                 .findFirst()
                 .map(FieldStopWords::words)
@@ -95,8 +96,10 @@ public record AnalysisSettings(
 
     /** The fields that have stop words, and those words. */
     private List<FieldStopWords> fieldsWithStopWords() {
-        return Stream.ofNullable(stopWords)
-                .flatMap(found -> found.fields().stream())
+        if (stopWords == null) {
+            return List.of();
+        }
+        return stopWords.fields().stream()
                 .filter(words -> !words.words().isEmpty())
                 .toList();
     }

@@ -126,6 +126,12 @@ public record AutoStopWords(int maxDocFreq, Map<String, List<String>> words) {
 
         private static final long serialVersionUID = 1L;
 
+        /** The message, which every constructor takes. */
+        @Override
+        public String getMessage() {
+            return Objects.requireNonNullElse(super.getMessage(), getClass().getSimpleName());
+        }
+
         private final String field;
 
         TooManyWordsException(String field, int maxWords) {

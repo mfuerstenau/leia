@@ -122,7 +122,7 @@ public final class IndexCheck {
             DirectoryImpl directoryImpl,
             int level,
             int threads,
-            List<String> onlySegments,
+            @Nullable List<String> onlySegments,
             Consumer<String> output,
             ScanProgress progress) {
         CheckIndex.Level.checkIfLevelInBounds(level);
@@ -158,8 +158,8 @@ public final class IndexCheck {
      * Checks segments in parallel if there are several to check, on {@code threads} threads at most,
      * one per segment, on an executor that is never interrupted.
      */
-    private static CheckIndex.Status run(CheckIndex checker, List<String> commit, int threads, List<String> only)
-            throws IOException {
+    private static CheckIndex.Status run(
+            CheckIndex checker, List<String> commit, int threads, @Nullable List<String> only) throws IOException {
         long segments = only == null
                 ? commit.size()
                 : commit.stream().filter(only::contains).count();

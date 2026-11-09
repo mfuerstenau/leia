@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.runtime;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Jars with analysis components, codecs or formats of their own, compiled against the runtime's
@@ -72,6 +73,12 @@ public interface Extensions {
     /** Jars whose factories, codecs or formats can't be loaded, such as for a missing dependency. */
     final class InvalidJarException extends Exception {
         private static final long serialVersionUID = 1L;
+
+        /** The message, which every constructor takes. */
+        @Override
+        public String getMessage() {
+            return Objects.requireNonNullElse(super.getMessage(), getClass().getSimpleName());
+        }
 
         public InvalidJarException(String message, Throwable cause) {
             super(message, cause);

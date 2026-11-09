@@ -173,17 +173,19 @@ final class Queries {
     /** The index's fields, fetched by the first who asks. */
     static final class Stats {
         private final Call call;
-        private GetIndexStatsResult stats;
+        private @Nullable GetIndexStatsResult stats;
 
         Stats(Call call) {
             this.call = call;
         }
 
         List<IndexField> fields() throws ToolException, Jobs.Cancelled {
-            if (stats == null) {
-                stats = call.call(Methods.GET_INDEX_STATS, new GetIndexStatsParams());
+            GetIndexStatsResult result = stats;
+            if (result == null) {
+                result = call.call(Methods.GET_INDEX_STATS, new GetIndexStatsParams());
+                stats = result;
             }
-            return stats.fields();
+            return result.fields();
         }
 
         Optional<DocValuesType> docValuesType(String field) throws ToolException, Jobs.Cancelled {

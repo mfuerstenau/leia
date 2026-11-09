@@ -509,7 +509,13 @@ public interface Search {
     final class InvalidAnalyzerException extends Exception {
         private static final long serialVersionUID = 1L;
 
-        public InvalidAnalyzerException(String message, Throwable cause) {
+        /** The message, which every constructor takes. */
+        @Override
+        public String getMessage() {
+            return Objects.requireNonNullElse(super.getMessage(), getClass().getSimpleName());
+        }
+
+        public InvalidAnalyzerException(String message, @Nullable Throwable cause) {
             super(message, cause);
         }
     }
@@ -518,7 +524,13 @@ public interface Search {
     final class InvalidQueryException extends Exception {
         private static final long serialVersionUID = 1L;
 
-        public InvalidQueryException(String message, Throwable cause) {
+        /** The message, which every constructor takes. */
+        @Override
+        public String getMessage() {
+            return Objects.requireNonNullElse(super.getMessage(), getClass().getSimpleName());
+        }
+
+        public InvalidQueryException(String message, @Nullable Throwable cause) {
             super(message, cause);
         }
     }

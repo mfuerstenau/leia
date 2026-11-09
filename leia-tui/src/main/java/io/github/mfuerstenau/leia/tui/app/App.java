@@ -188,28 +188,28 @@ public final class App {
     private DirectoryImpl directory;
 
     /** What is open, or null. */
-    private Opened opened;
+    private @Nullable Opened opened;
 
     /** The overview of the open index; null without one, or without a reader. */
-    private Overview overview;
+    private @Nullable Overview overview;
 
     /** The commits screen of the open index, with or without a reader; null without one. */
-    private Commits commits;
+    private @Nullable Commits commits;
 
     /** The terms screen of the open index; null without one, or without a reader. */
-    private Terms terms;
+    private @Nullable Terms terms;
 
     /** The documents screen of the open index; null without one, or without a reader. */
-    private Documents documents;
+    private @Nullable Documents documents;
 
     /** The format of each point field, which the terms and documents screens share (ADR 0041). */
     private PointFormats pointFormats = new PointFormats();
 
     /** The search screen of the open index; null without one, or without a reader. */
-    private Search search;
+    private @Nullable Search search;
 
     /** The check screen of the open path, with or without a reader; null without one. */
-    private Check check;
+    private @Nullable Check check;
 
     /** The analysis screen, which needs no index; its analyzer is kept when another index is opened. */
     private final Analysis analysis = new Analysis();
@@ -226,18 +226,19 @@ public final class App {
      *
      * @param jobId null until the backend has started the job
      */
-    private record RunningScan(long id, String field, int topN, Long jobId) {}
+    private record RunningScan(
+            long id, String field, int topN, @Nullable Long jobId) {}
 
-    private RunningScan scan;
+    private @Nullable RunningScan scan;
 
     /**
      * The scan of the stored fields on the overview (ADR 0113), under an id of the term scans'.
      *
      * @param jobId null until the backend has started the job
      */
-    private record RunningStoredFields(long id, Long jobId) {}
+    private record RunningStoredFields(long id, @Nullable Long jobId) {}
 
-    private RunningStoredFields storedFieldsScan;
+    private @Nullable RunningStoredFields storedFieldsScan;
 
     /** Fields whose scan waits for the running one. */
     private final ArrayDeque<String> queue = new ArrayDeque<>();
@@ -285,16 +286,16 @@ public final class App {
     }
 
     /** The open-index prompt, or null. */
-    private PathPrompt prompt;
+    private @Nullable PathPrompt prompt;
 
     /** What the last reopen came to, on the tab line until the next key; or null. */
-    private Notice notice;
+    private @Nullable Notice notice;
 
     /**
      * The path of a prompt that was closed after it failed to open it: the next prompt starts from
      * it, so that it can be tried again once a jar is added (ADR 0024). Or null.
      */
-    private String failedPath;
+    private @Nullable String failedPath;
 
     /** The default folder of jars, and whether its jars were loaded (ADR 0024). */
     private DefaultJars defaultJars = DefaultJars.none();
@@ -305,25 +306,25 @@ public final class App {
     private RuntimesDirs runtimeFolders = RuntimesDirs.none();
 
     /** The runtime jars leia knows and which of them are loaded (ADR 0072); null until they are known. */
-    private GetRuntimesResult runtimes;
+    private @Nullable GetRuntimesResult runtimes;
 
     /** The jars popup, while it is open; or null. */
-    private JarsPopup jars;
+    private @Nullable JarsPopup jars;
 
     /** The window that downloads runtimes (ADR 0080), while it is open; or null. */
-    private RuntimeWindow runtimeWindow;
+    private @Nullable RuntimeWindow runtimeWindow;
 
     /** The last records of the log (ADR 0087). */
     private LogBuffer log = LogBuffer.detached();
 
     /** The log window, while it is open; or null. */
-    private LogWindow logWindow;
+    private @Nullable LogWindow logWindow;
 
     /** The about window, while it is open; or null. */
-    private AboutWindow aboutWindow;
+    private @Nullable AboutWindow aboutWindow;
 
     /** The menu that {@code g} opened, which takes the next key (ADR 0120); null while closed. */
-    private GoMenu goMenu;
+    private @Nullable GoMenu goMenu;
 
     /** The level the log window shows; it outlasts the window. */
     private Level logFilter = log.logged();
@@ -338,7 +339,7 @@ public final class App {
     private @Nullable Path cwd;
 
     /** Where to export the terms of a field (ADR 0022) or a document (ADR 0030) to, while it is asked; or null. */
-    private ExportPrompt exportPrompt;
+    private @Nullable ExportPrompt exportPrompt;
 
     /**
      * The export that runs, or null. There is at most one. Each has an id, so that a reply for an
@@ -353,7 +354,8 @@ public final class App {
      *
      * @param jobId null until the backend has started the job
      */
-    private record TermsExport(long id, String field, Long jobId, long termsWritten) implements RunningExport {}
+    private record TermsExport(
+            long id, String field, @Nullable Long jobId, long termsWritten) implements RunningExport {}
 
     /**
      * A document, exported by leia-client (ADR 0030, ADR 0126): fetched, rebuilt, put together and
@@ -361,9 +363,10 @@ public final class App {
      *
      * @param job null until the session has started it
      */
-    private record DocumentExporting(long id, int docId, ExportJob job) implements RunningExport {}
+    private record DocumentExporting(
+            long id, int docId, @Nullable ExportJob job) implements RunningExport {}
 
-    private RunningExport export;
+    private @Nullable RunningExport export;
 
     /** The id of the next export. */
     private long nextExportId = 1;
@@ -514,7 +517,8 @@ public final class App {
 
     /** The search screen of {@code stats}, which parses with the analysis screen's analyzer. */
     private Search newSearch(GetIndexStatsResult stats) {
-        Search fresh = new Search(stats.fields(), stats.maxDoc()).withFeatures(opened.features());
+        Search fresh = new Search(stats.fields(), stats.maxDoc())
+                .withFeatures(Objects.requireNonNull(opened).features());
         fresh.setAnalyzer(analysis.settings());
         return fresh;
     }
@@ -598,7 +602,7 @@ public final class App {
         }
         // Before anything below reads it.
         opened = new Opened(
-                opened.path(),
+                Objects.requireNonNull(opened).path(),
                 false,
                 opened.directory(),
                 indexes.stream().map(IndexCommitStats::path).toList(),
@@ -1145,7 +1149,9 @@ public final class App {
                 if (documents == null) {
                     yield Optional.<Action>empty();
                 }
-                documents.showSearchHit(document.docId(), search.matchesQuery().orElse(null));
+                documents.showSearchHit(
+                        document.docId(),
+                        Objects.requireNonNull(search).matchesQuery().orElse(null));
                 jump(Screen.DOCUMENTS);
                 yield loadDocument(document.docId());
             }
@@ -1153,7 +1159,9 @@ public final class App {
                 if (documents == null) {
                     yield Optional.<Action>empty();
                 }
-                documents.showSearchHit(view.docId(), search.matchesQuery().orElse(null));
+                documents.showSearchHit(
+                        view.docId(),
+                        Objects.requireNonNull(search).matchesQuery().orElse(null));
                 jump(Screen.DOCUMENTS);
                 Optional<Action> action = documentsAction(documents
                         .viewMatches(view.docId(), view.field(), view.index(), view.spans(), view.matchCount())
@@ -1273,7 +1281,7 @@ public final class App {
      */
     private Optional<Action> loadDocument(int docId) {
         List<Long> cancel = new ArrayList<>();
-        documents.stopRebuild().ifPresent(cancel::add);
+        Objects.requireNonNull(documents).stopRebuild().ifPresent(cancel::add);
         Optional<Documents.MatchesStart> matches = documents.matchesFor(docId, cancel);
         Optional<Documents.Locate> locate = documents.filterToLocate(docId);
         documents.want(docId);
@@ -1352,7 +1360,11 @@ public final class App {
                     notice = new Notice.ExportRunning();
                 } else {
                     exportPrompt = ExportPrompt.document(
-                            asked.docId(), indexDirs(), opened.supports(Feature.RECONSTRUCT), home, cwd);
+                            asked.docId(),
+                            indexDirs(),
+                            Objects.requireNonNull(opened).supports(Feature.RECONSTRUCT),
+                            home,
+                            cwd);
                 }
                 yield Optional.empty();
             }
@@ -1609,13 +1621,13 @@ public final class App {
     private Optional<Action> startExport(ExportPrompt.ExportRequest request) {
         return switch (request) {
             case ExportPrompt.ExportRequest.Terms termsRequest -> {
-                exportPrompt.setBusy();
+                Objects.requireNonNull(exportPrompt).setBusy();
                 long id = nextExportId++;
                 export = new TermsExport(id, termsRequest.params().field(), null, 0);
                 yield Optional.of(new Action.StartExportTerms(id, termsRequest.params()));
             }
             case ExportPrompt.ExportRequest.Document document -> {
-                exportPrompt.setBusy();
+                Objects.requireNonNull(exportPrompt).setBusy();
                 long id = nextExportId++;
                 export = new DocumentExporting(id, document.docId(), null);
                 yield Optional.of(new Action.StartDocumentExport(id, exportRequest(document)));
@@ -1625,7 +1637,8 @@ public final class App {
 
     /** What leia-client is to export for {@code document}, and where to (ADR 0126). */
     private DocumentExporter.Request exportRequest(ExportPrompt.ExportRequest.Document document) {
-        Documents shown = documents;
+        Documents shown = Objects.requireNonNull(documents);
+        Opened open = Objects.requireNonNull(opened);
         DocumentExporter.Target target = switch (document.target()) {
             case ExportTarget.File file ->
                 new DocumentExporter.Target.File(Path.of(file.path()), file.overwrite(), indexDirs());
@@ -1633,10 +1646,10 @@ public final class App {
         };
         return new DocumentExporter.Request(
                 document.docId(),
-                opened.supports(Feature.TERM_VECTORS),
+                open.supports(Feature.TERM_VECTORS),
                 document.indexedTerms(),
                 shown::field,
-                opened.path(),
+                open.path(),
                 shown.indexOf(document.docId()).orElse(null),
                 target);
     }
@@ -1911,8 +1924,8 @@ public final class App {
             documents.matchesJob().ifPresent(job -> polls.add(new Poll.DocumentMatches(job[0], job[1])));
             documents
                     .filterJob()
-                    .ifPresent(jobId ->
-                            polls.add(new Poll.Filter(documents.filterSerial().getAsLong(), jobId)));
+                    .ifPresent(jobId -> polls.add(new Poll.Filter(
+                            Objects.requireNonNull(documents).filterSerial().getAsLong(), jobId)));
         }
         if (export instanceof TermsExport termsExport && termsExport.jobId() != null) {
             polls.add(new Poll.ExportTerms(termsExport.id(), termsExport.jobId()));
@@ -1922,11 +1935,13 @@ public final class App {
             search.explainJob().ifPresent(job -> polls.add(new Poll.Explain(job[0], job[1])));
             search.highlightJob().ifPresent(job -> polls.add(new Poll.Highlight(job[0], job[1])));
             search.storedScanJob()
-                    .ifPresent(job -> polls.add(new Poll.StoredScan(job[0], job[1], search.storedScanFromHit())));
+                    .ifPresent(job -> polls.add(new Poll.StoredScan(
+                            job[0], job[1], Objects.requireNonNull(search).storedScanFromHit())));
             search.knnRecallJob().ifPresent(job -> polls.add(new Poll.KnnRecall(job[0], job[1])));
         }
         if (check != null) {
-            check.job().ifPresent(job -> polls.add(new Poll.Check(job[0], job[1], check.fromLine())));
+            Check running = check;
+            running.job().ifPresent(job -> polls.add(new Poll.Check(job[0], job[1], running.fromLine())));
         }
         analysis.autoStopWordsJob().ifPresent(job -> polls.add(new Poll.AutoStopWords(job[0], job[1])));
         return polls;
@@ -2019,7 +2034,7 @@ public final class App {
      * if it has started; otherwise {@link #scanStarted} cancels it once it has.
      */
     private Optional<Action> cancelScans() {
-        Long jobId = scan.jobId();
+        Long jobId = Objects.requireNonNull(scan).jobId();
         if (overview != null) {
             overview.setScan(scan.field(), null);
             for (String field : queue) {
@@ -2032,7 +2047,7 @@ public final class App {
 
     /** Starts the scan of the stored fields, unless it runs (ADR 0113). */
     private Optional<Action> requestStoredFields() {
-        if (!opened.supports(Feature.STORED_FIELDS)) {
+        if (!Objects.requireNonNull(opened).supports(Feature.STORED_FIELDS)) {
             notice = new Notice.NotSupported("Stored fields", reason());
             return Optional.empty();
         }
@@ -2040,7 +2055,7 @@ public final class App {
             return Optional.empty();
         }
         storedFieldsScan = new RunningStoredFields(nextScanId++, null);
-        overview.setStoredFields(new StoredFieldsState.Running(0));
+        Objects.requireNonNull(overview).setStoredFields(new StoredFieldsState.Running(0));
         return Optional.of(new Action.StartStoredFieldsScan(storedFieldsScan.id()));
     }
 
@@ -2050,11 +2065,11 @@ public final class App {
      * finished stored fields scan found in no document is said to have none instead.
      */
     private Optional<Action> filterByStoredField(boolean withDeleted) {
-        if (!opened.supports(Feature.STORED_FIELDS)) {
+        if (!Objects.requireNonNull(opened).supports(Feature.STORED_FIELDS)) {
             notice = new Notice.NotSupported("Docs storing a field", reason());
             return Optional.empty();
         }
-        Optional<IndexField> field = overview.selectedField();
+        Optional<IndexField> field = Objects.requireNonNull(overview).selectedField();
         if (field.isEmpty()) {
             return Optional.empty();
         }
@@ -2120,7 +2135,7 @@ public final class App {
 
     /** Forgets the stored fields scan. Returns the action that cancels its job, if it has started. */
     private Optional<Action> cancelStoredFields() {
-        Long jobId = storedFieldsScan.jobId();
+        Long jobId = Objects.requireNonNull(storedFieldsScan).jobId();
         if (overview != null) {
             overview.setStoredFields(null);
         }
@@ -2130,12 +2145,12 @@ public final class App {
 
     /** Queues the scans of {@code fields}, and returns the scan to start if none runs. */
     private Optional<Action> requestScans(List<String> fields) {
-        if (!opened.supports(Feature.TOP_TERMS)) {
+        if (!Objects.requireNonNull(opened).supports(Feature.TOP_TERMS)) {
             notice = new Notice.NotSupported("Top terms", reason());
             return Optional.empty();
         }
         for (String field : fields) {
-            overview.setScan(field, new FieldScan.Queued());
+            Objects.requireNonNull(overview).setScan(field, new FieldScan.Queued());
             queue.addLast(field);
         }
         return scan != null ? Optional.empty() : startNextScan();
@@ -2159,7 +2174,7 @@ public final class App {
             return overviewEnter();
         }
         if (key.isChar('a')) {
-            return requestScans(overview.fieldsToScan());
+            return requestScans(Objects.requireNonNull(overview).fieldsToScan());
         }
         if (key.isChar('f')) {
             return requestStoredFields();
@@ -2169,20 +2184,20 @@ public final class App {
         }
         if (key.isChar('+') || key.isChar('=') || key.isChar('-')) {
             topN = Overview.stepTopTerms(topN, !key.isChar('-'));
-            overview.setTopN(topN);
+            Objects.requireNonNull(overview).setTopN(topN);
             return Optional.empty();
         }
-        overview.handleKey(key);
+        Objects.requireNonNull(overview).handleKey(key);
         return Optional.empty();
     }
 
     /** The jumps of the {@code g} menu on the overview (ADR 0120): the selected top term's docs and a search for it. */
     private List<GoMenu.Target> overviewJumps() {
-        if (overview.selectedTopTerm().isEmpty()) {
+        if (Objects.requireNonNull(overview).selectedTopTerm().isEmpty()) {
             return List.of();
         }
         List<GoMenu.Target> jumps = new ArrayList<>();
-        if (opened.supports(Feature.TERMS)) {
+        if (Objects.requireNonNull(opened).supports(Feature.TERMS)) {
             jumps.add(new GoMenu.Target(Jump.TERMS, "docs of the term"));
         }
         if (searchesTerms() && search != null) {
@@ -2193,7 +2208,7 @@ public final class App {
 
     /** {@code g t} and {@code g s} on the overview: the selected top term's docs, or a search for it. */
     private Optional<Action> overviewJump(Jump to) {
-        Optional<Overview.FieldTerm> top = overview.selectedTopTerm();
+        Optional<Overview.FieldTerm> top = Objects.requireNonNull(overview).selectedTopTerm();
         if (top.isEmpty()) {
             return Optional.empty();
         }
@@ -2215,18 +2230,20 @@ public final class App {
 
     /** Enter on the overview: the docs of the selected top term, or else a scan of the selected field. */
     private Optional<Action> overviewEnter() {
-        Optional<Overview.FieldTerm> top = overview.selectedTopTerm();
+        Optional<Overview.FieldTerm> top = Objects.requireNonNull(overview).selectedTopTerm();
         if (top.isEmpty()) {
             return overview.selectedField()
                     .filter(overview::needsScan)
                     .flatMap(field -> requestScans(List.of(field.name())));
         }
-        if (!opened.supports(Feature.TERMS)) {
+        if (!Objects.requireNonNull(opened).supports(Feature.TERMS)) {
             notice = new Notice.NotSupported("Term's docs", reason());
             return Optional.empty();
         }
         jump(Screen.TERMS);
-        return terms.browse(top.get().field(), top.get().term()).flatMap(this::termsAction);
+        return Objects.requireNonNull(terms)
+                .browse(top.get().field(), top.get().term())
+                .flatMap(this::termsAction);
     }
 
     public Optional<Action> handleKey(KeyEvent key) {
@@ -2275,7 +2292,7 @@ public final class App {
     }
 
     private Optional<Action> logWindowKey(KeyEvent key) {
-        return switch (logWindow.handleKey(key)) {
+        return switch (Objects.requireNonNull(logWindow).handleKey(key)) {
             case LogWindow.Copy copy -> Optional.of(new Action.Copy(copy.text()));
             case LogWindow.Close _ -> {
                 logFilter = logWindow.filter();
@@ -2288,7 +2305,7 @@ public final class App {
 
     /** The key after {@code g}: a jump of the shown screen, {@code g} for the top, or any other to close it. */
     private Optional<Action> goMenuKey(KeyEvent key) {
-        GoMenu.Event event = goMenu.handleKey(key);
+        GoMenu.Event event = Objects.requireNonNull(goMenu).handleKey(key);
         goMenu = null;
         return switch (event) {
             case GoMenu.Picked picked -> goTo(picked.jump());
@@ -2387,7 +2404,7 @@ public final class App {
 
     /** The app's keys for the key list. */
     private Keys appKeys() {
-        boolean reopens = overview != null && opened.supports(Feature.REOPEN);
+        boolean reopens = overview != null && Objects.requireNonNull(opened).supports(Feature.REOPEN);
         return Keys.builder()
                 .more(APP, "q", "quit")
                 .more(APP, "o", "open an index")
@@ -2409,7 +2426,7 @@ public final class App {
             logWindow = new LogWindow(log, logFilter);
             return Optional.empty();
         }
-        return switch (aboutWindow.handleKey(key)) {
+        return switch (Objects.requireNonNull(aboutWindow).handleKey(key)) {
             case AboutWindow.Copy copy -> Optional.of(new Action.Copy(copy.text()));
             case AboutWindow.Close _ -> {
                 aboutWindow = null;
@@ -2438,7 +2455,7 @@ public final class App {
     }
 
     private Optional<Action> runtimeWindowKey(KeyEvent key) {
-        return switch (runtimeWindow.handleKey(key)) {
+        return switch (Objects.requireNonNull(runtimeWindow).handleKey(key)) {
             case RuntimeWindow.Install install -> Optional.of(new Action.InstallRuntimes(install.job()));
             case RuntimeWindow.UseMirror use -> Optional.of(new Action.UseMirror(use.mirror()));
             case RuntimeWindow.Close _ -> {
@@ -2450,7 +2467,7 @@ public final class App {
     }
 
     private Optional<Action> jarsKey(KeyEvent key) {
-        return switch (jars.handleKey(key)) {
+        return switch (Objects.requireNonNull(jars).handleKey(key)) {
             case JarsPopup.Submit submit -> {
                 jars.setBusy();
                 yield Optional.of(
@@ -2465,7 +2482,7 @@ public final class App {
     }
 
     private Optional<Action> promptKey(KeyEvent key) {
-        return switch (prompt.handleKey(key)) {
+        return switch (Objects.requireNonNull(prompt).handleKey(key)) {
             case PathPrompt.Submit submit -> {
                 prompt.setBusy();
                 directory = prompt.directory();
@@ -2483,7 +2500,7 @@ public final class App {
     }
 
     private Optional<Action> exportPromptKey(KeyEvent key) {
-        return switch (exportPrompt.handleKey(key)) {
+        return switch (Objects.requireNonNull(exportPrompt).handleKey(key)) {
             case ExportPrompt.Submit submit -> startExport(submit.request());
             case ExportPrompt.Cancel _ -> {
                 exportPrompt = null;
@@ -2506,10 +2523,11 @@ public final class App {
 
     private Optional<Action> screenPromptKey(KeyEvent key) {
         return switch (screen) {
-            case TERMS -> terms.handleKey(key).flatMap(this::termsAction);
-            case DOCUMENTS -> documentsAction(documents.handleKey(key).orElse(null));
+            case TERMS -> Objects.requireNonNull(terms).handleKey(key).flatMap(this::termsAction);
+            case DOCUMENTS ->
+                documentsAction(Objects.requireNonNull(documents).handleKey(key).orElse(null));
             case ANALYSIS -> analysisAction(analysis.handleKey(key).orElse(null));
-            case SEARCH -> search.handleKey(key).flatMap(this::searchAction);
+            case SEARCH -> Objects.requireNonNull(search).handleKey(key).flatMap(this::searchAction);
             default -> Optional.empty();
         };
     }
@@ -2530,7 +2548,7 @@ public final class App {
         }
         if (screen == Screen.SEARCH && searching()) {
             // A job that hasn't started yet is cancelled once it starts.
-            List<Long> jobs = search.cancel();
+            List<Long> jobs = Objects.requireNonNull(search).cancel();
             return jobs.isEmpty() ? Optional.empty() : Optional.of(new Action.CancelSearch(jobs));
         }
         if (screen == Screen.DOCUMENTS && documents != null && documents.rebuilding()) {
@@ -2541,18 +2559,22 @@ public final class App {
         }
         if (screen == Screen.CHECK && checking()) {
             // A job that hasn't started yet is cancelled once it starts.
-            return check.cancel().stream().boxed().findFirst().map(Action.CancelCheck::new);
+            return Objects.requireNonNull(check).cancel().stream()
+                    .boxed()
+                    .findFirst()
+                    .map(Action.CancelCheck::new);
         }
         return Optional.of(new Action.Quit());
     }
 
     private Optional<Action> cancelExport() {
         Long job = null;
-        switch (export) {
+        RunningExport running = export;
+        switch (running) {
             case DocumentExporting exporting
             when exporting.job() != null -> exporting.job().cancel();
             case TermsExport termsExport -> job = termsExport.jobId();
-            default -> {
+            case null, default -> {
                 // Nothing runs yet: a job that starts for it is cancelled then.
             }
         }
@@ -2649,7 +2671,7 @@ public final class App {
     }
 
     private Optional<Action> reopenKey() {
-        if (hasIndex() && !opened.supports(Feature.REOPEN)) {
+        if (hasIndex() && !Objects.requireNonNull(opened).supports(Feature.REOPEN)) {
             notice = new Notice.NotSupported("Reopen", reason());
         } else if (overview != null) {
             notice = new Notice.Reopening();
@@ -2707,7 +2729,7 @@ public final class App {
 
     /** Whether the open index can search a term (ADR 0058). */
     private boolean searchesTerms() {
-        return opened.supports(Feature.TERM_SEARCH);
+        return Objects.requireNonNull(opened).supports(Feature.TERM_SEARCH);
     }
 
     /**
@@ -2725,7 +2747,7 @@ public final class App {
      * who wrote it, such as {@code not for Lucene 2.x}.
      */
     private String reason() {
-        if (opened.noReader()) {
+        if (Objects.requireNonNull(opened).noReader()) {
             return "needs a reader";
         }
         return "not for " + oldLucene();
@@ -2733,13 +2755,13 @@ public final class App {
 
     /** The old Lucene of the open index, such as {@code Lucene 2.x}, or {@code this index}. */
     private String oldLucene() {
-        String old = opened.oldLucene();
+        String old = Objects.requireNonNull(opened).oldLucene();
         return old == null ? "this index" : old.substring(0, old.indexOf(','));
     }
 
     /** Why the open index can't find auto stop words; empty if it can (ADR 0039). */
     private @Nullable String autoStopWordsReason() {
-        return opened.supports(Feature.AUTO_STOP_WORDS) ? null : reason();
+        return Objects.requireNonNull(opened).supports(Feature.AUTO_STOP_WORDS) ? null : reason();
     }
 
     /** The tab line says that the index lacks {@code what} until the next key; nothing goes to the backend. */
@@ -2791,24 +2813,17 @@ public final class App {
 
     /** Keeps where the shown screen is, for Backspace to go back to. */
     private void pushBack() {
-        boolean leavesDocuments = screen == Screen.DOCUMENTS && documents != null;
+        Documents leaving = screen == Screen.DOCUMENTS ? documents : null;
+        Optional<Documents.Walk> walk = leaving == null ? Optional.empty() : leaving.walk();
         boolean leavesTerms = screen == Screen.TERMS
-                || leavesDocuments
-                        && documents
-                                .walk()
-                                .filter(Documents.Walk.TERM_DOCS::equals)
-                                .isPresent();
+                || walk.filter(Documents.Walk.TERM_DOCS::equals).isPresent();
         // A search hit's [/] step the search screen, as a term's document's step the terms screen.
         boolean leavesSearch = screen == Screen.SEARCH
-                || leavesDocuments
-                        && documents
-                                .walk()
-                                .filter(Documents.Walk.SEARCH_HITS::equals)
-                                .isPresent();
+                || walk.filter(Documents.Walk.SEARCH_HITS::equals).isPresent();
         back.push(new Back(
                 screen,
                 leavesTerms && terms != null ? terms.mark() : null,
-                leavesDocuments ? documents.mark() : null,
+                leaving != null ? leaving.mark() : null,
                 leavesSearch && search != null ? search.mark() : null,
                 screen == Screen.COMMITS && commits != null ? commits.mark() : null));
         if (back.size() > BACK_DEPTH) {
@@ -2925,17 +2940,17 @@ public final class App {
         } else if (opened == null) {
             renderAbout(frame, body);
         } else if (screen == Screen.COMMITS) {
-            commits.render(frame, body);
+            Objects.requireNonNull(commits).render(frame, body);
         } else if (screen == Screen.CHECK && check != null) {
             check.render(frame, body);
         } else if (overview == null) {
             renderWithoutReader(frame, body);
         } else if (screen == Screen.SEARCH) {
-            search.render(frame, body);
+            Objects.requireNonNull(search).render(frame, body);
         } else if (screen == Screen.TERMS) {
-            terms.render(frame, body);
+            Objects.requireNonNull(terms).render(frame, body);
         } else if (screen == Screen.DOCUMENTS) {
-            documents.render(frame, body);
+            Objects.requireNonNull(documents).render(frame, body);
         } else {
             overview.render(frame, body);
         }
@@ -2959,15 +2974,18 @@ public final class App {
             return Optional.empty();
         }
         return switch (screen) {
-            case SEARCH -> search.promptKeys();
-            case TERMS -> terms.prompting() ? Optional.of(" type to seek   ⏎/Esc done") : Optional.empty();
+            case SEARCH -> Objects.requireNonNull(search).promptKeys();
+            case TERMS ->
+                Objects.requireNonNull(terms).prompting()
+                        ? Optional.of(" type to seek   ⏎/Esc done")
+                        : Optional.empty();
             case DOCUMENTS -> documentsPromptKeys();
             default -> Optional.empty();
         };
     }
 
     private Optional<String> documentsPromptKeys() {
-        Optional<Viewer> viewer = documents.viewer();
+        Optional<Viewer> viewer = Objects.requireNonNull(documents).viewer();
         if (viewer.isPresent()) {
             return viewer.get().promptKeys();
         }
@@ -3048,9 +3066,10 @@ public final class App {
             return Keys.NONE;
         }
         return switch (screen) {
-            case SEARCH -> search.keys();
-            case TERMS -> terms.keys();
-            case DOCUMENTS -> documents.viewer().map(Viewer::keys).orElseGet(documents::keys);
+            case SEARCH -> Objects.requireNonNull(search).keys();
+            case TERMS -> Objects.requireNonNull(terms).keys();
+            case DOCUMENTS ->
+                Objects.requireNonNull(documents).viewer().map(Viewer::keys).orElseGet(documents::keys);
             default -> overviewKeys();
         };
     }
@@ -3061,12 +3080,12 @@ public final class App {
         if (scan != null || storedFieldsScan != null) {
             return keys.build();
         }
-        if (overview.selectedTopTerm().isPresent()) {
-            return keys.keyIf(opened.supports(Feature.TERMS), SHOW, "⏎", "term's docs")
+        if (Objects.requireNonNull(overview).selectedTopTerm().isPresent()) {
+            return keys.keyIf(Objects.requireNonNull(opened).supports(Feature.TERMS), SHOW, "⏎", "term's docs")
                     .key(SHOW, "+/-", "top N")
                     .build();
         }
-        boolean topTerms = opened.supports(Feature.TOP_TERMS);
+        boolean topTerms = Objects.requireNonNull(opened).supports(Feature.TOP_TERMS);
         boolean stored = opened.supports(Feature.STORED_FIELDS);
         return keys.keyIf(topTerms, SHOW, "⏎", "terms")
                 .keyIf(topTerms, SHOW, "+/-", "top N")
@@ -3109,7 +3128,7 @@ public final class App {
      */
     private void renderWithoutReader(Frame frame, Rect body) {
         List<Line> lines = new ArrayList<>();
-        lines.add(labelLine("Path", opened.path()));
+        lines.add(labelLine("Path", Objects.requireNonNull(opened).path()));
         lines.add(labelLine("Directory", directoryName(opened.directory())));
         lines.add(labelLine("Reader", "none: opened without a reader, so only the commits (4) and check (7) work"));
         if (opened.indexes().size() > 1) {
@@ -3161,7 +3180,7 @@ public final class App {
     }
 
     /** What the tabs show after them, if anything: the notice, the running export or the index. */
-    private Line tabsLine() {
+    private @Nullable Line tabsLine() {
         Optional<String> exporting = exportLine();
         if (notice != null && !notice.inFooter()) {
             return notice.line();
@@ -3245,7 +3264,7 @@ public final class App {
      * What the tab line says about how the index was opened, if not as usual: without a reader, or
      * with several index directories. Null otherwise.
      */
-    private static Line marker(Opened opened) {
+    private static @Nullable Line marker(Opened opened) {
         int count = opened.indexes().size();
         String oldLucene = opened.oldLucene();
         String text;
@@ -3275,7 +3294,7 @@ public final class App {
     }
 
     /** {@code lines} wrapped at word boundaries to fit {@code area}, in a bordered block if {@code title} isn't null. */
-    private static Paragraph wrapped(List<Line> lines, String title, Rect area) {
+    private static Paragraph wrapped(List<Line> lines, @Nullable String title, Rect area) {
         return title != null
                 ? Panels.wrapped(lines, bordered(title), area)
                 : Paragraph.from(Text.from(Panels.wrap(lines, area.width())));

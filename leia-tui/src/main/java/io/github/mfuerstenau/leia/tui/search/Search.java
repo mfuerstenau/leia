@@ -86,6 +86,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
@@ -246,9 +247,11 @@ public final class Search {
         final int valueIndex;
 
         /** Null until the backend has started the job. */
+        @Nullable
         Long jobId;
 
         /** Why the matches could not be found; null while the job runs. */
+        @Nullable
         String error;
 
         Highlighting(long id, StartHighlightParams params, int valueIndex) {
@@ -274,6 +277,7 @@ public final class Search {
         boolean more;
 
         /** Why the last page could not be fetched; no more pages are fetched then. Null otherwise. */
+        @Nullable
         String error;
 
         HitList(SearchResults results, boolean more) {
@@ -301,7 +305,10 @@ public final class Search {
         /** The first page's params; later pages differ only in their offset and limit. */
         final StartSearchParams params;
 
+        @Nullable
         HitList hits;
+
+        @Nullable
         String error;
 
         Submitted(StartSearchParams params) {
@@ -319,7 +326,7 @@ public final class Search {
      * @param jobId null until the backend has started the job
      * @param more whether the page continues the shown hits
      */
-    private record Running(long id, Long jobId, boolean more, int limit, long docsSearched) {}
+    private record Running(long id, @Nullable Long jobId, boolean more, int limit, long docsSearched) {}
 
     /** The explanation of one hit for one query and similarity. */
     private static final class Explain {
@@ -327,11 +334,14 @@ public final class Search {
         final StartExplainParams params;
 
         /** Null until the backend has started the job. */
+        @Nullable
         Long jobId;
 
         /** Null while the job runs. */
+        @Nullable
         Explanation explanation;
 
+        @Nullable
         String error;
 
         Explain(long id, StartExplainParams params) {
@@ -363,14 +373,14 @@ public final class Search {
     private AnalysisSettings analyzer = new AnalysisSettings();
 
     /** The popup that takes the keys, while it is open: one of the four forms, or null. */
-    private Object form;
+    private @Nullable Object form;
 
     private boolean exact;
 
     private Highlights highlights = Highlights.QUERY_FIELDS;
 
     /** The highlight that runs for {@code v}, or the one that failed; null otherwise. */
-    private Highlighting highlighting;
+    private @Nullable Highlighting highlighting;
 
     /** Whether the regex scan ignores case. */
     private boolean caseInsensitive;
@@ -382,12 +392,12 @@ public final class Search {
     static final int RECALL_SAMPLE = 100;
 
     /** The last recall check of the KNN mode, until the next search; null otherwise (ADR 0086). */
-    private KnnRecall recall;
+    private @Nullable KnnRecall recall;
 
     private long recallId;
 
     /** The last regex scan, while the mode is {@link Mode#REGEX}; null otherwise. */
-    private StoredScan scan;
+    private @Nullable StoredScan scan;
 
     private long scanId;
     private LineInput input = new LineInput("");
@@ -431,13 +441,13 @@ public final class Search {
     private EditLine editLine = EditLine.QUERY;
 
     /** Why the doc values or KNN line could not be read, until the next search; or null. */
-    private String lineError;
+    private @Nullable String lineError;
 
     private boolean editing;
     private Focus focus = Focus.HITS;
-    private Submitted submitted;
-    private Running running;
-    private Explain explain;
+    private @Nullable Submitted submitted;
+    private @Nullable Running running;
+    private @Nullable Explain explain;
 
     /** Whether the documents screen waits for the next page to step to its first hit. */
     private boolean stepPending;
@@ -731,17 +741,17 @@ public final class Search {
         private final DocValuesNumber number;
         private final boolean hex;
         private final int vectorField;
-        private final String lineError;
-        private final Submitted submitted;
-        private final Running running;
+        private final @Nullable String lineError;
+        private final @Nullable Submitted submitted;
+        private final @Nullable Running running;
         private final int selected;
         private final int detailsScroll;
         private final Focus focus;
-        private final Explain explain;
-        private final Highlighting highlighting;
-        private final StoredScan scan;
+        private final @Nullable Explain explain;
+        private final @Nullable Highlighting highlighting;
+        private final @Nullable StoredScan scan;
         private final long scanId;
-        private final KnnRecall recall;
+        private final @Nullable KnnRecall recall;
         private final long recallId;
 
         private Mark(Search of) {
@@ -935,11 +945,11 @@ public final class Search {
     }
 
     private static SearchQuery query(
-            ClassicQuery classic,
-            StandardQuery standard,
-            TermQuery term,
-            MoreLikeThisQuery moreLikeThis,
-            DocValuesQuery docValues) {
+            @Nullable ClassicQuery classic,
+            @Nullable StandardQuery standard,
+            @Nullable TermQuery term,
+            @Nullable MoreLikeThisQuery moreLikeThis,
+            @Nullable DocValuesQuery docValues) {
         return new SearchQuery(
                 Optional.ofNullable(classic),
                 Optional.ofNullable(standard),
@@ -1285,7 +1295,8 @@ public final class Search {
         if (!runs(searchId)) {
             return OptionalLong.of(jobId);
         }
-        running = new Running(running.id(), jobId, running.more(), running.limit(), running.docsSearched());
+        running = new Running(
+                Objects.requireNonNull(running).id(), jobId, running.more(), running.limit(), running.docsSearched());
         return OptionalLong.empty();
     }
 
@@ -1299,14 +1310,18 @@ public final class Search {
         }
         Optional<SearchResults> found = result.results();
         if (found.isEmpty()) {
-            running =
-                    new Running(running.id(), running.jobId(), running.more(), running.limit(), result.docsSearched());
+            running = new Running(
+                    Objects.requireNonNull(running).id(),
+                    running.jobId(),
+                    running.more(),
+                    running.limit(),
+                    result.docsSearched());
             return Optional.empty();
         }
         SearchResults results = found.get();
         Running page = running;
         running = null;
-        boolean full = results.hits().size() == page.limit();
+        boolean full = results.hits().size() == Objects.requireNonNull(page).limit();
         if (page.more()) {
             if (submitted.hits == null) {
                 return Optional.empty();
@@ -1332,7 +1347,7 @@ public final class Search {
     /** Shows why search {@code searchId} could not start or failed. */
     public void searchFailed(long searchId, String error) {
         if (runs(searchId)) {
-            fail(running, error);
+            fail(Objects.requireNonNull(running), error);
         }
     }
 
@@ -1380,19 +1395,19 @@ public final class Search {
         if (!explains(explainId)) {
             return OptionalLong.of(jobId);
         }
-        explain.jobId = jobId;
+        Objects.requireNonNull(explain).jobId = jobId;
         return OptionalLong.empty();
     }
 
     public void explainProgress(long explainId, GetExplainResult result) {
         if (explains(explainId)) {
-            result.explanation().ifPresent(explanation -> explain.explanation = explanation);
+            result.explanation().ifPresent(explanation -> Objects.requireNonNull(explain).explanation = explanation);
         }
     }
 
     public void explainFailed(long explainId, String error) {
         if (explains(explainId)) {
-            explain.error = error;
+            Objects.requireNonNull(explain).error = error;
         }
     }
 
@@ -1411,10 +1426,11 @@ public final class Search {
      * terms, and for the regex scan.
      */
     public Optional<Documents.MatchQuery> matchesQuery() {
-        if (submitted == null || mode == Mode.REGEX) {
+        Submitted current = submitted;
+        if (current == null || mode == Mode.REGEX) {
             return Optional.empty();
         }
-        return submitted.params.highlight().map(options -> new Documents.MatchQuery(submitted.params.query(), options));
+        return current.params.highlight().map(options -> new Documents.MatchQuery(current.params.query(), options));
     }
 
     /**
@@ -1423,7 +1439,8 @@ public final class Search {
      */
     private Optional<Request> viewSelected() {
         Optional<Hit> hit = selectedHit();
-        Optional<HighlightOptions> options = submitted.params.highlight();
+        Optional<HighlightOptions> options =
+                Objects.requireNonNull(submitted).params.highlight();
         if (hit.isEmpty() || hit.get().highlights().isEmpty() || options.isEmpty()) {
             return Optional.empty();
         }
@@ -1446,7 +1463,7 @@ public final class Search {
         if (!highlights(highlightId)) {
             return OptionalLong.of(jobId);
         }
-        highlighting.jobId = jobId;
+        Objects.requireNonNull(highlighting).jobId = jobId;
         return OptionalLong.empty();
     }
 
@@ -1460,7 +1477,7 @@ public final class Search {
             return Optional.empty();
         }
         Highlighting done = highlighting;
-        String highlighted = done.params.field().orElseThrow();
+        String highlighted = Objects.requireNonNull(done).params.field().orElseThrow();
         List<ValueHighlight> values = highlight.get().fields().stream()
                 .filter(matches -> matches.field().equals(highlighted))
                 .findFirst()
@@ -1486,7 +1503,7 @@ public final class Search {
 
     public void highlightFailed(long highlightId, String error) {
         if (highlights(highlightId)) {
-            highlighting.error = error;
+            Objects.requireNonNull(highlighting).error = error;
         }
     }
 
@@ -1510,20 +1527,20 @@ public final class Search {
         if (!scans(id)) {
             return OptionalLong.of(jobId);
         }
-        scan.started(jobId);
+        Objects.requireNonNull(scan).started(jobId);
         return OptionalLong.empty();
     }
 
     public void storedScanProgress(long id, GetStoredScanResult result) {
         if (scans(id)) {
-            scan.progress(result);
+            Objects.requireNonNull(scan).progress(result);
         }
     }
 
     /** Shows why the regex scan could not start or failed. */
     public void storedScanFailed(long id, String error) {
         if (scans(id)) {
-            scan.failed(error);
+            Objects.requireNonNull(scan).failed(error);
         }
     }
 
@@ -1536,20 +1553,20 @@ public final class Search {
         if (!checksRecall(id)) {
             return OptionalLong.of(jobId);
         }
-        recall.started(jobId);
+        Objects.requireNonNull(recall).started(jobId);
         return OptionalLong.empty();
     }
 
     public void knnRecallProgress(long id, GetKnnRecallResult result) {
         if (checksRecall(id)) {
-            recall.progress(result);
+            Objects.requireNonNull(recall).progress(result);
         }
     }
 
     /** Shows why the recall check could not start or failed. */
     public void knnRecallFailed(long id, String error) {
         if (checksRecall(id)) {
-            recall.failed(error);
+            Objects.requireNonNull(recall).failed(error);
         }
     }
 
@@ -1610,7 +1627,7 @@ public final class Search {
      * target is searched for its nearest.
      */
     private Optional<Request> openRecallRow() {
-        Optional<KnnRecallTarget> target = recall.selectedTarget();
+        Optional<KnnRecallTarget> target = Objects.requireNonNull(recall).selectedTarget();
         if (target.isPresent() && target.get().docId().isPresent()) {
             input.set(Integer.toString(target.get().docId().getAsInt()));
             binary = false;
@@ -1747,7 +1764,7 @@ public final class Search {
             return Optional.empty();
         }
         if (recalls) {
-            recall.moveSelection(key);
+            Objects.requireNonNull(recall).moveSelection(key);
             return Optional.empty();
         }
         Optional<HitList> list = hitList();
@@ -1964,7 +1981,7 @@ public final class Search {
 
     /** Passes a key to the open popup, and takes its outcome: a changed setting searches again. */
     private Optional<Request> formKey(KeyEvent key) {
-        Form.Event<?> event = switch (form) {
+        Form.Event<?> event = switch (Objects.requireNonNull(form)) {
             case OptionsForm options -> options.handleKey(key);
             case LikeForm likeForm -> likeForm.handleKey(key);
             case ScoringForm scoringForm -> scoringForm.handleKey(key);
@@ -2349,7 +2366,7 @@ public final class Search {
     }
 
     /** How far the running search is, if one runs. */
-    private String searchingText() {
+    private @Nullable String searchingText() {
         if (running == null) {
             return null;
         }
@@ -2357,7 +2374,7 @@ public final class Search {
         return "searching… " + percent + "%";
     }
 
-    private String hitsTitle(HitList list, String searching) {
+    private String hitsTitle(HitList list, @Nullable String searching) {
         String title = " " + list.total() + " in " + list.tookMillis + " ms ";
         Optional<String> sort = scoring.sortText();
         if (sort.isPresent()) {
@@ -2390,7 +2407,7 @@ public final class Search {
                         .orElse(0),
                 MAX_SORT_WIDTH);
         boolean sorted = sortWidth > 0;
-        OptionalInt source = submitted
+        OptionalInt source = Objects.requireNonNull(submitted)
                 .params
                 .query()
                 .moreLikeThis()
@@ -2580,7 +2597,8 @@ public final class Search {
         lines.add(Line.from("Rewritten  " + TextFormat.escapeControl(list.rewrittenQuery)));
         lines.addAll(parserLines());
         lines.add(Line.empty());
-        Optional<MoreLikeThisQuery> source = submitted.params.query().moreLikeThis();
+        Optional<MoreLikeThisQuery> source =
+                Objects.requireNonNull(submitted).params.query().moreLikeThis();
         if (source.isPresent()) {
             if (list.moreLikeThisTerms != null && !list.moreLikeThisTerms.isEmpty()) {
                 lines.addAll(likeTermLines(list.moreLikeThisTerms));

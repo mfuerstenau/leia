@@ -34,6 +34,7 @@ import io.github.mfuerstenau.leia.runtime.Scoring;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.StandardSearch;
 import io.github.mfuerstenau.leia.runtime.Terms;
+import io.github.mfuerstenau.leia.runtime.support.Failures;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -598,7 +599,7 @@ final class Lucene10Index
                             options.fuzzyMaxEdits(), options.splitOnWhitespace(), options.autoGeneratePhraseQueries()),
                     analyzer));
         } catch (io.github.mfuerstenau.leia.core.InvalidQueryException | RuntimeException e) {
-            throw new InvalidQueryException(e.getMessage(), e);
+            throw new InvalidQueryException(Failures.message(e), e);
         } finally {
             analyzer.close();
         }
@@ -644,6 +645,8 @@ final class Lucene10Index
     }
 
     /** The options of leia-core's parsers, with the dates as {@link DateTools} has them. */
+    // NullAway doesn't read the nested type-use @Nullable of ParserOptions.dateResolution from the class file
+    @SuppressWarnings("NullAway")
     private static io.github.mfuerstenau.leia.core.ParserOptions parserOptions(
             boolean defaultAnd,
             boolean allowLeadingWildcard,
@@ -700,7 +703,7 @@ final class Lucene10Index
                     types,
                     analyzer));
         } catch (io.github.mfuerstenau.leia.core.InvalidQueryException | RuntimeException e) {
-            throw new InvalidQueryException(e.getMessage(), e);
+            throw new InvalidQueryException(Failures.message(e), e);
         }
     }
 

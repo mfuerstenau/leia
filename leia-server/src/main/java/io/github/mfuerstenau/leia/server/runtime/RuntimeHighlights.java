@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.LongConsumer;
@@ -196,7 +197,7 @@ public final class RuntimeHighlights {
 
         @Override
         public synchronized Exception getCause() {
-            return (Exception) super.getCause();
+            return (Exception) Objects.requireNonNull(super.getCause());
         }
     }
 }

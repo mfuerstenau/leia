@@ -179,7 +179,7 @@ public final class AnalyzerForm {
     record Target(boolean insert, int index) {}
 
     /** What a picker picks: a component of a section, put at {@code target}, or a preset (null section). */
-    record Pick(Section section, Target target) {
+    record Pick(@Nullable Section section, @Nullable Target target) {
         static final Pick PRESET = new Pick(null, null);
 
         boolean preset() {
@@ -229,6 +229,8 @@ public final class AnalyzerForm {
     private static final class TextEdit {
         final TextTarget target;
         final LineInput input;
+
+        @Nullable
         String error;
 
         TextEdit(TextTarget target, String text) {
@@ -245,13 +247,13 @@ public final class AnalyzerForm {
     private int selected;
 
     /** The open picker, or null. */
-    private Picker picker;
+    private @Nullable Picker picker;
 
     /** The open line input, or null. */
-    private TextEdit textEdit;
+    private @Nullable TextEdit textEdit;
 
     /** Why the draft was refused, until the next change; or null. */
-    private String error;
+    private @Nullable String error;
 
     /** Whether no loaded runtime has analysis (ADR 0071). */
     private boolean noAnalysis;
@@ -868,7 +870,7 @@ public final class AnalyzerForm {
                 ? components.analyzers().stream()
                         .map(analyzer -> new Choice(analyzer.name(), analyzer.className()))
                         .toList()
-                : open.pick.section().available(components);
+                : Objects.requireNonNull(open.pick.section()).available(components);
         return choices.stream()
                 .filter(choice -> choice.name().toLowerCase(Locale.ROOT).contains(filter))
                 .toList();
@@ -879,27 +881,31 @@ public final class AnalyzerForm {
      * class name, if none matches), Esc goes back.
      */
     private void pickKey(KeyEvent key) {
-        List<Choice> matches = matches(picker);
+        Picker open = picker;
+        if (open == null) {
+            return;
+        }
+        List<Choice> matches = matches(open);
         int last = Math.max(matches.size() - 1, 0);
         switch (key.code()) {
             case ESCAPE -> picker = null;
-            case UP -> picker.selected = Math.max(picker.selected - 1, 0);
-            case DOWN -> picker.selected = Math.min(picker.selected + 1, last);
-            case PAGE_UP -> picker.selected = Math.max(picker.selected - 10, 0);
-            case PAGE_DOWN -> picker.selected = Math.min(picker.selected + 10, last);
+            case UP -> open.selected = Math.max(open.selected - 1, 0);
+            case DOWN -> open.selected = Math.min(open.selected + 1, last);
+            case PAGE_UP -> open.selected = Math.max(open.selected - 10, 0);
+            case PAGE_DOWN -> open.selected = Math.min(open.selected + 10, last);
             case ENTER -> {
-                Pick pick = picker.pick;
+                Pick pick = open.pick;
                 String name = matches.isEmpty()
-                        ? picker.filter.text().strip()
+                        ? open.filter.text().strip()
                         : pick.preset()
-                                ? matches.get(Math.min(picker.selected, last)).className()
-                                : matches.get(Math.min(picker.selected, last)).name();
+                                ? matches.get(Math.min(open.selected, last)).className()
+                                : matches.get(Math.min(open.selected, last)).name();
                 if (name.isEmpty()) {
                     return;
                 }
                 picker = null;
                 if (!pick.preset()) {
-                    put(pick.section(), pick.target(), name);
+                    put(Objects.requireNonNull(pick.section()), Objects.requireNonNull(pick.target()), name);
                     return;
                 }
                 draft.preset = name;
@@ -930,8 +936,8 @@ public final class AnalyzerForm {
                 error = null;
             }
             default -> {
-                if (picker.filter.handleKey(key, LineInput::wordStart) == LineInput.Edit.CHANGED) {
-                    picker.selected = 0;
+                if (open.filter.handleKey(key, LineInput::wordStart) == LineInput.Edit.CHANGED) {
+                    open.selected = 0;
                 }
             }
         }
@@ -959,18 +965,22 @@ public final class AnalyzerForm {
 
     /** Enter takes the text, Esc goes back; any other key edits it. */
     private void textKey(KeyEvent key) {
+        TextEdit edit = textEdit;
+        if (edit == null) {
+            return;
+        }
         switch (key.code()) {
             case ESCAPE -> textEdit = null;
             case ENTER -> {
                 try {
-                    takeText(textEdit.target, textEdit.input.text());
+                    takeText(edit.target, edit.input.text());
                     textEdit = null;
                     error = null;
                 } catch (IllegalArgumentException e) {
-                    textEdit.error = e.getMessage();
+                    edit.error = e.getMessage();
                 }
             }
-            default -> textEdit.input.handleKey(key, LineInput::wordStart);
+            default -> edit.input.handleKey(key, LineInput::wordStart);
         }
     }
 
@@ -1349,7 +1359,9 @@ public final class AnalyzerForm {
                     Span.styled(TextFormat.escapeControl(detail), Form.muted()));
             lines.add(i == shown ? line.patchStyle(Palette.current().selection()) : line);
         }
-        String title = open.pick.preset() ? " Pick a preset analyzer " : " Pick a " + open.pick.section().noun + " ";
+        String title = open.pick.preset()
+                ? " Pick a preset analyzer "
+                : " Pick a " + Objects.requireNonNull(open.pick.section()).noun + " ";
         Form.renderPopup(frame, area, title, lines, shown + 2, WIDTH - 8);
     }
 

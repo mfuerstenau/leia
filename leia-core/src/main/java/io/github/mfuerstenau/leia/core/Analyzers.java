@@ -19,6 +19,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Function;
@@ -294,7 +295,8 @@ public final class Analyzers {
     }
 
     private static String message(Exception e) {
-        Throwable cause = e instanceof UncheckedIOException unchecked ? unchecked.getCause() : e;
+        Throwable cause =
+                e instanceof UncheckedIOException unchecked ? Objects.requireNonNull(unchecked.getCause()) : e;
         if (cause.getMessage() == null) {
             return cause.getClass().getSimpleName();
         }

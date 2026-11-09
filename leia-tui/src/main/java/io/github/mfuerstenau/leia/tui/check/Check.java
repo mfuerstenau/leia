@@ -129,7 +129,7 @@ public final class Check {
      *
      * @param jobId null until the backend has started the job
      */
-    private record Running(long id, Long jobId) implements State {}
+    private record Running(long id, @Nullable Long jobId) implements State {}
 
     private record Done(CheckIndexResult result) implements State {}
 
@@ -724,7 +724,7 @@ public final class Check {
     }
 
     /** The row of an index, with its marks and, once checked, whether it passed. */
-    private Line indexRow(CheckTargetIndex index, IndexCheck outcome) {
+    private Line indexRow(CheckTargetIndex index, @Nullable IndexCheck outcome) {
         List<Span> spans = new ArrayList<>();
         spans.add(Span.raw(mark(index).box + " "));
         if (outcome != null) {
@@ -747,7 +747,7 @@ public final class Check {
         return Line.from(spans);
     }
 
-    private Line segmentRow(CheckTargetIndex index, CheckTargetSegment segment, SegmentCheck outcome) {
+    private Line segmentRow(CheckTargetIndex index, CheckTargetSegment segment, @Nullable SegmentCheck outcome) {
         List<Span> spans = new ArrayList<>();
         spans.add(Span.raw("    " + (isMarked(index, segment.name()) ? Mark.ALL : Mark.NONE).box + " "));
         if (outcome != null) {

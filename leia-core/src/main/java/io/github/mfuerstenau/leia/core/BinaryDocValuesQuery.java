@@ -29,7 +29,7 @@ import org.jspecify.annotations.Nullable;
 final class BinaryDocValuesQuery extends Query {
 
     private final String field;
-    private final Set<BytesRef> values;
+    private final @Nullable Set<BytesRef> values;
     private final @Nullable BytesRef lower;
     private final @Nullable BytesRef upper;
     private final boolean includeLower;
@@ -76,7 +76,7 @@ final class BinaryDocValuesQuery extends Query {
     public Weight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost) {
         return new ConstantScoreWeight(this, boost) {
             @Override
-            public ScorerSupplier scorerSupplier(LeafReaderContext context) throws IOException {
+            public @Nullable ScorerSupplier scorerSupplier(LeafReaderContext context) throws IOException {
                 BinaryDocValues docValues = context.reader().getBinaryDocValues(field);
                 if (docValues == null) {
                     return null;

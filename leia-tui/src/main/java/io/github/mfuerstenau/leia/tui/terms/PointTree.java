@@ -38,9 +38,11 @@ final class PointTree {
         Boolean leaf;
 
         /** The children once fetched; null before. */
+        @Nullable
         List<Node> children;
 
         /** The points of a leaf once fetched; null before. */
+        @Nullable
         List<LeafPoint> points;
 
         boolean pointsCut;
@@ -102,7 +104,7 @@ final class PointTree {
     final String field;
 
     /** The tree; null if it could not be fetched. */
-    final GetPointTreeResult tree;
+    final @Nullable GetPointTreeResult tree;
 
     final @Nullable String error;
 
@@ -114,6 +116,7 @@ final class PointTree {
     final TableState table = new TableState();
 
     /** The leaf whose points are shown; null before one is opened. */
+    @Nullable
     Node leaf;
 
     int pointSelected;
@@ -182,8 +185,10 @@ final class PointTree {
 
     /** The selected point of the shown leaf. */
     Optional<LeafPoint> selectedPoint() {
-        return leaf != null && pointSelected < leaf.points.size()
-                ? Optional.of(leaf.points.get(pointSelected))
+        Node shown = leaf;
+        List<LeafPoint> points = shown == null ? null : shown.points;
+        return points != null && pointSelected < points.size()
+                ? Optional.of(points.get(pointSelected))
                 : Optional.empty();
     }
 

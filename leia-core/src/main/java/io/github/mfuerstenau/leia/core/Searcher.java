@@ -12,6 +12,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.function.Predicate;
@@ -123,7 +124,7 @@ final class Searcher {
         } catch (ExitableDirectoryReader.ExitingReaderException e) {
             throw cancellation.stopped(e);
         } catch (IndexSearcher.TooManyClauses e) {
-            throw new InvalidQueryException(e.getMessage(), e);
+            throw new InvalidQueryException(Objects.requireNonNullElse(e.getMessage(), "too many clauses"), e);
         }
     }
 
@@ -162,7 +163,7 @@ final class Searcher {
         } catch (ExitableDirectoryReader.ExitingReaderException e) {
             throw cancellation.stopped(e);
         } catch (IndexSearcher.TooManyClauses e) {
-            throw new InvalidQueryException(e.getMessage(), e);
+            throw new InvalidQueryException(Objects.requireNonNullElse(e.getMessage(), "too many clauses"), e);
         }
     }
 
@@ -182,7 +183,7 @@ final class Searcher {
         } catch (ExitableDirectoryReader.ExitingReaderException e) {
             throw cancellation.stopped(e);
         } catch (IndexSearcher.TooManyClauses e) {
-            throw new InvalidQueryException(e.getMessage(), e);
+            throw new InvalidQueryException(Objects.requireNonNullElse(e.getMessage(), "too many clauses"), e);
         }
     }
 
@@ -216,7 +217,7 @@ final class Searcher {
         } catch (ExitableDirectoryReader.ExitingReaderException e) {
             throw cancellation.stopped(e);
         } catch (IndexSearcher.TooManyClauses e) {
-            throw new InvalidQueryException(e.getMessage(), e);
+            throw new InvalidQueryException(Objects.requireNonNullElse(e.getMessage(), "too many clauses"), e);
         }
     }
 
@@ -337,7 +338,7 @@ final class Searcher {
 
         private final ScanProgress progress;
         private long searched;
-        private CancellationException cancelled;
+        private @Nullable CancellationException cancelled;
 
         Cancellation(ScanProgress progress) {
             this.progress = progress;
@@ -477,7 +478,7 @@ final class Searcher {
         }
 
         @Override
-        public CacheHelper getReaderCacheHelper() {
+        public @Nullable CacheHelper getReaderCacheHelper() {
             return null;
         }
     }
@@ -489,7 +490,7 @@ final class Searcher {
         }
 
         @Override
-        public Bits getLiveDocs() {
+        public @Nullable Bits getLiveDocs() {
             return null;
         }
 
@@ -499,12 +500,12 @@ final class Searcher {
         }
 
         @Override
-        public CacheHelper getCoreCacheHelper() {
+        public @Nullable CacheHelper getCoreCacheHelper() {
             return null;
         }
 
         @Override
-        public CacheHelper getReaderCacheHelper() {
+        public @Nullable CacheHelper getReaderCacheHelper() {
             return null;
         }
     }

@@ -39,6 +39,7 @@ import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import tools.jackson.core.JacksonException;
@@ -305,7 +306,7 @@ public final class Viewer {
         private boolean fetching;
 
         /** Why the whole value could not be fetched; or null. */
-        private String error;
+        private @Nullable String error;
 
         /** Matches of a pattern, in order. */
         private List<ByteRange> matches = List.of();
@@ -421,9 +422,12 @@ public final class Viewer {
      * @param detail what the mode label at the bottom adds, such as the number of items; or null
      * @param notice why the value is not shown in the mode, such as JSON that does not parse; or null
      */
-    record Formatted(List<List<Segment>> lines, String detail, String notice) {
+    record Formatted(
+            List<List<Segment>> lines,
+            @Nullable String detail,
+            @Nullable String notice) {
 
-        static Formatted text(String text, String notice) {
+        static Formatted text(String text, @Nullable String notice) {
             List<List<Segment>> lines = new ArrayList<>();
             for (String line : text.split("\n", -1)) {
                 lines.add(List.of(new Segment(Style.EMPTY, stripCr(line))));
@@ -543,7 +547,12 @@ public final class Viewer {
      *
      * @param matchRows the row each highlighted match starts on, in order
      */
-    private record Wrapped(int width, List<Line> lines, List<Integer> matchRows, String detail, String notice) {}
+    private record Wrapped(
+            int width,
+            List<Line> lines,
+            List<Integer> matchRows,
+            @Nullable String detail,
+            @Nullable String notice) {}
 
     /** The form that asks for the delimiters of the delimited mode. */
     private static final class DelimiterForm {
@@ -555,6 +564,7 @@ public final class Viewer {
         boolean onKeyValue;
 
         /** What is wrong with the delimiters; or null. */
+        @Nullable
         String error;
 
         DelimiterForm(Delimiters delimiters) {
@@ -575,7 +585,7 @@ public final class Viewer {
     private Delimiters delimiters;
 
     /** The delimiter form while it is open; or null. */
-    private DelimiterForm form;
+    private @Nullable DelimiterForm form;
 
     /** The first row shown. */
     private int scroll;
@@ -584,10 +594,10 @@ public final class Viewer {
     private int page = 10;
 
     /** Null after the shown value, the mode or the delimiters changed. */
-    private Wrapped wrapped;
+    private @Nullable Wrapped wrapped;
 
     /** What the last key did, such as copying; cleared by the next key. Or null. */
-    private String message;
+    private @Nullable String message;
 
     /** The match {@code m}/{@code M} last jumped to. */
     private int matchIndex;
@@ -837,7 +847,7 @@ public final class Viewer {
 
     /** Edits the delimiter form. */
     private void formKey(KeyEvent key) {
-        StringBuilder input = form.onKeyValue ? form.keyValue : form.items;
+        StringBuilder input = Objects.requireNonNull(form).onKeyValue ? form.keyValue : form.items;
         switch (key.code()) {
             case ESCAPE -> form = null;
             case ENTER -> {
@@ -848,7 +858,7 @@ public final class Viewer {
                     delimiters = typed;
                     setMode(Mode.DELIMITED);
                 } catch (IllegalArgumentException e) {
-                    form.error = e.getMessage();
+                    Objects.requireNonNull(form).error = e.getMessage();
                 }
             }
             case TAB, UP, DOWN -> form.onKeyValue = !form.onKeyValue;
@@ -963,7 +973,7 @@ public final class Viewer {
 
     /** Scrolls to the match that {@code m} or {@code M} chose, once the text has it. */
     private void scrollToMatch(Value value) {
-        List<Integer> matchRows = wrapped.matchRows();
+        List<Integer> matchRows = Objects.requireNonNull(wrapped).matchRows();
         if (matchIndex < matchRows.size()) {
             // Two rows of context above the match.
             scroll = Math.max(matchRows.get(matchIndex) - 2, 0);
@@ -975,7 +985,7 @@ public final class Viewer {
     }
 
     /** What the bottom border says left of the position. */
-    private String status(Value value, Wrapped shown) {
+    private String status(Value value, @Nullable Wrapped shown) {
         if (message != null) {
             return message;
         }

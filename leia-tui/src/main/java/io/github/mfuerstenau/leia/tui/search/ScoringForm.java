@@ -16,6 +16,7 @@ import io.github.mfuerstenau.leia.tui.widgets.Form;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import org.jspecify.annotations.Nullable;
 
 /** The similarity and sort popup: a draft of the {@link ScoringSettings}, applied with Enter. */
 public final class ScoringForm {
@@ -181,12 +182,13 @@ public final class ScoringForm {
      * guessed type, its smallest value and Lucene's missing values.
      */
     private void changeTarget(int level, int step) {
-        List<Target> choices = new ArrayList<>(Arrays.asList(null, new Target.Score(), new Target.Doc()));
+        List<@Nullable Target> choices =
+                new ArrayList<@Nullable Target>(Arrays.asList(null, new Target.Score(), new Target.Doc()));
         for (int field = 0; field < draft.fields.size(); field++) {
             choices.add(new Target.Field(field));
         }
         SortLevel current = draft.levels[level];
-        Target target = cycled(choices, current == null ? null : current.target(), step);
+        @Nullable Target target = cycled(choices, current == null ? null : current.target(), step);
         if (target == null) {
             Arrays.fill(draft.levels, level, ScoringSettings.MAX_LEVELS, null);
             return;
@@ -212,7 +214,7 @@ public final class ScoringForm {
     }
 
     /** The choice {@code step} places after {@code current} in {@code choices}, wrapping around. */
-    private static <T> T cycled(List<T> choices, T current, int step) {
+    private static <T extends @Nullable Object> T cycled(List<T> choices, T current, int step) {
         int at = Math.max(choices.indexOf(current), 0);
         return choices.get(Math.floorMod(at + step, choices.size()));
     }

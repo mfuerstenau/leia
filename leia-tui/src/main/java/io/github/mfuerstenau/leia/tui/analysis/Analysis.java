@@ -38,6 +38,7 @@ import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.function.ToIntFunction;
@@ -117,36 +118,36 @@ public final class Analysis {
     private @Nullable String field;
 
     /** The auto stop words popup; null while it is closed. */
-    private AutoStopWordsForm stopWordsForm;
+    private @Nullable AutoStopWordsForm stopWordsForm;
 
     /** The id of the last search for auto stop words. */
     private long stopWordsId;
 
     /** The components, once fetched; null before. */
-    private GetAnalysisComponentsResult components;
+    private @Nullable GetAnalysisComponentsResult components;
 
     /** What the tab and the analyzer form say when no loaded runtime has analysis (ADR 0071). */
     static final String NO_ANALYSIS = "No loaded runtime has analysis";
 
     /** Why the components could not be fetched; null otherwise. */
-    private String componentsError;
+    private @Nullable String componentsError;
 
     /** Whether no loaded runtime has analysis (ADR 0071): then there are no components to list. */
     private boolean noAnalysis;
 
     private final LineInput input = new LineInput("");
-    private Origin origin;
+    private @Nullable Origin origin;
     private boolean editing;
-    private AnalyzerForm form;
+    private @Nullable AnalyzerForm form;
 
     /** The analysis with the analyzer that the form applied, while the backend tries it; null otherwise. */
-    private AnalysisSettings trying;
+    private @Nullable AnalysisSettings trying;
 
     /** The last analysis; null before the first one or after it failed. */
-    private Shown shown;
+    private @Nullable Shown shown;
 
     /** Why the last analysis failed; null otherwise. */
-    private String error;
+    private @Nullable String error;
 
     private Focus focus = Focus.TOKENS;
     private int step = -1;
@@ -369,7 +370,7 @@ public final class Analysis {
     }
 
     private Optional<Request> formKey(KeyEvent key) {
-        return switch (form.handleKey(key)) {
+        return switch (Objects.requireNonNull(form).handleKey(key)) {
             case Form.Event.None<AnalyzerSettings> _ -> Optional.empty();
             case Form.Event.Cancel<AnalyzerSettings> _ -> {
                 form = null;
@@ -433,7 +434,7 @@ public final class Analysis {
     }
 
     private Optional<Request> stopWordsKey(KeyEvent key) {
-        return switch (stopWordsForm.handleKey(key)) {
+        return switch (Objects.requireNonNull(stopWordsForm).handleKey(key)) {
             case AutoStopWordsForm.Event.None _ -> Optional.empty();
             case AutoStopWordsForm.Event.Close _ -> {
                 stopWordsForm = null;
@@ -499,7 +500,11 @@ public final class Analysis {
     /** The tokens of the selected stage; empty if a char filter is selected. */
     private Optional<List<Token>> stageTokens() {
         return step().flatMap(selected -> selected instanceof Step.Stage stage
-                ? Optional.of(shown.result.stages().get(stage.index()).tokens())
+                ? Optional.of(Objects.requireNonNull(shown)
+                        .result
+                        .stages()
+                        .get(stage.index())
+                        .tokens())
                 : Optional.empty());
     }
 
@@ -701,7 +706,7 @@ public final class Analysis {
         int width = stepNameWidth();
         boolean focused = focused(Focus.STEPS);
         List<Row> rows = new ArrayList<>();
-        for (CharFilterStep filter : shown.result.charFilters()) {
+        for (CharFilterStep filter : Objects.requireNonNull(shown).result.charFilters()) {
             rows.add(Row.from(Cell.from(Line.from(
                     Span.raw(Form.padded(TextFormat.escapeControl(filter.name()), width) + " "),
                     Span.styled(String.format("%6s", "text"), Form.muted())))));
@@ -734,7 +739,8 @@ public final class Analysis {
             return;
         }
         if (selected.get() instanceof Step.CharFilter charFilter) {
-            CharFilterStep filter = shown.result.charFilters().get(charFilter.index());
+            CharFilterStep filter =
+                    Objects.requireNonNull(shown).result.charFilters().get(charFilter.index());
             frame.renderWidget(
                     Panels.wrapped(
                             TextFormat.escapeControl(filter.text()),
@@ -743,7 +749,7 @@ public final class Analysis {
                     area);
             return;
         }
-        TokenStage stage = shown.result.stages().get(((Step.Stage) selected.get()).index());
+        TokenStage stage = Objects.requireNonNull(shown).result.stages().get(((Step.Stage) selected.get()).index());
         String title = " Tokens after " + TextFormat.escapeControl(stage.name()) + " · "
                 + stage.tokens().size() + " ";
         if (stage.truncated()) {

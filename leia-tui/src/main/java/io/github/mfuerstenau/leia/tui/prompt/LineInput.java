@@ -4,6 +4,7 @@ import dev.tamboui.text.CharWidth;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
 import java.util.function.ToIntFunction;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A one-line text editor, shared by the open-index prompt, the search query and the popups: the cursor
@@ -130,7 +131,7 @@ public final class LineInput {
      * but both together are AltGr: Windows reports {@code \} or {@code @} on a German layout, typed
      * or pasted, with both.
      */
-    public static String typed(KeyEvent key) {
+    public static @Nullable String typed(KeyEvent key) {
         if (key.code() != KeyCode.CHAR || key.hasCtrl() != key.hasAlt()) {
             return null;
         }

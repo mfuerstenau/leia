@@ -268,7 +268,7 @@ public final class KnnGraphs {
     }
 
     /** The vectors of a field in a segment; null if the segment has none. */
-    private static KnnVectorValues values(LeafReader leaf, FieldInfo field) throws IOException {
+    private static @Nullable KnnVectorValues values(LeafReader leaf, FieldInfo field) throws IOException {
         FieldInfo segmentField = leaf.getFieldInfos().fieldInfo(field.getName());
         if (segmentField == null || segmentField.getVectorDimension() == 0) {
             return null;

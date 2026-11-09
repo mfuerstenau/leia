@@ -831,7 +831,8 @@ public final class Overview {
     }
 
     /** The cells of a field's row. {@code totalTerms} is the number of terms of all fields, once known. */
-    private static String[] fieldCells(IndexField field, FieldScan scan, @Nullable Long totalTerms, String stored) {
+    private static String[] fieldCells(
+            IndexField field, @Nullable FieldScan scan, @Nullable Long totalTerms, String stored) {
         String points = field.pointDimensionCount() == 0
                 ? "-"
                 : field.pointDimensionCount() + "×" + field.pointNumBytes() + "B";

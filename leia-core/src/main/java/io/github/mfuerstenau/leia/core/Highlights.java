@@ -19,6 +19,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -34,6 +35,7 @@ import org.apache.lucene.search.uhighlight.SplittingBreakIterator;
 import org.apache.lucene.search.uhighlight.UHComponents;
 import org.apache.lucene.search.uhighlight.UnifiedHighlighter;
 import org.apache.lucene.search.uhighlight.WholeBreakIterator;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Highlights the matches of a query in stored text with Lucene's {@link UnifiedHighlighter} (ADR
@@ -155,7 +157,7 @@ public final class Highlights {
         for (int f = 0; f < fields.size(); f++) {
             String field = fields.get(f);
             List<Integer> indexes = textIndexes.get(f);
-            List<StoredValue> values = stored.get(field);
+            List<StoredValue> values = Objects.requireNonNull(stored.get(field));
             long chars = indexes.size() - 1L;
             for (int index : indexes) {
                 chars += ((StoredValue.Text) values.get(index)).value().length();
@@ -449,7 +451,7 @@ public final class Highlights {
 
         @Override
         @SuppressWarnings("unchecked")
-        public Object highlightFieldForDoc(LeafReader reader, int docId, String content) throws IOException {
+        public @Nullable Object highlightFieldForDoc(LeafReader reader, int docId, String content) throws IOException {
             UnifiedHighlighter.OffsetSource source = getOffsetSource();
             Object found;
             try {

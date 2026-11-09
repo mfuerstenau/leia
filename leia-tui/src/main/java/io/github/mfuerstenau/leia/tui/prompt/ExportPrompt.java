@@ -96,10 +96,10 @@ public final class ExportPrompt {
     private final LineInput input;
 
     /** Why the last export couldn't start, or that the file exists; or null. */
-    private String error;
+    private @Nullable String error;
 
     /** The file that the prompt said exists: Enter on it again overwrites it. Or null. */
-    private String overwrite;
+    private @Nullable String overwrite;
 
     /** Set while the export is being started. */
     private boolean busy;

@@ -45,6 +45,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
@@ -172,7 +173,7 @@ public final class Commits {
      * The segment to select once the opened commit of the shown index directory is in, as the
      * documents screen asked for (ADR 0052); or null.
      */
-    private String wantedSegment;
+    private @Nullable String wantedSegment;
 
     /**
      * The commits screen of these index directories, as shown; at least one. {@code readerOpen} says
@@ -765,7 +766,7 @@ public final class Commits {
             3
         };
         // The columns on the right are also in the details, so they go first when the table is too wide.
-        Block block = panel(title, focused);
+        Block block = panel(Objects.requireNonNull(title), focused);
         int shown =
                 Panels.shownColumns(widths, COLUMN_SPACING, block.inner(area).width(), 1);
         Row header = segmentCells(
@@ -828,7 +829,7 @@ public final class Commits {
         }
         // TamboUI scrolls no further than to show the last line at the bottom (ratatui scrolled on
         // until it was at the top), so the scroll stops there too: the next key after End moves.
-        Block block = panel(title, focused);
+        Block block = panel(Objects.requireNonNull(title), focused);
         Rect inner = block.inner(area);
         List<Line> wrapped = Panels.wrap(lines, inner.width());
         detailsScroll = Math.clamp(detailsScroll, 0, Math.max(wrapped.size() - inner.height(), 0));

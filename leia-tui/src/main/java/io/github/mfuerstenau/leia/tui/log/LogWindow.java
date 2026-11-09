@@ -83,7 +83,7 @@ public final class LogWindow {
     /** The serial and filter that {@link #shown} and {@link #rowsShown} were built for. */
     private long cachedSerial = -1;
 
-    private Level cachedFilter;
+    private @Nullable Level cachedFilter;
     private List<LogBuffer.Entry> shown = List.of();
     private List<Row> rowsShown = List.of();
 

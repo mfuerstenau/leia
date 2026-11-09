@@ -338,18 +338,18 @@ public final class Terms {
     private final TableState fieldTable = new TableState();
 
     /** The terms shown; null before the first page. */
-    private TermList terms;
+    private @Nullable TermList terms;
 
     /** The postings shown; null before the first page. */
-    private PostingList postings;
+    private @Nullable PostingList postings;
 
     private Column focus = Column.FIELDS;
 
     /** The text typed into the seek prompt while it is open; null otherwise. */
-    private StringBuilder seek;
+    private @Nullable StringBuilder seek;
 
     /** The first page of terms asked for last; a reply for another first page is dropped. Null before. */
-    private Request.LoadTerms wantedFirst;
+    private Request.@Nullable LoadTerms wantedFirst;
 
     /** The filter of the documents screen, once it is built (ADR 0032). */
     private @Nullable Long filter;
@@ -361,22 +361,22 @@ public final class Terms {
     private final Set<Request> pending = new HashSet<>();
 
     /** The tree of the selected point field; null before it is in, or for a field with postings. */
-    private PointTree pointTree;
+    private @Nullable PointTree pointTree;
 
     /** The tree asked for last; a reply for another is dropped. Null before. */
-    private Request.LoadPointTree wantedTree;
+    private Request.@Nullable LoadPointTree wantedTree;
 
     /** The serial of the next tree asked for. */
     private long nextTreeSerial = 1;
 
     /** The graphs of the selected vector field; null before they are in, or for another row. */
-    private KnnGraphTree knnTree;
+    private @Nullable KnnGraphTree knnTree;
 
     /** The graphs asked for last; a reply for others is dropped. Null before. */
-    private Request.LoadKnnGraph wantedGraph;
+    private Request.@Nullable LoadKnnGraph wantedGraph;
 
     /** The node asked for last; a reply for another is dropped. Null before. */
-    private Request.LoadKnnNode wantedNode;
+    private Request.@Nullable LoadKnnNode wantedNode;
 
     /** The document whose node is to be shown once the graphs are in (ADR 0085); null if none. */
     private @Nullable Integer wantedDocNode;
@@ -391,7 +391,7 @@ public final class Terms {
     private PointFormats pointFormats = new PointFormats();
 
     /** What a key that doesn't work on the shown field said; until the next key. */
-    private String note;
+    private @Nullable String note;
 
     /** What the index can do (ADR 0044): the keys it lacks a feature for are refused and left out of the legend. */
     private Set<Feature> features = Feature.all();
@@ -573,7 +573,7 @@ public final class Terms {
 
     /** The postings of the selected term, or their next page once the last one is selected. */
     private Optional<Request> postingsRequest(String field) {
-        Optional<BytesValue> term = terms.selectedTerm();
+        Optional<BytesValue> term = Objects.requireNonNull(terms).selectedTerm();
         if (term.isEmpty()) {
             return Optional.empty();
         }
@@ -628,7 +628,7 @@ public final class Terms {
             if (!continuesTerms(request)) {
                 return Optional.empty();
             }
-            terms.entries.addAll(result.terms());
+            Objects.requireNonNull(terms).entries.addAll(result.terms());
             terms.next = result.next().orElse(null);
         } else {
             if (!wanted(request)) {
@@ -651,7 +651,7 @@ public final class Terms {
                 return Optional.empty();
             }
             // The selection may have moved on to a term whose postings are still missing.
-            terms.error = error;
+            Objects.requireNonNull(terms).error = error;
             return nextRequest();
         }
         if (wanted(request)) {
@@ -672,7 +672,7 @@ public final class Terms {
             if (!continuesPostings(request)) {
                 return Optional.empty();
             }
-            postings.postings.addAll(result.postings());
+            Objects.requireNonNull(postings).postings.addAll(result.postings());
             postings.nextDoc = Optionals.orNull(result.nextDoc());
             postings.docFreq = result.docFreq();
             if (postings.stepPending) {
@@ -702,7 +702,7 @@ public final class Terms {
         pending.remove(request);
         if (request.more()) {
             if (continuesPostings(request)) {
-                postings.error = error;
+                Objects.requireNonNull(postings).error = error;
                 postings.stepPending = false;
             }
         } else if (wanted(request)) {
@@ -748,7 +748,10 @@ public final class Terms {
         cellOf(request).ifPresent(node -> {
             node.loaded(result);
             if (node.points != null
-                    && pointTree.selectedNode().filter(node::equals).isPresent()) {
+                    && Objects.requireNonNull(pointTree)
+                            .selectedNode()
+                            .filter(node::equals)
+                            .isPresent()) {
                 pointTree.showLeaf(node);
                 focus = Column.POSTINGS;
             }
@@ -881,9 +884,9 @@ public final class Terms {
             return;
         }
         if (!request.walk()) {
-            knnTree.path.clear();
+            Objects.requireNonNull(knnTree).path.clear();
         }
-        knnTree.path.add(new KnnGraphTree.Shown(result));
+        Objects.requireNonNull(knnTree).path.add(new KnnGraphTree.Shown(result));
         knnTree.nodeError = null;
         focus = Column.POSTINGS;
     }
@@ -892,7 +895,7 @@ public final class Terms {
     public void knnNodeFailed(Request.LoadKnnNode request, String error) {
         pending.remove(request);
         if (wantedNode(request)) {
-            knnTree.nodeError = error;
+            Objects.requireNonNull(knnTree).nodeError = error;
         }
     }
 
@@ -905,7 +908,7 @@ public final class Terms {
      * page, fetches the next page on the row after a level's nodes, and shows the neighbours of a node.
      */
     private Optional<Request> openGraphRow() {
-        Optional<KnnGraphTree.Item> selected = knnTree.selectedItem();
+        Optional<KnnGraphTree.Item> selected = Objects.requireNonNull(knnTree).selectedItem();
         if (selected.isEmpty()) {
             return Optional.empty();
         }
@@ -941,24 +944,29 @@ public final class Terms {
         level.loading = true;
         level.error = null;
         return send(new Request.LoadKnnNodes(
-                knnTree.field, knnTree.serial, level.segment, level.number, level.nodes.size()));
+                Objects.requireNonNull(knnTree).field,
+                knnTree.serial,
+                level.segment,
+                level.number,
+                level.nodes.size()));
     }
 
     /** The neighbours of {@code node} of {@code segment}, as the start of a walk. */
     private Optional<Request> openNode(int segment, KnnGraphNode node) {
-        wantedNode = Request.LoadKnnNode.ofOrd(knnTree.field, knnTree.serial, segment, node.ord(), false);
+        wantedNode = Request.LoadKnnNode.ofOrd(
+                Objects.requireNonNull(knnTree).field, knnTree.serial, segment, node.ord(), false);
         return send(wantedNode);
     }
 
     /** Enter on a neighbour: walks on to it. */
     private Optional<Request> walkOn() {
-        Optional<KnnGraphTree.Shown> shown = knnTree.shown();
+        Optional<KnnGraphTree.Shown> shown = Objects.requireNonNull(knnTree).shown();
         if (shown.isEmpty()) {
             return Optional.empty();
         }
         return shown.get().selectedNeighbour().flatMap(neighbour -> {
             wantedNode = Request.LoadKnnNode.ofOrd(
-                    knnTree.field,
+                    Objects.requireNonNull(knnTree).field,
                     knnTree.serial,
                     shown.get().node.segment(),
                     neighbour.node().ord(),
@@ -969,7 +977,7 @@ public final class Terms {
 
     /** {@code <}: back to the node the walk came from. */
     private void walkBack() {
-        if (knnTree.path.size() > 1) {
+        if (Objects.requireNonNull(knnTree).path.size() > 1) {
             knnTree.path.removeLast();
             // A node still on its way would land on the wrong step.
             wantedNode = null;
@@ -982,17 +990,18 @@ public final class Terms {
     private Optional<Request> graphDocument() {
         Optional<KnnGraphNode> node = Optional.empty();
         if (focus == Column.POSTINGS) {
-            node = knnTree.shown()
+            node = Objects.requireNonNull(knnTree)
+                    .shown()
                     .flatMap(KnnGraphTree.Shown::selectedNeighbour)
                     .map(KnnGraphNeighbour::node);
         } else if (focus == Column.TERMS) {
-            node = knnTree.selectedItem().flatMap(item -> switch (item) {
+            node = Objects.requireNonNull(knnTree).selectedItem().flatMap(item -> switch (item) {
                 case KnnGraphTree.Item.EntryItem entry -> Optional.of(entry.node());
                 case KnnGraphTree.Item.NodeItem nodeItem -> Optional.of(nodeItem.node());
                 default -> Optional.empty();
             });
         }
-        return node.map(n -> new Request.VectorDocument(knnTree.field, n.docId()));
+        return node.map(n -> new Request.VectorDocument(Objects.requireNonNull(knnTree).field, n.docId()));
     }
 
     /**
@@ -1000,7 +1009,7 @@ public final class Terms {
      * needs first.
      */
     private Optional<Request> openCell() {
-        Optional<PointTree.Node> selected = pointTree.selectedNode();
+        Optional<PointTree.Node> selected = Objects.requireNonNull(pointTree).selectedNode();
         if (selected.isEmpty()) {
             return Optional.empty();
         }
@@ -1118,13 +1127,13 @@ public final class Terms {
     public static final class Mark {
         private final int fieldRow;
         private final Column focus;
-        private final TermList terms;
-        private final PostingList postings;
-        private final PointTree pointTree;
-        private final KnnGraphTree knnTree;
-        private final Request.LoadTerms wantedFirst;
-        private final Request.LoadPointTree wantedTree;
-        private final Request.LoadKnnGraph wantedGraph;
+        private final @Nullable TermList terms;
+        private final @Nullable PostingList postings;
+        private final @Nullable PointTree pointTree;
+        private final @Nullable KnnGraphTree knnTree;
+        private final Request.@Nullable LoadTerms wantedFirst;
+        private final Request.@Nullable LoadPointTree wantedTree;
+        private final Request.@Nullable LoadKnnGraph wantedGraph;
 
         private Mark(Terms of) {
             this.fieldRow = of.fieldRow;
@@ -1266,8 +1275,8 @@ public final class Terms {
             return Optional.of(openCell());
         }
         if (focus == Column.POSTINGS) {
-            return Optional.of(
-                    pointTree.selectedPoint().map(point -> new Request.PointDocument(pointTree.field, point.docId())));
+            PointTree tree = Objects.requireNonNull(pointTree);
+            return Optional.of(tree.selectedPoint().map(point -> new Request.PointDocument(tree.field, point.docId())));
         }
         return Optional.empty();
     }
@@ -1466,11 +1475,12 @@ public final class Terms {
         }
         if (terms == null
                 || selectedField()
-                        .filter(field -> field.name().equals(terms.field))
+                        .filter(field -> field.name().equals(Objects.requireNonNull(terms).field))
                         .isEmpty()) {
             return Optional.empty();
         }
-        return terms.selectedTerm().map(term -> new Request.Search(terms.field, term));
+        TermList list = Objects.requireNonNull(terms);
+        return list.selectedTerm().map(term -> new Request.Search(list.field, term));
     }
 
     private Optional<Request> seekKey(KeyEvent key) {
@@ -1479,9 +1489,9 @@ public final class Terms {
                 seek = null;
                 return Optional.empty();
             }
-            case CHAR -> seek.appendCodePoint(key.codePoint());
+            case CHAR -> Objects.requireNonNull(seek).appendCodePoint(key.codePoint());
             case BACKSPACE -> {
-                if (!seek.isEmpty()) {
+                if (!Objects.requireNonNull(seek).isEmpty()) {
                     seek.setLength(seek.offsetByCodePoints(seek.length(), -1));
                 }
             }
@@ -1520,14 +1530,14 @@ public final class Terms {
         if (selectedVectorField().isPresent()) {
             if (knnTree != null) {
                 Selection.moved(knnTree.selected, knnTree.visible().size(), key)
-                        .ifPresent(row -> knnTree.selected = row);
+                        .ifPresent(row -> Objects.requireNonNull(knnTree).selected = row);
             }
             return Optional.empty();
         }
         if (selectedPointField().isPresent()) {
             if (pointTree != null) {
                 Selection.moved(pointTree.selected, pointTree.visible().size(), key)
-                        .ifPresent(row -> pointTree.selected = row);
+                        .ifPresent(row -> Objects.requireNonNull(pointTree).selected = row);
             }
             return Optional.empty();
         }
@@ -1555,8 +1565,11 @@ public final class Terms {
         }
         if (selectedPointField().isPresent()) {
             if (pointTree != null && pointTree.leaf != null) {
-                Selection.moved(pointTree.pointSelected, pointTree.leaf.points.size(), key)
-                        .ifPresent(row -> pointTree.pointSelected = row);
+                Selection.moved(
+                                pointTree.pointSelected,
+                                Objects.requireNonNull(pointTree.leaf.points).size(),
+                                key)
+                        .ifPresent(row -> Objects.requireNonNull(pointTree).pointSelected = row);
             }
             return Optional.empty();
         }
@@ -1719,14 +1732,14 @@ public final class Terms {
     }
 
     private String postingsTitle(boolean onlyMatches) {
-        if (postings.filter == null) {
+        if (Objects.requireNonNull(postings).filter == null) {
             return POSTINGS_TITLE + postings.docFreq + ") ";
         }
         return POSTINGS_TITLE + postings.docFreq + (onlyMatches ? ") · filter only " : ") · • filter ");
     }
 
     private String noPostingsText(boolean onlyMatches) {
-        if (postings.error != null) {
+        if (Objects.requireNonNull(postings).error != null) {
             return "Cannot read the postings: " + postings.error;
         }
         return onlyMatches ? "No postings in the filter." : "No postings.";
@@ -1858,8 +1871,8 @@ public final class Terms {
         PointTree.Node leaf = pointTree.leaf;
         PointFormat format = pointFormats.of(selectedPointField().orElseThrow());
         String title = leaf.pointsCut
-                ? " Points (" + leaf.points.size() + " of " + leaf.size + ") "
-                : " Points (" + leaf.points.size() + ") ";
+                ? " Points (" + Objects.requireNonNull(leaf.points).size() + " of " + leaf.size + ") "
+                : " Points (" + Objects.requireNonNull(leaf.points).size() + ") ";
         int docWidth = Selection.numberWidth(leaf.points.stream().mapToLong(LeafPoint::docId));
         Row header = Row.from(right("Doc", docWidth), Cell.from("Value"))
                 .style(Palette.current().heading());
@@ -2024,7 +2037,7 @@ public final class Terms {
             return;
         }
         GetKnnGraphNodeResult node = shown.get().node;
-        List<String> ords = knnTree.path.stream()
+        List<String> ords = Objects.requireNonNull(knnTree).path.stream()
                 .map(step -> Integer.toString(step.node.node().ord()))
                 .toList();
         // A step that failed says so in the title, which the walk's ordinals give otherwise.

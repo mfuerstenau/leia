@@ -22,6 +22,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.jar.JarFile;
 import java.util.logging.Level;
@@ -503,7 +504,7 @@ public final class RuntimeFolders {
 
     /** How the folder of {@code known} was found. */
     public static State state(Known known) {
-        return states.get(known);
+        return Objects.requireNonNull(states.get(known));
     }
 
     /** The folder that the runtime of {@code known} was loaded from, if it was loaded from one (ADR 0122). */

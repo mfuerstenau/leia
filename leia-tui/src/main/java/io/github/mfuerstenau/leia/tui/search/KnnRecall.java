@@ -27,6 +27,7 @@ import io.github.mfuerstenau.leia.tui.widgets.Selection;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
@@ -49,10 +50,10 @@ public final class KnnRecall {
     private boolean running = true;
 
     private long checked;
-    private KnnRecallResult result;
+    private @Nullable KnnRecallResult result;
 
     /** Why the check could not start, failed, or was stopped; or null. */
-    private String error;
+    private @Nullable String error;
 
     private int selected;
     private final TableState table = new TableState();
@@ -126,7 +127,10 @@ public final class KnnRecall {
 
     /** The selected worst target of a sample. */
     Optional<KnnRecallTarget> selectedTarget() {
-        return sampled() && selected < rowCount() ? Optional.of(result.worst().get(selected)) : Optional.empty();
+        KnnRecallResult found = result;
+        return found != null && sampled() && selected < rowCount()
+                ? Optional.of(found.worst().get(selected))
+                : Optional.empty();
     }
 
     /** The selected missed document of a single target. */
@@ -164,8 +168,8 @@ public final class KnnRecall {
         if (sampled()) {
             int docWidth = Math.max(
                     3,
-                    Selection.numberWidth(
-                            result.worst().stream().mapToLong(t -> t.docId().orElse(0))));
+                    Selection.numberWidth(Objects.requireNonNull(result).worst().stream()
+                            .mapToLong(t -> t.docId().orElse(0))));
             header = Row.from(right("Doc", docWidth), right("Recall", 6), Cell.from("Missed"));
             for (KnnRecallTarget target : result.worst()) {
                 rows.add(Row.from(

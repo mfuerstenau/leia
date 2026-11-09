@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
@@ -283,7 +284,8 @@ public final class ReadOnlyIndex implements OpenedIndex {
             FieldInfos.getMergedFieldInfos(multi);
             return Optional.empty();
         } catch (IllegalArgumentException | IllegalStateException e) {
-            return Optional.of(e.getMessage());
+            return Optional.of(
+                    Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName()));
         }
     }
 

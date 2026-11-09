@@ -43,7 +43,8 @@ final class ElasticsearchSetup {
      */
     // The property is global, so it is set only while the class reads it, under the class's lock
     static synchronized void setUp(ClassLoader loader, Path lib) {
-        Path installation = lib.getParent();
+        Path parent = lib.getParent();
+        Path installation = parent != null ? parent : lib;
         Class<?> configurator;
         try {
             configurator = Class.forName(LOG_CONFIGURATOR, false, loader);

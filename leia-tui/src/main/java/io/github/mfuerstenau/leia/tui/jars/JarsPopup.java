@@ -61,21 +61,21 @@ public final class JarsPopup {
     private final @Nullable Path home;
 
     /** The loaded jars; null until they are fetched, or if they couldn't be. */
-    private List<String> jars;
+    private @Nullable List<String> jars;
 
     /** Why the jars couldn't be listed; null otherwise. */
-    private String jarsError;
+    private @Nullable String jarsError;
 
     private final LineInput input = new LineInput("");
 
     /** The drop-down of the names that the last Tab found, if it found more than one; else null. */
-    private CompletionList list;
+    private @Nullable CompletionList list;
 
     /** What the last addition did; null before one, or if it failed. */
-    private AddJarsResult added;
+    private @Nullable AddJarsResult added;
 
     /** Why the last addition failed; null otherwise. */
-    private String addError;
+    private @Nullable String addError;
 
     /** Set while the jars are being added: then the popup takes no key. */
     private boolean busy;
@@ -189,10 +189,14 @@ public final class JarsPopup {
 
     /** What a key does while the list is open; returns false if the popup handles it. */
     private boolean handleListKey(KeyEvent key) {
+        CompletionList open = list;
+        if (open == null) {
+            return false;
+        }
         switch (key.code()) {
-            case UP, DOWN, PAGE_UP, PAGE_DOWN -> list.move(key);
+            case UP, DOWN, PAGE_UP, PAGE_DOWN -> open.move(key);
             case ENTER, TAB -> {
-                input.set(list.chosen());
+                input.set(open.chosen());
                 list = null;
                 clearOutcome();
             }

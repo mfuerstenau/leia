@@ -71,30 +71,32 @@ final class Analyzers {
     static final class Names {
 
         private final Call call;
-        private List<AvailableAnalyzer> available;
+        private @Nullable List<AvailableAnalyzer> available;
 
         Names(Call call) {
             this.call = call;
         }
 
         String resolve(String name) throws ToolException, Jobs.Cancelled {
-            if (available == null) {
+            List<AvailableAnalyzer> names = available;
+            if (names == null) {
                 try {
-                    available = call.call(Methods.GET_ANALYSIS_COMPONENTS, new GetAnalysisComponentsParams())
+                    names = call.call(Methods.GET_ANALYSIS_COMPONENTS, new GetAnalysisComponentsParams())
                             .analyzers();
                 } catch (ToolException e) {
                     if (e.code().equals(Optional.of(ErrorCode.NOT_SUPPORTED))) {
                         // No Lucene 10 runtime to list them: the older runtimes take the simple name.
-                        available = List.of();
+                        names = List.of();
                     } else {
                         throw e;
                     }
                 }
+                available = names;
             }
-            if (available.isEmpty()) {
+            if (names.isEmpty()) {
                 return name;
             }
-            List<AvailableAnalyzer> matches = available.stream()
+            List<AvailableAnalyzer> matches = names.stream()
                     .filter(analyzer -> analyzer.name().equalsIgnoreCase(name))
                     .toList();
             if (matches.size() == 1) {
@@ -102,7 +104,7 @@ final class Analyzers {
             }
             if (matches.isEmpty()) {
                 throw ToolError.invalid("No analyzer " + name + "; there are "
-                        + available.stream().map(AvailableAnalyzer::name).collect(Collectors.joining(", ")));
+                        + names.stream().map(AvailableAnalyzer::name).collect(Collectors.joining(", ")));
             }
             throw ToolError.invalid("Several analyzers are called " + name + "; give the class name of one of "
                     + matches.stream().map(AvailableAnalyzer::className).collect(Collectors.joining(", ")));

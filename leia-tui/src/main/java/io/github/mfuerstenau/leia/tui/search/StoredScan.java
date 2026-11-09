@@ -57,10 +57,10 @@ public final class StoredScan {
     private long scannedDocs;
     private long matchedValues;
     private final List<StoredScanHit> hits = new ArrayList<>();
-    private StoredScanResult result;
+    private @Nullable StoredScanResult result;
 
     /** Why the scan could not start, failed, or was stopped; or null. */
-    private String error;
+    private @Nullable String error;
 
     private int selected = -1;
     private final TableState table = new TableState();
@@ -327,7 +327,7 @@ public final class StoredScan {
 
     /** The values that took too long to match, if any. */
     private List<Line> timedOutLines() {
-        if (result.timedOutValues() == 0) {
+        if (result == null || result.timedOutValues() == 0) {
             return List.of();
         }
         List<Line> lines = new ArrayList<>();

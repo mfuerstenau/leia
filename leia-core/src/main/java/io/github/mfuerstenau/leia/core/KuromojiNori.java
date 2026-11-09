@@ -207,7 +207,7 @@ final class KuromojiNori {
     }
 
     /** The enum constant of {@code type} named {@code name}; null if there is none. */
-    private static Object constant(Class<?> type, String name) {
+    private static @Nullable Object constant(Class<?> type, String name) {
         return Arrays.stream(type.getEnumConstants())
                 .filter(constant -> ((Enum<?>) constant).name().equals(name))
                 .findFirst()

@@ -77,9 +77,9 @@ public final class OptionsForm {
     private int selected;
 
     /** The row whose text is typed, or null. */
-    private Row editingRow;
+    private @Nullable Row editingRow;
 
-    private LineInput input;
+    private @Nullable LineInput input;
 
     public OptionsForm(ParserSettings settings, boolean classic) {
         this.draft = settings.copy();
@@ -93,7 +93,9 @@ public final class OptionsForm {
 
     /** The text that is typed, for the tests. */
     Optional<String> editedText() {
-        return editingRow == null ? Optional.empty() : Optional.of(input.text());
+        return editingRow == null
+                ? Optional.empty()
+                : Optional.of(Objects.requireNonNull(input).text());
     }
 
     /** The rows before the field rows. */
@@ -184,11 +186,11 @@ public final class OptionsForm {
         switch (key.code()) {
             case ESCAPE -> editingRow = null;
             case ENTER -> {
-                String typed = input.text().strip();
-                setText(editingRow, typed.isEmpty() ? null : typed);
+                String typed = Objects.requireNonNull(input).text().strip();
+                setText(Objects.requireNonNull(editingRow), typed.isEmpty() ? null : typed);
                 editingRow = null;
             }
-            default -> input.handleKey(key, LineInput::wordStart);
+            default -> Objects.requireNonNull(input).handleKey(key, LineInput::wordStart);
         }
     }
 
@@ -269,6 +271,7 @@ public final class OptionsForm {
             case DATE_RESOLUTION -> draft.dateResolution = cycled(resolutions(), draft.dateResolution, step);
             case FIELD_DATE -> {
                 String field = dateField(index);
+                @Nullable
                 DateResolution resolution = cycled(resolutions(), draft.fieldDateResolutions.get(field), step);
                 if (resolution == null) {
                     draft.fieldDateResolutions.remove(field);
@@ -279,10 +282,10 @@ public final class OptionsForm {
             case POINT -> {
                 int point = index - firstPoint();
                 PointSetting setting = draft.points.get(point);
-                List<PointType> cycle = setting.bytes() == 4
+                List<@Nullable PointType> cycle = setting.bytes() == 4
                         ? Arrays.asList(PointType.INT, PointType.FLOAT, null)
                         : Arrays.asList(PointType.LONG, PointType.DOUBLE, null);
-                PointType type = cycled(cycle, setting.pointType(), step);
+                @Nullable PointType type = cycled(cycle, setting.pointType(), step);
                 draft.points.set(point, new PointSetting(setting.field(), setting.bytes(), type));
             }
             default -> {}
@@ -290,15 +293,15 @@ public final class OptionsForm {
     }
 
     /** No resolution, then each from the coarsest. */
-    private static List<DateResolution> resolutions() {
-        List<DateResolution> cycle = new ArrayList<>();
+    private static List<@Nullable DateResolution> resolutions() {
+        List<@Nullable DateResolution> cycle = new ArrayList<>();
         cycle.add(null);
         cycle.addAll(List.of(DateResolution.values()));
         return cycle;
     }
 
     /** The entry after (or before) {@code current} in {@code cycle}, wrapping around. */
-    private static <T> T cycled(List<T> cycle, T current, int step) {
+    private static <T extends @Nullable Object> T cycled(List<T> cycle, T current, int step) {
         int at = Math.max(cycle.indexOf(current), 0);
         return cycle.get(Math.floorMod(at + step, cycle.size()));
     }
@@ -427,7 +430,7 @@ public final class OptionsForm {
         Rect inner = block.inner(popup);
         Panels.clear(frame, popup);
         frame.renderWidget(block, popup);
-        LineInput.Visible visible = input.visible(inner.width());
+        LineInput.Visible visible = Objects.requireNonNull(input).visible(inner.width());
         frame.renderWidget(Paragraph.from(Line.from(visible.text())), inner);
         frame.setCursorPosition(inner.x() + visible.cursorColumn(), inner.y());
     }

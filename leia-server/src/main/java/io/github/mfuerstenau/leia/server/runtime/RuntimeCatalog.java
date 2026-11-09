@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The runtimes leia knows, from the catalog {@value #RESOURCE} (ADR 0078): for each its folder in
@@ -126,7 +127,7 @@ public final class RuntimeCatalog {
     }
 
     @SuppressWarnings("unchecked")
-    private static Map<String, Object> object(Object value, String where) {
+    private static Map<String, Object> object(@Nullable Object value, String where) {
         if (value instanceof Map<?, ?> map) {
             return (Map<String, Object>) map;
         }
@@ -134,14 +135,14 @@ public final class RuntimeCatalog {
     }
 
     @SuppressWarnings("unchecked")
-    private static List<Object> array(Object value, String where) {
+    private static List<Object> array(@Nullable Object value, String where) {
         if (value instanceof List<?> list) {
             return (List<Object>) list;
         }
         throw new IllegalArgumentException(where + " is not an array");
     }
 
-    private static String string(Object value, String where) {
+    private static String string(@Nullable Object value, String where) {
         if (value instanceof String string) {
             return string;
         }

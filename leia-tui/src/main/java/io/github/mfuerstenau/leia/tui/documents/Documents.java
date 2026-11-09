@@ -277,12 +277,15 @@ public final class Documents {
         boolean sent;
 
         /** Null until the backend has started the job. */
+        @Nullable
         Long jobId;
 
         /** Per field with a text value, once they are in; null before. */
+        @Nullable
         Map<String, FieldMatches> fields;
 
         /** Why they could not be found; or null. */
+        @Nullable
         String error;
 
         Matches(long id, int docId, MatchQuery query) {
@@ -366,6 +369,7 @@ public final class Documents {
         final StringBuilder input = new StringBuilder();
 
         /** Or null. */
+        @Nullable
         String error;
     }
 
@@ -378,10 +382,10 @@ public final class Documents {
     private int docId;
 
     /** Or null. */
-    private GetDocumentResult document;
+    private @Nullable GetDocumentResult document;
 
     /** Why {@link #docId} could not be read; or null. */
-    private String error;
+    private @Nullable String error;
 
     /** The document asked for last; a reply for another one is dropped. Null before. */
     private @Nullable Integer wanted;
@@ -423,7 +427,7 @@ public final class Documents {
     private final Map<String, Reconstruction> reconstructions = new HashMap<>();
 
     /** The filter that ←/→ step through (ADR 0031); or null. */
-    private DocFilter filter;
+    private @Nullable DocFilter filter;
 
     /** The serial of the next filter. */
     private long nextFilterSerial = 1;
@@ -434,31 +438,31 @@ public final class Documents {
     private int detailsScroll;
 
     /** Or null. */
-    private DocIdPrompt prompt;
+    private @Nullable DocIdPrompt prompt;
 
     /** The text typed into the field seek while it is open; null otherwise. */
-    private StringBuilder seek;
+    private @Nullable StringBuilder seek;
 
     /** The term and document that the terms screen opened; or null. */
-    private TermHit hit;
+    private @Nullable TermHit hit;
 
     /** Whether the search screen opened the document, so {@code [}/{@code ]} step through its hits. */
     private boolean searchHits;
 
     /** Where the hit's term occurs in its document, once fetched; or null. */
-    private Positions positions;
+    private @Nullable Positions positions;
 
     /** The field to select once the next document is in; or null. */
-    private String selectField;
+    private @Nullable String selectField;
 
     /** The values of the selected field, viewed over the whole screen; or null. */
-    private Viewer viewer;
+    private @Nullable Viewer viewer;
 
     /** The value the viewer opens on once its document is in; or null. */
-    private PendingView pendingView;
+    private @Nullable PendingView pendingView;
 
     /** The matches of the search hit shown, or last shown; or null. */
-    private Matches matches;
+    private @Nullable Matches matches;
 
     private long nextMatchesId = 1;
 
@@ -478,19 +482,19 @@ public final class Documents {
     private List<SegmentStart> segments = List.of();
 
     /** The segment that ←/→ stay in (ADR 0051); or null. */
-    private SegmentStart pinned;
+    private @Nullable SegmentStart pinned;
 
     /**
      * Said about the last key until the next one, such as that ← is at the pin's first document, or
      * that a field has no terms; or null.
      */
-    private String note;
+    private @Nullable String note;
 
     /**
      * The segment that {@code <}/{@code >} step to the first match of while that step is under way:
      * the step stays in it, and its first document is shown if it has no match; or null.
      */
-    private SegmentStart segmentJump;
+    private @Nullable SegmentStart segmentJump;
 
     /** What the index can do (ADR 0044): the keys it lacks a feature for are refused and left out of the legend. */
     private Set<Feature> features = Feature.all();
@@ -778,7 +782,7 @@ public final class Documents {
         if (!findsMatches(matchesId)) {
             return OptionalLong.of(jobId);
         }
-        matches.jobId = jobId;
+        Objects.requireNonNull(matches).jobId = jobId;
         return OptionalLong.empty();
     }
 
@@ -799,12 +803,12 @@ public final class Documents {
         for (FieldMatches field : highlight.get().fields()) {
             fields.put(field.field(), field);
         }
-        matches.fields = fields;
+        Objects.requireNonNull(matches).fields = fields;
     }
 
     public void matchesFailed(long matchesId, String error) {
         if (findsMatches(matchesId)) {
-            matches.error = error;
+            Objects.requireNonNull(matches).error = error;
         }
     }
 
@@ -819,7 +823,7 @@ public final class Documents {
     private Optional<FieldMatches> matchesIn(String field) {
         return shownMatches()
                 .filter(shown -> shown.fields != null)
-                .map(shown -> shown.fields.get(field))
+                .map(shown -> Objects.requireNonNull(shown.fields).get(field))
                 .filter(found -> !found.values().isEmpty());
     }
 
@@ -874,11 +878,11 @@ public final class Documents {
      */
     public static final class Mark {
         private final int docId;
-        private final TermHit hit;
+        private final @Nullable TermHit hit;
         private final boolean searchHits;
-        private final SegmentStart pinned;
-        private final String field;
-        private final Matches matches;
+        private final @Nullable SegmentStart pinned;
+        private final @Nullable String field;
+        private final @Nullable Matches matches;
 
         private Mark(Documents of) {
             this.docId = of.wanted != null ? of.wanted : of.docId;
@@ -987,7 +991,9 @@ public final class Documents {
      * was replaced or cleared meanwhile, the job is to be cancelled.
      */
     public boolean filterStarted(long serial, long jobId) {
-        if (!isFilter(serial) || !filter.building() || filter.jobId().isPresent()) {
+        if (!isFilter(serial)
+                || !Objects.requireNonNull(filter).building()
+                || filter.jobId().isPresent()) {
             return false;
         }
         filter.started(jobId);
@@ -1003,7 +1009,8 @@ public final class Documents {
         if (!isFilter(serial)) {
             return Optional.empty();
         }
-        return filter.progress(result)
+        return Objects.requireNonNull(filter)
+                .progress(result)
                 .map(built -> new Request.StepFilter(
                         serial,
                         new StepFilterParams(
@@ -1013,10 +1020,11 @@ public final class Documents {
 
     /** What to build the filter from again after a reopen (ADR 0032), until it is started. */
     public Optional<Request.StartFilter> filterToRebuild() {
-        if (filter == null) {
+        DocFilter current = filter;
+        if (current == null) {
             return Optional.empty();
         }
-        return filter.toRebuild().map(params -> new Request.StartFilter(filter.serial(), params, null, null));
+        return current.toRebuild().map(params -> new Request.StartFilter(current.serial(), params, null, null));
     }
 
     /**
@@ -1025,7 +1033,7 @@ public final class Documents {
      */
     public void filterFailed(long serial, String error) {
         if (isFilter(serial)) {
-            filter.failed(error);
+            Objects.requireNonNull(filter).failed(error);
             steppingFilter = null;
             queuedSteps.clear();
         }
@@ -1037,7 +1045,8 @@ public final class Documents {
      */
     public Optional<Request> filterStepped(
             long serial, StepFilterParams params, FilterStep step, @Nullable FilterMatch found) {
-        if (!isFilter(serial) || !filter.filterId().equals(OptionalLong.of(params.filterId()))) {
+        if (!isFilter(serial)
+                || !Objects.requireNonNull(filter).filterId().equals(OptionalLong.of(params.filterId()))) {
             return Optional.empty();
         }
         // The step of < or > stays in the segment it goes to, any other one in the pinned segment.
@@ -1076,7 +1085,8 @@ public final class Documents {
 
     private Optional<Request> stepThroughFilter(boolean forward) {
         Optional<Request> step = filterStep(forward ? docId + 1 : docId - 1, forward, FilterStep.MOVE);
-        steppingFilter = step.isPresent() ? Long.valueOf(filter.serial()) : null;
+        steppingFilter =
+                step.isPresent() ? Long.valueOf(Objects.requireNonNull(filter).serial()) : null;
         return step;
     }
 
@@ -1120,7 +1130,7 @@ public final class Documents {
      * built one from {@code fromDoc}; nothing while it is built.
      */
     private Optional<Request> filterStep(int fromDoc, boolean forward, FilterStep step) {
-        OptionalLong filterId = filter.filterId();
+        OptionalLong filterId = Objects.requireNonNull(filter).filterId();
         if (filterId.isEmpty()) {
             return Optional.empty();
         }
@@ -1217,7 +1227,7 @@ public final class Documents {
     }
 
     /** The rebuild that is asked for or running, with its field; or null. */
-    private Map.Entry<String, Reconstruction> activeReconstruction() {
+    private Map.@Nullable Entry<String, Reconstruction> activeReconstruction() {
         return reconstructions.entrySet().stream()
                 .filter(entry -> entry.getValue().active())
                 .findFirst()
@@ -1336,7 +1346,7 @@ public final class Documents {
     }
 
     /** Fills the rows from the document, and selects the field {@code selected} if it is among them. */
-    private void updateRows(String selected) {
+    private void updateRows(@Nullable String selected) {
         rows.clear();
         row = -1;
         if (document == null) {
@@ -1426,9 +1436,9 @@ public final class Documents {
                 seek = null;
                 return;
             }
-            case CHAR -> seek.appendCodePoint(key.codePoint());
+            case CHAR -> Objects.requireNonNull(seek).appendCodePoint(key.codePoint());
             case BACKSPACE -> {
-                if (!seek.isEmpty()) {
+                if (!Objects.requireNonNull(seek).isEmpty()) {
                     seek.setLength(seek.offsetByCodePoints(seek.length(), -1));
                 }
             }
@@ -1630,7 +1640,7 @@ public final class Documents {
     }
 
     private Optional<Request> viewerKey(KeyEvent key) {
-        Optional<Viewer.Event> event = viewer.handleKey(key);
+        Optional<Viewer.Event> event = Objects.requireNonNull(viewer).handleKey(key);
         if (event.isPresent() && event.get() instanceof Viewer.Event.Close) {
             closeViewer();
         }
@@ -1642,7 +1652,11 @@ public final class Documents {
             prompt = null;
             return Optional.empty();
         }
-        OptionalInt chosen = promptKey(prompt, key, maxDoc);
+        DocIdPrompt open = prompt;
+        if (open == null) {
+            return Optional.empty();
+        }
+        OptionalInt chosen = promptKey(open, key, maxDoc);
         if (chosen.isEmpty()) {
             return Optional.empty();
         }
@@ -1830,7 +1844,7 @@ public final class Documents {
         if (pinned != null) {
             pinned = target;
         }
-        if (stepsThroughFilter() && filter.filterId().isPresent()) {
+        if (stepsThroughFilter() && Objects.requireNonNull(filter).filterId().isPresent()) {
             queuedSteps.clear();
             segmentJump = target;
             steppingFilter = filter.serial();
@@ -2234,7 +2248,7 @@ public final class Documents {
     /** How many fields there are, how many are shown, and the seek. */
     private String fieldsTitle() {
         int shown = rows.size();
-        int total = document.fields().size();
+        int total = Objects.requireNonNull(document).fields().size();
         String count =
                 (shown == total ? Integer.toString(total) : shown + " of " + total + ", e shows all") + matchesTitle();
         if (seek == null) {
@@ -2473,9 +2487,9 @@ public final class Documents {
             @Nullable TermHit hit,
             @Nullable String matchesLine,
             @Nullable FieldMatches matches,
-            Positions positions,
-            TermVector termVector,
-            Reconstruction reconstruction,
+            @Nullable Positions positions,
+            @Nullable TermVector termVector,
+            @Nullable Reconstruction reconstruction,
             NumberFormat numbers,
             PointFormats pointFormats,
             Set<Feature> features,
@@ -2641,7 +2655,8 @@ public final class Documents {
         return lines;
     }
 
-    private static List<Line> termVectorLines(DocumentField field, TermVector termVector, Set<Feature> features) {
+    private static List<Line> termVectorLines(
+            DocumentField field, @Nullable TermVector termVector, Set<Feature> features) {
         if (!field.hasTermVector()) {
             return List.of(labelled(TERM_VECTOR, "-"));
         }
@@ -2663,7 +2678,7 @@ public final class Documents {
      * they have positions, then term by term; the points one per line, decoded.
      */
     private static List<Line> reconstructionLines(
-            Reconstruction reconstruction, IndexField field, PointFormats pointFormats) {
+            @Nullable Reconstruction reconstruction, IndexField field, PointFormats pointFormats) {
         boolean terms = field.indexOptions() != IndexOptions.NONE;
         boolean points = field.pointDimensionCount() > 0;
         if (reconstruction == null) {
@@ -2729,7 +2744,7 @@ public final class Documents {
     }
 
     /** The term of the hit, how often it occurs, and where. */
-    private static List<Line> hitLines(TermHit hit, Positions positions) {
+    private static List<Line> hitLines(TermHit hit, @Nullable Positions positions) {
         List<Span> heading = new ArrayList<>();
         heading.add(label("Term"));
         heading.add(Span.raw(TextFormat.bytesText(hit.term().value(), hit.term().binary())));

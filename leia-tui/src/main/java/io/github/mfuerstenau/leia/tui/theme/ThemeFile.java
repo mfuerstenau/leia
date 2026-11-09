@@ -75,7 +75,7 @@ public record ThemeFile(@Nullable Path file, @Nullable Path writeFile) {
      * the caller checked to be among them; then {@code NO_COLOR} (no-color.org: set and not empty
      * means {@code mono}); then this file; then {@code dark}.
      */
-    public Theme resolve(@Nullable Theme option, String noColor, Themes themes) {
+    public Theme resolve(@Nullable Theme option, @Nullable String noColor, Themes themes) {
         if (option != null) {
             return option;
         }

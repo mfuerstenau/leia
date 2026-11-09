@@ -108,7 +108,7 @@ final class Collations {
             }
             return collator;
         } catch (InvocationTargetException e) {
-            Throwable cause = e.getCause();
+            Throwable cause = e.getTargetException();
             String message = cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage();
             throw new InvalidAnalyzerException("collation: " + message, cause);
         } catch (ReflectiveOperationException | LinkageError e) {

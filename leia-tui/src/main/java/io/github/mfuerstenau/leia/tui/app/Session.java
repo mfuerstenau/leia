@@ -127,13 +127,13 @@ public final class Session {
     /** The install of runtimes, while one runs (ADR 0080). */
     // A thread-safe handle, published through volatile (ADR 0088)
     @SuppressWarnings("java:S3077")
-    private volatile InstallJob installer;
+    private volatile @Nullable InstallJob installer;
 
     /** Set once leia quits, which cancels a download. */
     private final AtomicBoolean quitting = new AtomicBoolean();
 
     /** What made leia quit, if not the user: set on the UI thread. */
-    private Throwable failure;
+    private @Nullable Throwable failure;
 
     /** The polls whose call hasn't come back yet, so that a slow one isn't sent again: on the UI thread. */
     private final Set<Poll> polling = new HashSet<>();
@@ -1037,7 +1037,7 @@ public final class Session {
      * The {@link RpcException} that {@code error} is, an expected failure that the app shows; or
      * null after anything else, which ends leia.
      */
-    private RpcException rpcException(Throwable error, TuiRunner runner) {
+    private @Nullable RpcException rpcException(Throwable error, TuiRunner runner) {
         Throwable cause = error instanceof CompletionException && error.getCause() != null ? error.getCause() : error;
         if (cause instanceof RpcException rpc) {
             return rpc;

@@ -58,7 +58,7 @@ final class MirrorPicker {
     private final List<Mirror> mirrors;
     private final Map<URI, String> failed;
     private int cursor;
-    private LineInput input;
+    private @Nullable LineInput input;
     private @Nullable String problem;
 
     /**
@@ -114,13 +114,17 @@ final class MirrorPicker {
     }
 
     private Result typed(KeyEvent key) {
+        LineInput typing = input;
+        if (typing == null) {
+            return new Nothing();
+        }
         if (key.code() == KeyCode.ESCAPE) {
             input = null;
             problem = null;
             return new Nothing();
         }
         if (key.code() == KeyCode.ENTER) {
-            String url = input.text().strip();
+            String url = typing.text().strip();
             problem = Mirrors.check(url).orElse(null);
             if (problem != null) {
                 return new Nothing();
@@ -128,7 +132,7 @@ final class MirrorPicker {
             input = null;
             return new Chosen(Mirror.of(URI.create(url), Mirror.Origin.TYPED));
         }
-        if (input.handleKey(key, LineInput::wordStart) == LineInput.Edit.CHANGED) {
+        if (typing.handleKey(key, LineInput::wordStart) == LineInput.Edit.CHANGED) {
             problem = null;
         }
         return new Nothing();

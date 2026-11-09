@@ -699,7 +699,7 @@ public final class AnalyzerSettings {
     }
 
     /** The value after {@code current} in {@code values}, or the one before it, round and round. */
-    static <T> T cycled(T current, boolean forward, List<T> values) {
+    static <T extends @Nullable Object> T cycled(T current, boolean forward, List<T> values) {
         int index = Math.max(values.indexOf(current), 0);
         int len = values.size();
         return values.get(forward ? (index + 1) % len : (index + len - 1) % len);

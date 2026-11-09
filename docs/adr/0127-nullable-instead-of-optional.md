@@ -24,6 +24,8 @@ Both could have been exempted as the protocol is. That would have left two more 
 
    *Amended:* Error Prone runs NullAway alone in `leia.java-conventions`, in `OnlyNullMarked` and JSpecify mode, so it checks the packages marked `@NullMarked`, module by module (`leia-client` first). Main and testFixtures are checked, the latter because the frontends' tests use the fixtures as an API; the other source sets are not, so a test can pass `null` on purpose.
 
+   *Amended again:* the leia-owned modules are marked: `leia-client`, `leia-runtime`, `leia-core`, `leia-server`, `leia-mcp`, `leia-tui`, `leia-app` and `leia-lucene10`. `leia-protocol` and the runtimes of the old Lucenes are left for a decision of their own.
+
 ## Alternatives considered
 
 - **Exempt the tool records and the runtime records, as the protocol is.** Rejected: three kinds of record with their own rule instead of one, and the convention would be harder to state.

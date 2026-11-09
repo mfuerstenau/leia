@@ -5,6 +5,7 @@ import java.text.NumberFormat;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TimeZone;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.index.IndexReader;
@@ -77,7 +78,7 @@ public final class Queries {
             // The first line says what is wrong and where; the rest lists every token that could follow.
             throw new InvalidQueryException(firstLine(e), e);
         } catch (IndexSearcher.TooManyClauses e) {
-            throw new InvalidQueryException(e.getMessage(), e);
+            throw new InvalidQueryException(Objects.requireNonNullElse(e.getMessage(), "too many clauses"), e);
         }
     }
 
@@ -129,7 +130,7 @@ public final class Queries {
         } catch (QueryNodeException e) {
             throw new InvalidQueryException(firstLine(e), e);
         } catch (IndexSearcher.TooManyClauses e) {
-            throw new InvalidQueryException(e.getMessage(), e);
+            throw new InvalidQueryException(Objects.requireNonNullElse(e.getMessage(), "too many clauses"), e);
         }
     }
 

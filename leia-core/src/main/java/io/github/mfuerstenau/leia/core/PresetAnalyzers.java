@@ -27,6 +27,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
@@ -150,14 +151,16 @@ final class PresetAnalyzers {
     }
 
     /** Found when first needed, and again once extension jars have been loaded. */
-    private static Scan scan;
+    private static @Nullable Scan scan;
 
     private static synchronized Map<String, Preset> presets() {
         ClassLoader loader = ExtensionJars.classLoader();
-        if (scan == null || scan.loader() != loader) {
-            scan = new Scan(loader, scan(loader));
+        Scan found = scan;
+        if (found == null || found.loader() != loader) {
+            found = new Scan(loader, scan(loader));
+            scan = found;
         }
-        return scan.byClassName();
+        return found.byClassName();
     }
 
     /** The presets, sorted by simple name, ignoring case, then by class name. */
@@ -192,40 +195,43 @@ final class PresetAnalyzers {
         CharArraySet stemExclusion = given("stem exclusions", spec.stemExclusion());
         Analyzer analyzer;
         if (preset.collation() != null) {
-            Constructor<? extends Analyzer> constructor = preset.collation();
+            Constructor<? extends Analyzer> constructor = Objects.requireNonNull(preset.collation());
             Collation collation = spec.collation() != null ? spec.collation() : new Collation("", null, null);
             return construct(preset, constructor, Collations.collator(constructor, collation));
         } else if (spec.japaneseCompletion() != null) {
-            Constructor<? extends Analyzer> constructor = preset.japaneseCompletion();
+            Constructor<? extends Analyzer> constructor = Objects.requireNonNull(preset.japaneseCompletion());
             analyzer = construct(
                     preset,
                     constructor,
                     KuromojiNori.japaneseCompletionArguments(constructor, spec.japaneseCompletion()));
         } else if (preset.japanese() != null && (stopwords != null || spec.japanese() != null)) {
-            Constructor<? extends Analyzer> constructor = preset.japanese();
+            Constructor<? extends Analyzer> constructor = Objects.requireNonNull(preset.japanese());
             Japanese options = spec.japanese() != null ? spec.japanese() : new Japanese(null, null, null);
             CharArraySet set = stopwordsOrDefault(stopwords, preset);
             analyzer = construct(preset, constructor, KuromojiNori.japaneseArguments(constructor, set, options));
         } else if (spec.korean() != null) {
-            Constructor<? extends Analyzer> constructor = preset.korean();
+            Constructor<? extends Analyzer> constructor = Objects.requireNonNull(preset.korean());
             analyzer = construct(preset, constructor, KuromojiNori.koreanArguments(constructor, spec.korean()));
         } else if (spec.stemOverride() != null) {
             CharArrayMap<String> dictionary = read(spec.stemOverride());
             analyzer = construct(
                     preset,
-                    preset.stemOverride(),
+                    Objects.requireNonNull(preset.stemOverride()),
                     stopwordsOrDefault(stopwords, preset),
                     stemExclusion != null ? stemExclusion : CharArraySet.EMPTY_SET,
                     dictionary);
         } else if (stemExclusion != null) {
             analyzer = construct(
-                    preset, preset.stopwordsAndStemExclusion(), stopwordsOrDefault(stopwords, preset), stemExclusion);
+                    preset,
+                    Objects.requireNonNull(preset.stopwordsAndStemExclusion()),
+                    stopwordsOrDefault(stopwords, preset),
+                    stemExclusion);
         } else if (stopwords != null) {
-            analyzer = construct(preset, preset.stopwords(), stopwords);
+            analyzer = construct(preset, Objects.requireNonNull(preset.stopwords()), stopwords);
         } else if (spec.maxTokenLength() != null && preset.maxTokenLength() != null) {
-            return construct(preset, preset.maxTokenLength(), spec.maxTokenLength());
+            return construct(preset, Objects.requireNonNull(preset.maxTokenLength()), spec.maxTokenLength());
         } else {
-            analyzer = construct(preset, preset.noArguments());
+            analyzer = construct(preset, Objects.requireNonNull(preset.noArguments()));
         }
         if (spec.maxTokenLength() != null) {
             setMaxTokenLength(preset, analyzer, spec.maxTokenLength());
@@ -274,10 +280,10 @@ final class PresetAnalyzers {
     private static void setMaxTokenLength(Preset preset, Analyzer analyzer, int length)
             throws InvalidAnalyzerException {
         try {
-            preset.maxTokenLengthSetter().invoke(analyzer, length);
+            Objects.requireNonNull(preset.maxTokenLengthSetter()).invoke(analyzer, length);
         } catch (InvocationTargetException e) {
             analyzer.close();
-            throw failed(preset, e.getCause());
+            throw failed(preset, e.getTargetException());
         } catch (ReflectiveOperationException | LinkageError e) {
             analyzer.close();
             throw new InvalidAnalyzerException(preset.name() + ": " + e, e);
@@ -302,9 +308,10 @@ final class PresetAnalyzers {
             }
         }
         try {
-            return (CharArraySet) preset.defaultStopSet().invoke(null);
+            return (CharArraySet)
+                    Objects.requireNonNull(preset.defaultStopSet()).invoke(null);
         } catch (InvocationTargetException e) {
-            throw failed(preset, e.getCause());
+            throw failed(preset, e.getTargetException());
         } catch (ReflectiveOperationException | LinkageError e) {
             throw new InvalidAnalyzerException(preset.name() + ": " + e, e);
         }
@@ -315,7 +322,7 @@ final class PresetAnalyzers {
         try {
             return constructor.newInstance(arguments);
         } catch (InvocationTargetException e) {
-            throw failed(preset, e.getCause());
+            throw failed(preset, e.getTargetException());
         } catch (ReflectiveOperationException | LinkageError e) {
             throw new InvalidAnalyzerException(preset.name() + ": " + e, e);
         }
@@ -393,9 +400,8 @@ final class PresetAnalyzers {
 
     private static InvalidAnalyzerException unreadable(String what, Path path, Throwable e) {
         return switch (e) {
-            case InvocationTargetException invocation
-            when invocation.getCause() != null -> unreadable(what, path, invocation.getCause());
-            case UncheckedIOException unchecked -> unreadable(what, path, unchecked.getCause());
+            case InvocationTargetException invocation -> unreadable(what, path, invocation.getTargetException());
+            case UncheckedIOException unchecked -> unreadable(what, path, Objects.requireNonNull(unchecked.getCause()));
             case NoSuchFileException _ -> new InvalidAnalyzerException(what + ": no file " + path, e);
             case AccessDeniedException _ -> new InvalidAnalyzerException(what + ": cannot read " + path, e);
             case CharacterCodingException _ -> new InvalidAnalyzerException(what + ": " + path + " is not UTF-8", e);

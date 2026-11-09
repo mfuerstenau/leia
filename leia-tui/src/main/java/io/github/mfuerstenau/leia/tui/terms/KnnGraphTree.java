@@ -137,7 +137,7 @@ final class KnnGraphTree {
     final String field;
 
     /** The graphs; null if they could not be fetched. */
-    final GetKnnGraphResult graph;
+    final @Nullable GetKnnGraphResult graph;
 
     final @Nullable String error;
 

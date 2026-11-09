@@ -93,10 +93,10 @@ public final class DocFilter {
     private State state = new State.Building(null, 0);
 
     /** Or null. */
-    private Located located;
+    private @Nullable Located located;
 
     /** Said until the next key, such as that there is no next match; or null. */
-    private String note;
+    private @Nullable String note;
 
     /**
      * A filter about to be built from {@code params}, which starts on {@code startDoc} if it matches,

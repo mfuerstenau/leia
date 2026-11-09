@@ -72,7 +72,7 @@ public record SearchResults(
             @Nullable Number number, @Nullable BytesRef term) {
 
         /** The sort value as Lucene's {@code FieldDoc.fields} holds it. */
-        static SortValue of(Object value) {
+        static SortValue of(@Nullable Object value) {
             return switch (value) {
                 case null -> new SortValue(null, null);
                 case Number number -> new SortValue(number, null);
