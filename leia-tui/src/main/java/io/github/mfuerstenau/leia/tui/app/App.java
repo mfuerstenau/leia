@@ -1610,7 +1610,7 @@ public final class App {
                 document.indexedTerms(),
                 shown::field,
                 opened.path(),
-                shown.indexOf(document.docId()),
+                shown.indexOf(document.docId()).orElse(null),
                 target);
     }
 
@@ -1688,18 +1688,20 @@ public final class App {
         return switch (done.state()) {
             case DONE -> {
                 forgetExport();
-                Optional<String> text = done.text();
-                if (text.isPresent()) {
-                    long bytes = text.get().getBytes(StandardCharsets.UTF_8).length;
+                String text = done.text();
+                if (text != null) {
+                    long bytes = text.getBytes(StandardCharsets.UTF_8).length;
                     notice = new Notice.Exported("Copied document " + docId + " as JSON, " + TextFormat.size(bytes));
-                    yield Optional.of(new Action.Copy(text.get()));
+                    yield Optional.of(new Action.Copy(text));
                 }
-                notice = new Notice.Exported("Exported document " + docId + " to "
-                        + shownPath(done.path().map(Path::toString).orElse("")));
+                Path path = done.path();
+                notice = new Notice.Exported(
+                        "Exported document " + docId + " to " + shownPath(path != null ? path.toString() : ""));
                 yield Optional.empty();
             }
             case FAILED -> {
-                exportFailed(exportId, done.error().orElse("the export failed"));
+                String error = done.error();
+                exportFailed(exportId, error != null ? error : "the export failed");
                 yield Optional.empty();
             }
             default -> Optional.empty();
@@ -3105,7 +3107,7 @@ public final class App {
         return switch (snapshot.state()) {
             case REBUILDING ->
                 Optional.of("Exporting doc " + exporting.docId() + ": " + snapshot.scanned()
-                        + (snapshot.total().isPresent() ? "/" + snapshot.total().getAsLong() : "")
+                        + (snapshot.total() != null ? "/" + snapshot.total() : "")
                         + " terms and points");
             case WRITING -> Optional.of("Exporting doc " + exporting.docId() + ": writing…");
             default -> Optional.empty();

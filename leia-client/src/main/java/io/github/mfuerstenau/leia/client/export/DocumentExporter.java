@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletionStage;
 import java.util.function.Function;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Exports documents as JSON (ADR 0030, ADR 0126): each export fetches the document with every
@@ -113,7 +114,7 @@ public final class DocumentExporter {
      * @param indexedTerms whether to rebuild the indexed terms and points (ADR 0029, ADR 0041)
      * @param schema the field of the index with a name, for the flags, number and index options
      * @param index the path that was opened
-     * @param indexDirectory the index directory the document is in, as shown; empty with only one
+     * @param indexDirectory the index directory the document is in, as shown; null with only one
      */
     public record Request(
             int docId,
@@ -121,7 +122,7 @@ public final class DocumentExporter {
             boolean indexedTerms,
             Function<String, Optional<IndexField>> schema,
             String index,
-            Optional<String> indexDirectory,
+            @Nullable String indexDirectory,
             Target target) {}
 
     private final Calls calls;

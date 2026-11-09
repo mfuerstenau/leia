@@ -22,6 +22,9 @@ dependencies {
     // The document export writes its JSON with it (ADR 0030).
     implementation(platform(libs.jackson.bom))
     implementation(libs.jackson.databind)
+    // @Nullable instead of Optional parameters and fields; only at compile time, for leia-client and
+    // its frontends, so not in leia.jar.
+    compileOnlyApi(libs.jspecify)
 
     testFixturesImplementation(project(":leia-server"))
     testFixturesImplementation(project(":leia-protocol"))

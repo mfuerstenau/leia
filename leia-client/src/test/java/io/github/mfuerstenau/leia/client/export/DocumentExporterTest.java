@@ -74,7 +74,7 @@ class DocumentExporterTest {
     }
 
     private static Request request(int docId, boolean indexedTerms, Target target) {
-        return new Request(docId, true, indexedTerms, schema, demo, Optional.empty(), target);
+        return new Request(docId, true, indexedTerms, schema, demo, null, target);
     }
 
     @Test
@@ -104,14 +104,13 @@ class DocumentExporterTest {
                 .get(30, TimeUnit.SECONDS);
 
         assertThat(done.state()).isEqualTo(State.DONE);
-        assertThat(done.path()).contains(file);
-        assertThat(done.error()).isEmpty();
+        assertThat(done.path()).isEqualTo(file);
+        assertThat(done.error()).isNull();
         DocumentData data = DocumentExport.load(DocumentExporter.Calls.of(backend), 1, true)
                 .toCompletableFuture()
                 .get();
         assertThat(Files.readString(file))
-                .isEqualTo(DocumentExport.toJson(
-                        DocumentExport.assemble(data, Optional.of(rebuilt(1)), schema, demo, Optional.empty())));
+                .isEqualTo(DocumentExport.toJson(DocumentExport.assemble(data, rebuilt(1), schema, demo, null)));
         assertThat(DocumentExport.fromJson(Files.readString(file)).indexedTerms())
                 .isTrue();
     }
@@ -124,13 +123,12 @@ class DocumentExporterTest {
                 exporter.start(request(2, false, new Target.Text())).done().get(30, TimeUnit.SECONDS);
 
         assertThat(done.state()).isEqualTo(State.DONE);
-        assertThat(done.path()).isEmpty();
+        assertThat(done.path()).isNull();
         DocumentData data = DocumentExport.load(DocumentExporter.Calls.of(backend), 2, true)
                 .toCompletableFuture()
                 .get();
         assertThat(done.text())
-                .contains(DocumentExport.toJson(
-                        DocumentExport.assemble(data, Optional.empty(), schema, demo, Optional.empty())));
+                .isEqualTo(DocumentExport.toJson(DocumentExport.assemble(data, null, schema, demo, null)));
         try (var files = Files.list(tmp)) {
             assertThat(files).isEmpty();
         }
@@ -146,9 +144,8 @@ class DocumentExporterTest {
                 .get(30, TimeUnit.SECONDS);
 
         assertThat(done.state()).isEqualTo(State.FAILED);
-        assertThat(done.error())
-                .hasValueSatisfying(error -> assertThat(error).contains("Not writing into the index directory"));
-        assertThat(done.cause()).isEmpty();
+        assertThat(done.error()).contains("Not writing into the index directory");
+        assertThat(done.cause()).isNull();
         assertThat(file).doesNotExist();
     }
 
@@ -182,12 +179,12 @@ class DocumentExporterTest {
                         true,
                         name -> Optional.empty(),
                         "/index",
-                        Optional.empty(),
+                        null,
                         new Target.File(file, false, List.of("/index"))));
 
         Snapshot rebuilding = awaitSnapshot(job, snapshot -> snapshot.scanned() == 5);
         assertThat(rebuilding.state()).isEqualTo(State.REBUILDING);
-        assertThat(rebuilding.total()).hasValue(10);
+        assertThat(rebuilding.total()).isEqualTo(10L);
 
         job.cancel();
 
@@ -203,8 +200,7 @@ class DocumentExporterTest {
         FakeExportCalls calls = fakeCalls();
         calls.started = new CompletableFuture<>();
         ExportJob job = new DocumentExporter(calls, Duration.ofMillis(10))
-                .start(new Request(
-                        0, true, true, name -> Optional.empty(), "/index", Optional.empty(), new Target.Text()));
+                .start(new Request(0, true, true, name -> Optional.empty(), "/index", null, new Target.Text()));
         awaitSnapshot(job, snapshot -> snapshot.state() == State.REBUILDING);
 
         job.cancel();
@@ -220,14 +216,13 @@ class DocumentExporterTest {
         calls.document = CompletableFuture.failedFuture(new RpcException(ErrorCode.NO_INDEX_OPEN, "no index is open"));
 
         Snapshot done = new DocumentExporter(calls)
-                .start(new Request(
-                        0, true, false, name -> Optional.empty(), "/index", Optional.empty(), new Target.Text()))
+                .start(new Request(0, true, false, name -> Optional.empty(), "/index", null, new Target.Text()))
                 .done()
                 .get(30, TimeUnit.SECONDS);
 
         assertThat(done.state()).isEqualTo(State.FAILED);
-        assertThat(done.error()).contains("no index is open");
-        assertThat(done.cause()).containsInstanceOf(RpcException.class);
+        assertThat(done.error()).isEqualTo("no index is open");
+        assertThat(done.cause()).isInstanceOf(RpcException.class);
     }
 
     @Test
@@ -245,12 +240,12 @@ class DocumentExporterTest {
         });
 
         assertThat(notStartedDone.state()).isEqualTo(State.FAILED);
-        assertThat(notStartedDone.error()).contains(IllegalStateException.class.getName());
+        assertThat(notStartedDone.error()).isEqualTo(IllegalStateException.class.getName());
         assertThat(notAskedDone.state()).isEqualTo(State.FAILED);
-        assertThat(notAskedDone.error()).contains("the job is gone");
-        assertThat(notAskedDone.cause()).containsInstanceOf(IllegalStateException.class);
+        assertThat(notAskedDone.error()).isEqualTo("the job is gone");
+        assertThat(notAskedDone.cause()).isInstanceOf(IllegalStateException.class);
         assertThat(unassembled.state()).isEqualTo(State.FAILED);
-        assertThat(unassembled.error()).contains("no schema");
+        assertThat(unassembled.error()).isEqualTo("no schema");
     }
 
     @Test
@@ -278,7 +273,7 @@ class DocumentExporterTest {
         document.completeExceptionally(new IllegalStateException("too late"));
 
         assertThat(job.snapshot().state()).isEqualTo(State.CANCELLED);
-        assertThat(job.snapshot().error()).isEmpty();
+        assertThat(job.snapshot().error()).isNull();
     }
 
     @Test
@@ -309,7 +304,7 @@ class DocumentExporterTest {
     }
 
     private static Request textRequest(boolean indexedTerms, Function<String, Optional<IndexField>> schema) {
-        return new Request(0, true, indexedTerms, schema, "/index", Optional.empty(), new Target.Text());
+        return new Request(0, true, indexedTerms, schema, "/index", null, new Target.Text());
     }
 
     private static Snapshot exportText(

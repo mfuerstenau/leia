@@ -275,8 +275,7 @@ class DocumentExportTest {
 
     @Test
     void writesTheGoldenFile() throws IOException {
-        ExportedDocument export =
-                DocumentExport.assemble(loaded(), Optional.of(rebuilt()), schema(), "/i/demo", Optional.empty());
+        ExportedDocument export = DocumentExport.assemble(loaded(), rebuilt(), schema(), "/i/demo", null);
 
         assertThat(DocumentExport.toJson(export)).isEqualTo(golden());
         assertThat(DocumentExport.fromJson(golden())).isEqualTo(export);
@@ -284,16 +283,15 @@ class DocumentExportTest {
 
     @Test
     void exportsThePointsOfAFieldWithoutPostingsWithoutIndexedTerms() {
-        ExportedDocument export =
-                DocumentExport.assemble(loaded(), Optional.of(rebuilt()), schema(), "/i", Optional.empty());
+        ExportedDocument export = DocumentExport.assemble(loaded(), rebuilt(), schema(), "/i", null);
 
         ExportedField year = export.fields().stream()
                 .filter(field -> field.name().equals("year"))
                 .findFirst()
                 .orElseThrow();
-        assertThat(year.indexed()).isEmpty();
-        assertThat(year.points()).contains(List.of(new PointValue(List.of("800007e8"))));
-        assertThat(export.fields().getFirst().points()).isEmpty();
+        assertThat(year.indexed()).isNull();
+        assertThat(year.points()).isEqualTo(List.of(new PointValue(List.of("800007e8"))));
+        assertThat(export.fields().getFirst().points()).isNull();
     }
 
     @Test
@@ -307,30 +305,29 @@ class DocumentExportTest {
         ExportedDocument read = DocumentExport.fromJson(v2);
 
         assertThat(read.version()).isEqualTo(2);
-        assertThat(read.fields()).allSatisfy(field -> assertThat(field.points()).isEmpty());
+        assertThat(read.fields()).allSatisfy(field -> assertThat(field.points()).isNull());
         String v1 = v2.replace("\"version\": 2", "\"version\": 1").replaceAll(",\\s*\"vector\": \\{[^}]*\\}", "");
         assertThat(DocumentExport.fromJson(v1).fields())
-                .allSatisfy(field -> assertThat(field.vector()).isEmpty());
+                .allSatisfy(field -> assertThat(field.vector()).isNull());
     }
 
     @Test
     void escapesControlCharactersInLowercaseHexAsSerdeDid() {
-        ExportedDocument export =
-                DocumentExport.assemble(loaded(), Optional.empty(), schema(), "/i/a\u001eb", Optional.empty());
+        ExportedDocument export = DocumentExport.assemble(loaded(), null, schema(), "/i/a\u001eb", null);
 
         assertThat(DocumentExport.toJson(export)).contains("\"index\": \"/i/a\\u001eb\"");
     }
 
     @Test
     void leavesOutEmptyFieldsAndSaysWhetherTermsWereRebuilt() {
-        ExportedDocument export = DocumentExport.assemble(loaded(), Optional.empty(), schema(), "/i", Optional.of("b"));
+        ExportedDocument export = DocumentExport.assemble(loaded(), null, schema(), "/i", "b");
 
         assertThat(export.indexedTerms()).isFalse();
-        assertThat(export.indexDirectory()).contains("b");
+        assertThat(export.indexDirectory()).isEqualTo("b");
         assertThat(export.fields())
                 .extracting(ExportedField::name)
                 .containsExactly("id", "body", "labels", "year", "embedding");
-        assertThat(export.fields()).allMatch(field -> field.indexed().isEmpty());
+        assertThat(export.fields()).allMatch(field -> field.indexed() == null);
         String json = DocumentExport.toJson(export);
         assertThat(json).contains("\"indexDirectory\": \"b\"").contains("\"indexedTerms\": false");
     }
@@ -343,27 +340,24 @@ class DocumentExportTest {
         DocumentData unnormed =
                 new DocumentData(new GetDocumentResult(3, false, List.copyOf(fields)), data.termVectors());
 
-        ExportedDocument without =
-                DocumentExport.assemble(unnormed, Optional.empty(), schema(), "/i", Optional.empty());
+        ExportedDocument without = DocumentExport.assemble(unnormed, null, schema(), "/i", null);
         assertThat(without.fields()).extracting(ExportedField::name).doesNotContain("labels");
 
-        ExportedDocument with =
-                DocumentExport.assemble(unnormed, Optional.of(rebuilt()), schema(), "/i", Optional.empty());
+        ExportedDocument with = DocumentExport.assemble(unnormed, rebuilt(), schema(), "/i", null);
         ExportedField labels = with.fields().stream()
                 .filter(field -> field.name().equals("labels"))
                 .findFirst()
                 .orElseThrow();
         assertThat(labels.flags()).isEqualTo("I-------");
-        assertThat(labels.indexed().orElseThrow().source()).isEqualTo(ReconstructSource.POSTINGS);
+        assertThat(labels.indexed().source()).isEqualTo(ReconstructSource.POSTINGS);
     }
 
     @Test
     void hasNoNumberForAFieldTheIndexDoesNotKnow() {
-        ExportedDocument export =
-                DocumentExport.assemble(loaded(), Optional.empty(), _ -> Optional.empty(), "/i", Optional.empty());
+        ExportedDocument export = DocumentExport.assemble(loaded(), null, _ -> Optional.empty(), "/i", null);
 
         ExportedField id = export.fields().getFirst();
-        assertThat(id.number()).isEmpty();
+        assertThat(id.number()).isNull();
         assertThat(id.indexOptions()).isEqualTo(IndexOptions.NONE);
         assertThat(id.flags()).isEqualTo("---S----");
     }

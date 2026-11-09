@@ -656,9 +656,7 @@ class SessionPilotTest {
         ExportedField body = export.fields().getFirst();
         assertThat(body.name()).isEqualTo("body");
         assertThat(body.stored()).extracting(StoredValue::value).containsExactly("Red fox and red");
-        assertThat(body.indexed().orElseThrow().terms())
-                .extracting(TermVectorTerm::term)
-                .containsExactly("and", "fox", "red");
+        assertThat(body.indexed().terms()).extracting(TermVectorTerm::term).containsExactly("and", "fox", "red");
     }
 
     @Test
@@ -678,7 +676,7 @@ class SessionPilotTest {
         settle();
         ExportedDocument export = DocumentExport.fromJson(Files.readString(tmp.resolve("doc-0.json")));
         assertThat(export.indexedTerms()).isFalse();
-        assertThat(export.fields()).allMatch(field -> field.indexed().isEmpty());
+        assertThat(export.fields()).allMatch(field -> field.indexed() == null);
 
         // A second export to the same file asks first.
         pilot.press('E');

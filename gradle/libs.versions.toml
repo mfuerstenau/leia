@@ -28,6 +28,8 @@ dagger = "2.60.1"
 jackson = "3.2.3"
 # The per-segment cache of the stored fields (ADR 0113)
 roaringbitmap = "1.6.24"
+# @Nullable, where leia-client takes or holds a value that may be absent
+jspecify = "1.0.0"
 junit = "6.1.3"
 assertj = "3.27.7"
 palantirJavaFormat = "2.102.0"
@@ -82,6 +84,7 @@ lucene6-suggest = { module = "org.apache.lucene:lucene-suggest", version.ref = "
 dagger = { module = "com.google.dagger:dagger", version.ref = "dagger" }
 dagger-compiler = { module = "com.google.dagger:dagger-compiler", version.ref = "dagger" }
 roaringbitmap = { module = "org.roaringbitmap:RoaringBitmap", version.ref = "roaringbitmap" }
+jspecify = { module = "org.jspecify:jspecify", version.ref = "jspecify" }
 jackson-bom = { module = "tools.jackson:jackson-bom", version.ref = "jackson" }
 jackson-databind = { module = "tools.jackson.core:jackson-databind" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }

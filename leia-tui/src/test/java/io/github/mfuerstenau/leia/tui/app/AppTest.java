@@ -2933,7 +2933,7 @@ class AppTest {
 
         calls.rebuilt(rebuiltId(0));
         ExportJob.Snapshot done = ended(job);
-        assertThat(done.path()).contains(dir.resolve("doc-0.json"));
+        assertThat(done.path()).isEqualTo(dir.resolve("doc-0.json"));
         assertThat(Files.readString(dir.resolve("doc-0.json")))
                 .contains("\"indexedTerms\": true", "\"source\": \"POSTINGS\"");
         assertThat(app.documentExportDone(1, done)).isEmpty();

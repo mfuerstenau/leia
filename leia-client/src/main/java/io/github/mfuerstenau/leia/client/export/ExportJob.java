@@ -9,11 +9,11 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
+import org.jspecify.annotations.Nullable;
 
 /**
  * One export of a document (ADR 0030), as a handle that a UI polls (ADR 0126): {@link #snapshot}
@@ -41,31 +41,24 @@ public final class ExportJob {
      * How far the export is.
      *
      * @param scanned what the rebuild went through so far
-     * @param total what the rebuild goes through, if known
-     * @param text the JSON, once done, for {@link Target.Text}
-     * @param path the file written, once done, for {@link Target.File}
-     * @param error why it failed, as a sentence
+     * @param total what the rebuild goes through; null if not known
+     * @param text the JSON, once done, for {@link Target.Text}; else null
+     * @param path the file written, once done, for {@link Target.File}; else null
+     * @param error why it failed, as a sentence; null unless it failed
      * @param cause the failure of the call that failed it, if one did, such as an {@code
-     *     RpcException}, so that a UI can describe it as it does its other calls
+     *     RpcException}, so that a UI can describe it as it does its other calls; else null
      */
     public record Snapshot(
             State state,
             long scanned,
-            OptionalLong total,
-            Optional<String> text,
-            Optional<Path> path,
-            Optional<String> error,
-            Optional<Throwable> cause) {
+            @Nullable Long total,
+            @Nullable String text,
+            @Nullable Path path,
+            @Nullable String error,
+            @Nullable Throwable cause) {
 
         static Snapshot of(State state) {
-            return new Snapshot(
-                    state,
-                    0,
-                    OptionalLong.empty(),
-                    Optional.empty(),
-                    Optional.empty(),
-                    Optional.empty(),
-                    Optional.empty());
+            return new Snapshot(state, 0, null, null, null, null, null);
         }
 
         Snapshot with(State next) {
@@ -135,7 +128,7 @@ public final class ExportJob {
             } else if (request.indexedTerms()) {
                 rebuild(data);
             } else {
-                finish(data, Optional.empty());
+                finish(data, null);
             }
         });
     }
@@ -170,7 +163,7 @@ public final class ExportJob {
                 return;
             }
             if (result.result().isPresent()) {
-                finish(data, Optional.of(result.result().get().fields()));
+                finish(data, result.result().get().fields());
                 return;
             }
             if (progress(result)) {
@@ -184,18 +177,12 @@ public final class ExportJob {
         if (snapshot.state() != State.REBUILDING) {
             return false;
         }
-        snapshot = new Snapshot(
-                State.REBUILDING,
-                result.scanned(),
-                result.total(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty());
+        Long total = result.total().isPresent() ? result.total().getAsLong() : null;
+        snapshot = new Snapshot(State.REBUILDING, result.scanned(), total, null, null, null, null);
         return true;
     }
 
-    private void finish(DocumentData data, Optional<List<ReconstructedField>> rebuilt) {
+    private void finish(DocumentData data, @Nullable List<ReconstructedField> rebuilt) {
         if (!advance(State.WRITING)) {
             return;
         }
@@ -209,21 +196,21 @@ public final class ExportJob {
         }
         Snapshot ended;
         switch (request.target()) {
-            case Target.Text _ -> ended = ended(State.DONE, Optional.of(text), Optional.empty(), Optional.empty());
+            case Target.Text _ -> ended = ended(State.DONE, text, null, null);
             case Target.File file -> {
                 Optional<String> refused =
                         DocumentExport.writeFile(file.path(), text, file.overwrite(), file.indexDirs());
                 ended = refused.isPresent()
-                        ? ended(State.FAILED, Optional.empty(), Optional.empty(), refused)
-                        : ended(State.DONE, Optional.empty(), Optional.of(file.path()), Optional.empty());
+                        ? ended(State.FAILED, null, null, refused.get())
+                        : ended(State.DONE, null, file.path(), null);
             }
         }
         end(ended);
     }
 
-    private Snapshot ended(State state, Optional<String> text, Optional<Path> path, Optional<String> error) {
+    private Snapshot ended(State state, @Nullable String text, @Nullable Path path, @Nullable String error) {
         Snapshot last = snapshot();
-        return new Snapshot(state, last.scanned(), last.total(), text, path, error, Optional.empty());
+        return new Snapshot(state, last.scanned(), last.total(), text, path, error, null);
     }
 
     private void fail(Throwable error) {
@@ -233,10 +220,10 @@ public final class ExportJob {
                 State.FAILED,
                 last.scanned(),
                 last.total(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.of(cause.getMessage() != null ? cause.getMessage() : cause.toString()),
-                Optional.of(cause)));
+                null,
+                null,
+                cause.getMessage() != null ? cause.getMessage() : cause.toString(),
+                cause));
     }
 
     /** Moves on to {@code next}; returns false if the export was cancelled meanwhile. */
