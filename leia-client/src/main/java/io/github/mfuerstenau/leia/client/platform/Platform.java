@@ -15,6 +15,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Where leia keeps its files on this platform, as search paths (ADR 0122). Each kind of folder has
@@ -38,11 +39,15 @@ import java.util.function.Predicate;
  * -Dleia.runtimes} and {@code -Dleia.cache.dir} replace their lists.
  *
  * @param env the environment variables
- * @param home the user's home directory, if known
+ * @param home the user's home directory; null if not known
  * @param windows whether this is Windows
- * @param leiaJar the jar that leia runs from; empty if it runs from classes, as under Gradle
+ * @param leiaJar the jar that leia runs from; null if it runs from classes, as under Gradle
  */
-public record Platform(Function<String, String> env, Optional<Path> home, boolean windows, Optional<Path> leiaJar) {
+public record Platform(
+        Function<String, String> env,
+        @Nullable Path home,
+        boolean windows,
+        @Nullable Path leiaJar) {
 
     /**
      * The platform leia runs on.
@@ -53,9 +58,9 @@ public record Platform(Function<String, String> env, Optional<Path> home, boolea
         String home = System.getProperty("user.home", "");
         return new Platform(
                 System::getenv,
-                home.isEmpty() ? Optional.empty() : Optional.of(Path.of(home)),
+                home.isEmpty() ? null : Path.of(home),
                 System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("windows"),
-                jarOf(entry));
+                jarOf(entry).orElse(null));
     }
 
     /** The jar that {@code type} was loaded from, if it was loaded from a jar. */
@@ -88,13 +93,14 @@ public record Platform(Function<String, String> env, Optional<Path> home, boolea
         if (!property.isEmpty()) {
             return List.of(new RuntimesDir(Path.of(property).toAbsolutePath(), false));
         }
-        if (leiaJar.isEmpty()) {
+        if (leiaJar == null) {
             return List.of();
         }
         Set<RuntimesDir> dirs = new LinkedHashSet<>();
-        leiaJar.map(jar -> jar.resolveSibling("runtimes"))
-                .filter(Files::isDirectory)
-                .ifPresent(beside -> dirs.add(new RuntimesDir(beside, false)));
+        Path beside = leiaJar.resolveSibling("runtimes");
+        if (Files.isDirectory(beside)) {
+            dirs.add(new RuntimesDir(beside, false));
+        }
         dataDirs().forEach(dir -> dirs.add(new RuntimesDir(dir.resolve("runtimes"), false)));
         systemDataDirs().forEach(dir -> dirs.add(new RuntimesDir(dir.resolve("runtimes"), true)));
         return List.copyOf(dirs);
@@ -265,12 +271,15 @@ public record Platform(Function<String, String> env, Optional<Path> home, boolea
             String xdg, String homeRelative, String windowsVariable, String windowsRelative, String below) {
         Set<Path> dirs = new LinkedHashSet<>();
         if (windows) {
-            Optional<Path> root = absolute(windowsVariable).or(() -> home.map(dir -> dir.resolve(windowsRelative)));
+            Optional<Path> root = absolute(windowsVariable)
+                    .or(() -> Optional.ofNullable(home).map(dir -> dir.resolve(windowsRelative)));
             root.ifPresent(dir -> dirs.add(
                     below.isEmpty() ? dir.resolve("leia") : dir.resolve("leia").resolve(below)));
         } else {
             absolute(xdg).ifPresent(dir -> dirs.add(dir.resolve("leia")));
-            home.ifPresent(dir -> dirs.add(dir.resolve(homeRelative).resolve("leia")));
+            if (home != null) {
+                dirs.add(home.resolve(homeRelative).resolve("leia"));
+            }
         }
         return List.copyOf(dirs);
     }

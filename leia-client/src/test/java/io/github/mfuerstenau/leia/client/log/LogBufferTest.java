@@ -51,7 +51,7 @@ class LogBufferTest {
         assertThat(entry.message()).isEqualTo("Cannot read _0.cfs of /data/idx");
         assertThat(entry.level()).isEqualTo(Level.WARNING);
         assertThat(entry.logger()).isEqualTo("io.github.Some");
-        assertThat(entry.trace()).isEmpty();
+        assertThat(entry.trace()).isNull();
     }
 
     @Test
@@ -63,9 +63,8 @@ class LogBufferTest {
         buffer.publish(record);
 
         assertThat(buffer.entries().getFirst().trace())
-                .hasValueSatisfying(trace -> assertThat(trace)
-                        .startsWith("java.lang.IllegalStateException: broken")
-                        .contains("\tat " + LogBufferTest.class.getName()));
+                .startsWith("java.lang.IllegalStateException: broken")
+                .contains("\tat " + LogBufferTest.class.getName());
     }
 
     @Test

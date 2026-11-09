@@ -102,7 +102,7 @@ public final class Tui {
         ThemeFile themeFile =
                 new ThemeFile(platform.themeFile().or(platform::themeWriteFile), platform.themeWriteFile());
         Palette.use(themeFile.resolve(start.theme(), platform.env().apply("NO_COLOR"), start.themes()));
-        App app = new App(version, platform.home(), history, start.directory())
+        App app = new App(version, Optional.ofNullable(platform.home()), history, start.directory())
                 .withCwd(Path.of("").toAbsolutePath())
                 .withDefaultJars(start.defaultJars())
                 .withThemes(start.themes(), themeFile)

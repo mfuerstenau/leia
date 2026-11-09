@@ -290,8 +290,8 @@ public final class JarsPopup {
     }
 
     private Line defaultLine() {
-        Optional<Path> dir = defaultJars.dir();
-        if (dir.isEmpty()) {
+        Path dir = defaultJars.dir();
+        if (dir == null) {
             return Line.from(
                     Span.raw("Default folder: "),
                     Span.styled("none (no home directory)", Palette.current().muted()));
@@ -303,7 +303,7 @@ public final class JarsPopup {
         };
         return Line.from(
                 Span.raw("Default folder: "),
-                Span.raw(shorten(dir.get())),
+                Span.raw(shorten(dir)),
                 Span.styled(note, Palette.current().muted()));
     }
 

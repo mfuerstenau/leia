@@ -19,6 +19,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The mirrors of Maven Central that the runtimes' Lucene jars are downloaded from (ADR 0124): leia's
@@ -155,11 +156,15 @@ public final class Mirrors {
      * @param property {@code -Dleia.download.url}, or null
      * @param options the URLs of {@code --download-url}, which {@link io.github.mfuerstenau.leia.tui}'s
      *     command line has checked
-     * @param saved the file with the mirror chosen last
-     * @param mirrorsFile the user's {@code mirrors} file
+     * @param saved the file with the mirror chosen last, or null
+     * @param mirrorsFile the user's {@code mirrors} file, or null
      */
     public static Loaded resolve(
-            String property, List<String> options, Optional<Path> saved, Optional<Path> mirrorsFile, boolean insecure) {
+            @Nullable String property,
+            List<String> options,
+            @Nullable Path saved,
+            @Nullable Path mirrorsFile,
+            boolean insecure) {
         List<Mirror> all = new ArrayList<>();
         List<String> problems = new ArrayList<>();
         if (property != null && !property.isBlank()) {
@@ -174,14 +179,13 @@ public final class Mirrors {
                             problem -> problems.add("--download-url: " + problem),
                             () -> all.add(Mirror.of(URI.create(option), Mirror.Origin.OPTION)));
         }
-        saved.filter(Files::isRegularFile).ifPresent(file -> {
-            Parsed parsed = read(file, Mirror.Origin.SAVED, insecure, problems);
+        if (saved != null && Files.isRegularFile(saved)) {
+            Parsed parsed = read(saved, Mirror.Origin.SAVED, insecure, problems);
             parsed.mirrors().stream().findFirst().ifPresent(all::add);
-        });
-        mirrorsFile
-                .filter(Files::isRegularFile)
-                .ifPresent(file -> all.addAll(
-                        read(file, Mirror.Origin.FILE, insecure, problems).mirrors()));
+        }
+        if (mirrorsFile != null && Files.isRegularFile(mirrorsFile)) {
+            all.addAll(read(mirrorsFile, Mirror.Origin.FILE, insecure, problems).mirrors());
+        }
         List<Mirror> builtIn = builtIn();
         all.addAll(builtIn);
         return new Loaded(distinct(all, builtIn), problems);
@@ -189,7 +193,7 @@ public final class Mirrors {
 
     /** {@link #resolve}, with {@code http} allowed by {@code -Dleia.download.insecure=true}. */
     public static Loaded resolve(
-            String property, List<String> options, Optional<Path> saved, Optional<Path> mirrorsFile) {
+            @Nullable String property, List<String> options, @Nullable Path saved, @Nullable Path mirrorsFile) {
         return resolve(property, options, saved, mirrorsFile, Boolean.getBoolean(INSECURE));
     }
 

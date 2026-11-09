@@ -49,9 +49,7 @@ class JarsPopupTest {
         Path dir = home.resolve(".config/leia/jars");
         Path runtimes = Path.of("/opt/leia/runtimes");
         JarsPopup popup = new JarsPopup(
-                new DefaultJars(Optional.of(dir), DefaultJars.State.LOADED),
-                new RuntimesDirs(Optional.of(runtimes)),
-                Optional.of(home));
+                new DefaultJars(dir, DefaultJars.State.LOADED), RuntimesDirs.of(runtimes), Optional.of(home));
         assertThat(render(popup, 100, 20)).contains("Listing the jars…");
         assertThat(popup.waiting()).isTrue();
 
@@ -76,8 +74,8 @@ class JarsPopupTest {
     @Test
     void saysWhyTheDefaultFolderAndTheRuntimesWereNotLoaded() {
         JarsPopup popup = new JarsPopup(
-                new DefaultJars(Optional.of(Path.of("/cfg/leia/jars")), DefaultJars.State.SKIPPED),
-                new RuntimesDirs(Optional.of(Path.of("/opt/leia/runtimes"))),
+                new DefaultJars(Path.of("/cfg/leia/jars"), DefaultJars.State.SKIPPED),
+                RuntimesDirs.of(Path.of("/opt/leia/runtimes")),
                 Optional.empty());
         popup.jarsLoaded(List.of());
 

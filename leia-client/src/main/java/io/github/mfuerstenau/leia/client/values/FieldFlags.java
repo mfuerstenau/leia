@@ -3,7 +3,7 @@ package io.github.mfuerstenau.leia.client.values;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
-import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /** What a document has in a field, as letters, as the documents screen and the export show them. */
 public final class FieldFlags {
@@ -17,17 +17,17 @@ public final class FieldFlags {
      * {@code I} indexed, {@code N} norm, {@code P} payloads, {@code S} stored, {@code V} term vector,
      * {@code D} doc values, {@code T} points, {@code K} KNN vector; {@code -} where absent. {@code N},
      * {@code S}, {@code V}, {@code D} and {@code K} are about this document, the others about the
-     * field.
+     * field, which {@code schema} describes; null if the index doesn't know it.
      */
-    public static String of(Optional<IndexField> schema, DocumentField field) {
+    public static String of(@Nullable IndexField schema, DocumentField field) {
         boolean[] set = {
-            schema.filter(f -> f.indexOptions() != IndexOptions.NONE).isPresent(),
+            schema != null && schema.indexOptions() != IndexOptions.NONE,
             field.norm().isPresent(),
-            schema.filter(IndexField::hasPayloads).isPresent(),
+            schema != null && schema.hasPayloads(),
             !field.stored().isEmpty(),
             field.hasTermVector(),
             field.docValues().isPresent(),
-            schema.filter(f -> f.pointDimensionCount() > 0).isPresent(),
+            schema != null && schema.pointDimensionCount() > 0,
             field.vector().isPresent()
         };
         StringBuilder flags = new StringBuilder();

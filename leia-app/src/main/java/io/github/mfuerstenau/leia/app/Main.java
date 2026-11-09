@@ -132,11 +132,11 @@ public final class Main {
         // after those of --jar, which win a clash of names (ADR 0024).
         RuntimesDirs runtimeFolders = new RuntimesDirs(
                 platform.runtimesDirs().stream().map(RuntimesDir::path).toList());
-        DefaultJars defaultJars = DefaultJars.find(platform.defaultJarsDir(), cli.noDefaultJars());
+        DefaultJars defaultJars = DefaultJars.find(platform.defaultJarsDir().orElse(null), cli.noDefaultJars());
         List<Path> jars = new ArrayList<>(cli.jars());
         defaultJars.loadedDir().ifPresent(jars::add);
 
-        try (LeiaLog.Opened log = LeiaLog.toFile(platform.logFile())) {
+        try (LeiaLog.Opened log = LeiaLog.toFile(platform.logFile().orElse(null))) {
             LOG.info(() -> "leia started with " + List.of(args));
             if (cli.mcp()) {
                 return runMcp(cli, platform, defaultJars, jars, mcpRoots, log, in, out, err);
@@ -227,8 +227,13 @@ public final class Main {
             try (LeiaBackend started = backend.get()) {
                 VersionResult version =
                         started.call(Methods.VERSION, new VersionParams()).get();
-                McpServer server =
-                        new McpServer(started, version, cli.directory(), platform.home(), mcpRoots, cli.mcpPin());
+                McpServer server = new McpServer(
+                        started,
+                        version,
+                        cli.directory(),
+                        Optional.ofNullable(platform.home()),
+                        mcpRoots,
+                        cli.mcpPin());
                 if (cli.indexPath().isPresent()) {
                     String path = cli.indexPath().get();
                     try {
@@ -255,7 +260,7 @@ public final class Main {
      * embeds them; into the log, as is a failure, whose runtime the backend then refuses as outdated.
      */
     private static void refreshOwnJars(Platform platform) {
-        if (platform.leiaJar().isEmpty()) {
+        if (platform.leiaJar() == null) {
             return;
         }
         // The user's folders only, and only those that exist and are writable: a system folder is
@@ -347,7 +352,10 @@ public final class Main {
      */
     private static Mirrors.Loaded mirrors(Platform platform, List<String> downloadUrls) {
         return Mirrors.resolve(
-                System.getProperty("leia.download.url"), downloadUrls, platform.mirrorFile(), platform.mirrorsFile());
+                System.getProperty("leia.download.url"),
+                downloadUrls,
+                platform.mirrorFile().orElse(null),
+                platform.mirrorsFile().orElse(null));
     }
 
     /**
@@ -374,7 +382,8 @@ public final class Main {
             throws Exception {
         Mirrors.Loaded mirrors = mirrors(platform, List.of());
         mirrors.problems().forEach(problem -> LOG.warning(() -> "Mirror left out: " + problem));
-        MirrorSettings mirrorSettings = new MirrorSettings(mirrors.problems(), platform.mirrorWriteFile());
+        MirrorSettings mirrorSettings = new MirrorSettings(
+                mirrors.problems(), platform.mirrorWriteFile().orElse(null));
         Optional<RuntimeService> runtimes = platform.runtimesInstallDir()
                 .map(dir -> new RuntimeService(
                         new RuntimeInstall(dir, mirrors.mirrors(), Main.class.getClassLoader(), localCaches(platform)),

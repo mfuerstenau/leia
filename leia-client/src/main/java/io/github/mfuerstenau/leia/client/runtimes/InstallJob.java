@@ -13,6 +13,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * An install of runtimes on a thread of its own, as a handle that a UI polls (ADR 0126): {@link
@@ -55,7 +56,7 @@ public final class InstallJob {
      *
      * @param size its size, as the list has it
      * @param bytes the bytes of its download so far; a retry starts at 0
-     * @param source the mirror it was downloaded from, or the cache it was copied from
+     * @param source the mirror it was downloaded from, or the cache it was copied from; null before
      * @param failures a line per failed download, such as {@code Google Cloud, EU: HTTP 404}
      */
     public record JarProgress(
@@ -64,7 +65,7 @@ public final class InstallJob {
             long size,
             long bytes,
             JarState state,
-            Optional<String> source,
+            @Nullable String source,
             List<String> failures) {
 
         public JarProgress {
@@ -75,10 +76,11 @@ public final class InstallJob {
     /**
      * A runtime the install takes on.
      *
-     * @param failure why it failed, once it did
+     * @param failure why it failed, once it did; else null
      * @param jars its Lucene jars, in the list's order
      */
-    public record RuntimeProgress(RuntimeInstall.RuntimePlan plan, Optional<String> failure, List<JarProgress> jars) {
+    public record RuntimeProgress(
+            RuntimeInstall.RuntimePlan plan, @Nullable String failure, List<JarProgress> jars) {
 
         public RuntimeProgress {
             jars = List.copyOf(jars);
@@ -112,8 +114,8 @@ public final class InstallJob {
      * @param jarCount the jars to download
      * @param total the bytes to download
      * @param done the bytes downloaded so far
-     * @param question what the install waits for, in {@link State#WAITING_FOR_MIRROR}
-     * @param outcome how it ended, once {@link State#DONE}
+     * @param question what the install waits for, in {@link State#WAITING_FOR_MIRROR}; else null
+     * @param outcome how it ended, once {@link State#DONE}; else null
      */
     public record Snapshot(
             State state,
@@ -122,8 +124,8 @@ public final class InstallJob {
             int jarCount,
             long total,
             long done,
-            Optional<Question> question,
-            Optional<RuntimeInstall.Outcome> outcome) {
+            @Nullable Question question,
+            RuntimeInstall.@Nullable Outcome outcome) {
 
         public Snapshot {
             runtimes = List.copyOf(runtimes);
@@ -142,7 +144,7 @@ public final class InstallJob {
     private final RuntimeInstall.Plan plan;
     private final Set<RuntimeFolders.Known> chosen;
     private final RuntimeInstall.Listener also;
-    private final Optional<MirrorChooser> chooser;
+    private final @Nullable MirrorChooser chooser;
     private final AtomicBoolean cancelled = new AtomicBoolean();
     private final CompletableFuture<RuntimeInstall.Outcome> done = new CompletableFuture<>();
     private final Progress progress;
@@ -157,7 +159,7 @@ public final class InstallJob {
             RuntimeInstall.Plan plan,
             Set<RuntimeFolders.Known> chosen,
             RuntimeInstall.Listener also,
-            Optional<MirrorChooser> chooser) {
+            @Nullable MirrorChooser chooser) {
         this.install = install;
         this.plan = plan;
         this.chosen = Set.copyOf(chosen);
@@ -175,7 +177,7 @@ public final class InstallJob {
      * Snapshot#question}, and waits for {@link #choose}.
      */
     public static InstallJob of(RuntimeInstall install, RuntimeInstall.Plan plan, Set<RuntimeFolders.Known> chosen) {
-        return new InstallJob(install, plan, chosen, new RuntimeInstall.Listener() {}, Optional.empty());
+        return new InstallJob(install, plan, chosen, new RuntimeInstall.Listener() {}, null);
     }
 
     /**
@@ -188,7 +190,7 @@ public final class InstallJob {
             Set<RuntimeFolders.Known> chosen,
             RuntimeInstall.Listener also,
             MirrorChooser chooser) {
-        return new InstallJob(install, plan, chosen, also, Optional.of(chooser));
+        return new InstallJob(install, plan, chosen, also, chooser);
     }
 
     /** The install this job runs. */
@@ -216,8 +218,7 @@ public final class InstallJob {
     /** How far the install is. */
     public Snapshot snapshot() {
         synchronized (this) {
-            return progress.snapshot(
-                    state, cancelled.get(), Optional.ofNullable(question), Optional.ofNullable(done.getNow(null)));
+            return progress.snapshot(state, cancelled.get(), question, done.getNow(null));
         }
     }
 
@@ -279,8 +280,8 @@ public final class InstallJob {
     private void run() {
         RuntimeInstall.Outcome outcome;
         try {
-            outcome =
-                    install.install(plan, chosen, new Both(progress, also), cancelled::get, chooser.orElse(this::ask));
+            outcome = install.install(
+                    plan, chosen, new Both(progress, also), cancelled::get, chooser != null ? chooser : this::ask);
         } catch (RuntimeException e) {
             LOG.log(Level.WARNING, "The runtimes' install failed", e);
             outcome = failedOutcome(chosen, e);
@@ -389,7 +390,7 @@ public final class InstallJob {
             }
 
             JarProgress copy() {
-                return new JarProgress(folder, name, size, bytes, state, Optional.ofNullable(source), failures);
+                return new JarProgress(folder, name, size, bytes, state, source, failures);
             }
         }
 
@@ -425,13 +426,13 @@ public final class InstallJob {
         }
 
         synchronized Snapshot snapshot(
-                State state, boolean cancelled, Optional<Question> question, Optional<RuntimeInstall.Outcome> outcome) {
+                State state, boolean cancelled, @Nullable Question question, RuntimeInstall.@Nullable Outcome outcome) {
             List<RuntimeProgress> copies = new ArrayList<>();
             for (RuntimeInstall.RuntimePlan runtime : runtimes) {
                 String folder = runtime.known().folder();
                 copies.add(new RuntimeProgress(
                         runtime,
-                        Optional.ofNullable(failures.get(folder)),
+                        failures.get(folder),
                         jars.values().stream()
                                 .filter(jar -> jar.folder.equals(folder))
                                 .map(Jar::copy)

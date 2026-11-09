@@ -7,7 +7,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The recently opened index paths (ADR 0020): newest first, at most {@link #MAX_PATHS}, kept in a
@@ -21,16 +21,16 @@ public final class History {
     private final List<String> paths;
 
     /** Where the paths are kept; empty keeps them in memory only. */
-    private final Optional<Path> file;
+    private final @Nullable Path file;
 
-    private History(List<String> paths, Optional<Path> file) {
+    private History(List<String> paths, @Nullable Path file) {
         this.paths = paths;
         this.file = file;
     }
 
     /** A history that is not kept in a file. */
     public static History inMemory() {
-        return new History(new ArrayList<>(), Optional.empty());
+        return new History(new ArrayList<>(), null);
     }
 
     /** Reads the history from {@code file}, and keeps it there. A missing or unreadable file is an empty history. */
@@ -53,7 +53,7 @@ public final class History {
         } catch (IOException _) {
             paths.clear();
         }
-        return new History(paths, Optional.of(write));
+        return new History(paths, write);
     }
 
     /** Newest first. */
@@ -75,7 +75,9 @@ public final class History {
         while (paths.size() > MAX_PATHS) {
             paths.removeLast();
         }
-        file.ifPresent(this::write);
+        if (file != null) {
+            write(file);
+        }
     }
 
     /** Writes the whole file through a temporary one, so that a reader never sees half of it. */

@@ -188,12 +188,13 @@ public final class LogWindow {
         StringBuilder text = new StringBuilder();
         for (LogBuffer.Entry entry : entries) {
             text.append(head(entry, entry.logger())).append(entry.message()).append('\n');
-            entry.trace().ifPresent(trace -> {
+            String trace = entry.trace();
+            if (trace != null) {
                 text.append(trace);
                 if (!trace.endsWith("\n")) {
                     text.append('\n');
                 }
-            });
+            }
         }
         return text.toString();
     }
@@ -231,7 +232,10 @@ public final class LogWindow {
             Style style = style(entry.level());
             String logger = entry.logger().substring(entry.logger().lastIndexOf('.') + 1);
             List<String> lines = new ArrayList<>(entry.message().lines().toList());
-            entry.trace().ifPresent(trace -> lines.addAll(trace.lines().toList()));
+            String trace = entry.trace();
+            if (trace != null) {
+                lines.addAll(trace.lines().toList());
+            }
             String head = head(entry, logger);
             for (int i = 0; i < Math.max(lines.size(), 1); i++) {
                 String line = i < lines.size() ? lines.get(i).replace("\t", INDENT) : "";

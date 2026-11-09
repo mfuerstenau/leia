@@ -2342,7 +2342,7 @@ public final class Documents {
 
     /** As {@link FieldFlags#of}. */
     static String flags(Optional<IndexField> schema, DocumentField field) {
-        return FieldFlags.of(schema, field);
+        return FieldFlags.of(schema.orElse(null), field);
     }
 
     /** The letters of {@link #flags}, in order. */

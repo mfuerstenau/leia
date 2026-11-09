@@ -651,7 +651,7 @@ class AppTest {
 
     @Test
     void theAboutScreenNamesTheLoadedRuntimesAndWhyTheOthersAreNot() {
-        App app = app().withRuntimeFolders(new RuntimesDirs(Optional.of(Path.of("/opt/leia/runtimes"))));
+        App app = app().withRuntimeFolders(RuntimesDirs.of(Path.of("/opt/leia/runtimes")));
         app.runtimesLoaded(new GetRuntimesResult(
                 List.of(
                         new RuntimeFolder(
@@ -732,7 +732,7 @@ class AppTest {
 
     @Test
     void theAboutScreenSaysWhenARuntimeNeedsARestart() {
-        App app = app().withRuntimeFolders(new RuntimesDirs(Optional.of(Path.of("/opt/leia/runtimes"))));
+        App app = app().withRuntimeFolders(RuntimesDirs.of(Path.of("/opt/leia/runtimes")));
         app.runtimesLoaded(everyState());
 
         assertThat(TestScreens.render(app::render, 200, 30))
@@ -742,7 +742,7 @@ class AppTest {
 
     @Test
     void dOnTheStartScreenPlansOnlyTheMissingAndIncompleteRuntimes() {
-        App app = app().withRuntimeFolders(new RuntimesDirs(Optional.of(Path.of("/opt/leia/runtimes"))));
+        App app = app().withRuntimeFolders(RuntimesDirs.of(Path.of("/opt/leia/runtimes")));
         app.runtimesLoaded(everyState());
 
         Optional<Action> action = app.handleKey(key('D'));
@@ -926,7 +926,7 @@ class AppTest {
 
     @Test
     void dOnTheAnalysisTabIsTheAnalysisTabs() {
-        App app = app().withRuntimeFolders(new RuntimesDirs(Optional.of(Path.of("/opt/leia/runtimes"))));
+        App app = app().withRuntimeFolders(RuntimesDirs.of(Path.of("/opt/leia/runtimes")));
         app.handleKey(key('6'));
 
         Optional<Action> action = app.handleKey(key('D'));
@@ -938,7 +938,7 @@ class AppTest {
 
     @Test
     void theNewRuntimesAreLoadedOnceInstalledAndTheAboutScreenFollows() {
-        App app = app().withRuntimeFolders(new RuntimesDirs(Optional.of(Path.of("/opt/leia/runtimes"))));
+        App app = app().withRuntimeFolders(RuntimesDirs.of(Path.of("/opt/leia/runtimes")));
         app.runtimesLoaded(everyState());
         app.handleKey(key('D'));
 
@@ -3232,7 +3232,7 @@ class AppTest {
     void xOpensTheJarsPopupFromAnyScreenAndAddsJars() {
         Path home = Path.of("/home/me");
         Path dir = home.resolve(".config/leia/jars");
-        App app = app(Optional.of(home)).withDefaultJars(new DefaultJars(Optional.of(dir), DefaultJars.State.LOADED));
+        App app = app(Optional.of(home)).withDefaultJars(new DefaultJars(dir, DefaultJars.State.LOADED));
         assertThat(render(app)).contains("X jars", "X to add");
         assertThat(app.handleKey(key('6'))).hasValue(new Action.LoadAnalysisComponents());
         app.componentsLoaded(COMPONENTS);

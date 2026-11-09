@@ -13,6 +13,7 @@ import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 import java.util.logging.SimpleFormatter;
 import java.util.logging.StreamHandler;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Where {@code java.util.logging} goes (ADR 0034 §7): into {@code leia.log}, since the terminal
@@ -51,8 +52,9 @@ public final class LeiaLog {
      * and into a {@link LogBuffer}. If the file can't be written, or there is none, only the buffer
      * keeps the log.
      */
-    public static Opened toFile(Optional<Path> file) {
-        PrintStream stream = file.flatMap(LeiaLog::open)
+    public static Opened toFile(@Nullable Path file) {
+        PrintStream stream = Optional.ofNullable(file)
+                .flatMap(LeiaLog::open)
                 .orElseGet(() -> new PrintStream(OutputStream.nullOutputStream(), true, StandardCharsets.UTF_8));
         Level level = configure(stream, Level.INFO);
         LogBuffer buffer = new LogBuffer(level);

@@ -1,6 +1,7 @@
 package io.github.mfuerstenau.leia.client.runtimes;
 
 import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -71,6 +72,9 @@ public final class RuntimeService {
     /** {@code mirror} is the first from now on, and saved for next time (ADR 0124). */
     public void useMirror(Mirror mirror) {
         install.updateAndGet(current -> current.withFirst(mirror));
-        settings.saveFile().ifPresent(file -> Mirrors.save(file, mirror));
+        Path file = settings.saveFile();
+        if (file != null) {
+            Mirrors.save(file, mirror);
+        }
     }
 }

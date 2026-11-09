@@ -9,6 +9,7 @@ import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.function.Function;
@@ -95,7 +96,7 @@ public sealed interface Reconstruction {
         }
         Function<Token, String> text = token -> TextFormat.bytesText(token.term(), token.binary());
         tokens.sort(Comparator.comparingInt(Token::position)
-                .thenComparingInt(token -> token.startOffset().orElse(0))
+                .thenComparingInt(token -> Objects.requireNonNullElse(token.startOffset(), 0))
                 .thenComparing(text));
         return Optional.of(PositionedTokens.line(tokens, text, "·", true, Integer.MAX_VALUE));
     }

@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -16,9 +15,8 @@ class RuntimesDirsTest {
 
     @Test
     void existsOnlyAsAFolder() throws Exception {
-        assertThat(new RuntimesDirs(Optional.of(tmp)).exists()).isTrue();
-        assertThat(new RuntimesDirs(Optional.of(tmp.resolve("missing"))).exists())
-                .isFalse();
+        assertThat(RuntimesDirs.of(tmp).exists()).isTrue();
+        assertThat(RuntimesDirs.of(tmp.resolve("missing")).exists()).isFalse();
         assertThat(Files.isDirectory(tmp)).isTrue();
         assertThat(RuntimesDirs.none().exists()).isFalse();
     }
@@ -38,7 +36,7 @@ class RuntimesDirsTest {
 
     @Test
     void namesTheRuntimeFolderOfAJar() {
-        RuntimesDirs folders = new RuntimesDirs(Optional.of(tmp));
+        RuntimesDirs folders = RuntimesDirs.of(tmp);
 
         assertThat(folders.folderOf(tmp.resolve("lucene10").resolve("lucene-core-10.5.2.jar")))
                 .hasValue("runtimes/lucene10");

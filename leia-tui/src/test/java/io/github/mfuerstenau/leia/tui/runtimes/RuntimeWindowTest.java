@@ -543,7 +543,7 @@ class RuntimeWindowTest {
                 runtimes,
                 install.mirrors(),
                 RuntimeWindowTest.class.getClassLoader(),
-                LocalCaches.detect(name -> null, name -> null, Optional.of(tmp.resolve("home"))));
+                LocalCaches.detect(name -> null, name -> null, tmp.resolve("home")));
         plan(List.of(known("lucene9")));
         RuntimeInstall.RuntimePlan lucene9 =
                 install.plan(List.of(known("lucene9"))).runtimes().getFirst();

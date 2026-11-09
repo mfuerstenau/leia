@@ -65,9 +65,9 @@ class TuiTest {
                         "XDG_DATA_HOME", tmp.resolve("data").toString(),
                         "XDG_DATA_DIRS", tmp.resolve("share").toString(),
                         "XDG_CACHE_HOME", tmp.resolve("cache").toString())::get,
-                Optional.empty(),
+                null,
                 false,
-                Optional.empty());
+                null);
     }
 
     @AfterEach

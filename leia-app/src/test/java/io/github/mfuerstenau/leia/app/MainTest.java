@@ -10,7 +10,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
-import java.util.Optional;
 import java.util.logging.LogManager;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -39,9 +38,9 @@ class MainTest {
         logFile = tmp.resolve("state/leia/leia.log");
         platform = new Platform(
                 Map.of("XDG_STATE_HOME", tmp.resolve("state").toString(), "XDG_CONFIG_HOME", configDir.toString())::get,
-                Optional.empty(),
+                null,
                 false,
-                Optional.empty());
+                null);
     }
 
     @AfterEach
@@ -102,7 +101,7 @@ class MainTest {
     @Test
     void downloadsOnlyTheRuntimesNamed() throws Exception {
         Path leiaJar = Files.writeString(tmp.resolve("leia.jar"), "");
-        platform = new Platform(platform.env(), Optional.empty(), false, Optional.of(leiaJar));
+        platform = new Platform(platform.env(), null, false, leiaJar);
 
         assertThat(run("--download-runtimes")).isEqualTo(2);
 

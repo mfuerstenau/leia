@@ -228,7 +228,7 @@ public final class DocumentExport {
             fields.add(new ExportedField(
                     field.name(),
                     info.map(IndexField::number).orElse(null),
-                    FieldFlags.of(info, field),
+                    FieldFlags.of(info.orElse(null), field),
                     info.map(IndexField::indexOptions).orElse(IndexOptions.NONE),
                     field.norm().isPresent() ? field.norm().getAsLong() : null,
                     field.stored(),

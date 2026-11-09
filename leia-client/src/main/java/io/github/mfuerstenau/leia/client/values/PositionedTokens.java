@@ -5,8 +5,8 @@ import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.OptionalInt;
 import java.util.function.Function;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The tokens of a rebuilt field (ADR 0029, ADR 0041) back in position order, as the analyzer left
@@ -20,10 +20,10 @@ public final class PositionedTokens {
     /**
      * A term at one of its positions.
      *
-     * @param startOffset where it starts in the text, if the terms have offsets
+     * @param startOffset where it starts in the text; null if the terms have no offsets
      * @param term the term as the protocol has it: hex if {@code binary}
      */
-    public record Token(int position, OptionalInt startOffset, String term, boolean binary) {}
+    public record Token(int position, @Nullable Integer startOffset, String term, boolean binary) {}
 
     /**
      * A token for each position of each term, in position order; tokens at one position stay in the
@@ -33,8 +33,10 @@ public final class PositionedTokens {
         List<Token> tokens = new ArrayList<>();
         for (TermVectorTerm term : terms) {
             for (TermPosition position : term.positions()) {
-                position.position()
-                        .ifPresent(at -> tokens.add(new Token(at, position.startOffset(), term.term(), term.binary())));
+                Integer startOffset = position.startOffset().isPresent()
+                        ? position.startOffset().getAsInt()
+                        : null;
+                position.position().ifPresent(at -> tokens.add(new Token(at, startOffset, term.term(), term.binary())));
             }
         }
         // Stable: the tokens at one position stay in term order.

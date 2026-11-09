@@ -18,6 +18,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -67,7 +68,7 @@ class InstallJobTest {
         assertThat(snapshot.state()).isEqualTo(State.READY);
         assertThat(snapshot.runtimes()).singleElement().satisfies(runtime -> {
             assertThat(runtime.known()).isEqualTo(known("lucene9"));
-            assertThat(runtime.failure()).isEmpty();
+            assertThat(runtime.failure()).isNull();
             assertThat(runtime.jars())
                     .extracting(JarProgress::name)
                     .containsExactlyElementsOf(lucene(known("lucene9")).stream()
@@ -78,8 +79,8 @@ class InstallJobTest {
         assertThat(snapshot.total()).isEqualTo(plan.runtimes().getFirst().downloadSize());
         assertThat(snapshot.done()).isZero();
         assertThat(snapshot.jarCount()).isEqualTo(lucene(known("lucene9")).size());
-        assertThat(snapshot.question()).isEmpty();
-        assertThat(snapshot.outcome()).isEmpty();
+        assertThat(snapshot.question()).isNull();
+        assertThat(snapshot.outcome()).isNull();
         assertThat(snapshot.active()).isEmpty();
     }
 
@@ -94,12 +95,12 @@ class InstallJobTest {
         assertThat(job.done()).isCompletedWithValue(outcome);
         Snapshot snapshot = job.snapshot();
         assertThat(snapshot.state()).isEqualTo(State.DONE);
-        assertThat(snapshot.outcome()).contains(outcome);
+        assertThat(snapshot.outcome()).isEqualTo(outcome);
         assertThat(snapshot.done()).isEqualTo(snapshot.total());
         assertThat(snapshot.runtimes().getFirst().jars()).allSatisfy(jar -> {
             assertThat(jar.state()).isEqualTo(JarState.DOWNLOADED);
             assertThat(jar.bytes()).isEqualTo(jar.size());
-            assertThat(jar.source()).contains("First");
+            assertThat(jar.source()).isEqualTo("First");
         });
     }
 
@@ -132,7 +133,7 @@ class InstallJobTest {
 
         Snapshot asking = awaitSnapshot(job, snapshot -> snapshot.state() == State.WAITING_FOR_MIRROR);
 
-        assertThat(asking.question()).hasValueSatisfying(question -> {
+        assertThat(asking.question()).satisfies(question -> {
             assertThat(question.failure().folder()).isEqualTo("lucene7");
             assertThat(question.failure().jar()).isEqualTo(missing.name());
             assertThat(question.failure().reason()).isEqualTo("HTTP 404");
@@ -143,12 +144,12 @@ class InstallJobTest {
         assertThat(jar(asking, missing.name()).failures()).containsExactly("First: HTTP 404");
 
         job.choose(new MirrorChooser.Choice.Retry(chosen));
-        assertThat(job.snapshot().question()).isEmpty();
+        assertThat(job.snapshot().question()).isNull();
 
         RuntimeInstall.Outcome outcome = job.await();
         assertThat(outcome.results()).containsEntry(known("lucene7"), new RuntimeInstall.Result.Installed());
         assertThat(jar(job.snapshot(), missing.name()).state()).isEqualTo(JarState.DOWNLOADED);
-        assertThat(jar(job.snapshot(), missing.name()).source()).contains("Second");
+        assertThat(jar(job.snapshot(), missing.name()).source()).isEqualTo("Second");
         assertNoPart(runtimes.resolve("lucene7"));
     }
 
@@ -164,8 +165,8 @@ class InstallJobTest {
         InstallJob job = InstallJob.of(install, install.plan(List.of(known("lucene7"))), Set.of(known("lucene7")))
                 .start();
 
-        Snapshot asking = awaitSnapshot(job, snapshot -> snapshot.question().isPresent());
-        String jar = asking.question().orElseThrow().failure().jar();
+        Snapshot asking = awaitSnapshot(job, snapshot -> snapshot.question() != null);
+        String jar = Objects.requireNonNull(asking.question()).failure().jar();
         // The bytes of the failed try count until the jar starts over.
         assertThat(asking.done()).isPositive();
         assertThat(jar(asking, jar).failures()).containsExactly("Slow: no bytes for 1 s");
@@ -189,13 +190,13 @@ class InstallJobTest {
                         Set.of(known("lucene7"), known("lucene5")))
                 .start();
 
-        awaitSnapshot(job, snapshot -> snapshot.question().isPresent());
+        awaitSnapshot(job, snapshot -> snapshot.question() != null);
         job.choose(new MirrorChooser.Choice.Skip());
 
         RuntimeInstall.Outcome outcome = job.await();
         assertThat(outcome.results().get(known("lucene7"))).isInstanceOf(RuntimeInstall.Result.Failed.class);
         assertThat(outcome.results()).containsEntry(known("lucene5"), new RuntimeInstall.Result.Installed());
-        assertThat(job.snapshot().runtimes().getFirst().failure()).isPresent();
+        assertThat(job.snapshot().runtimes().getFirst().failure()).isNotNull();
     }
 
     @Test
@@ -208,7 +209,7 @@ class InstallJobTest {
                         Set.of(known("lucene7"), known("lucene5")))
                 .start();
 
-        awaitSnapshot(job, snapshot -> snapshot.question().isPresent());
+        awaitSnapshot(job, snapshot -> snapshot.question() != null);
         job.choose(new MirrorChooser.Choice.Abort());
 
         RuntimeInstall.Outcome outcome = job.await();
@@ -226,14 +227,14 @@ class InstallJobTest {
                         Set.of(known("lucene7"), known("lucene5")))
                 .start();
 
-        awaitSnapshot(job, snapshot -> snapshot.question().isPresent());
+        awaitSnapshot(job, snapshot -> snapshot.question() != null);
         job.cancel();
 
         RuntimeInstall.Outcome outcome = job.await();
         assertThat(outcome.status()).isEqualTo(1);
         assertThat(outcome.results()).containsEntry(known("lucene5"), new RuntimeInstall.Result.Cancelled());
         assertThat(job.snapshot().cancelled()).isTrue();
-        assertThat(job.snapshot().question()).isEmpty();
+        assertThat(job.snapshot().question()).isNull();
         assertNoPart(runtimes.resolve("lucene7"));
     }
 
@@ -344,7 +345,7 @@ class InstallJobTest {
 
         assertThat(job.start().await().status()).isZero();
         assertThat(failed).hasValue("First: HTTP 404");
-        assertThat(job.snapshot().question()).isEmpty();
+        assertThat(job.snapshot().question()).isNull();
     }
 
     @Test

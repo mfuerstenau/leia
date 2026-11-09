@@ -10,10 +10,10 @@ import java.net.URLClassLoader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,7 +39,7 @@ class RuntimeServiceTest {
 
     @Test
     void plansTheChosenAndThePresentRuntimesApart() throws Exception {
-        RuntimeService service = service(RuntimeServiceTest.class.getClassLoader(), Optional.empty());
+        RuntimeService service = service(RuntimeServiceTest.class.getClassLoader(), null);
 
         RuntimeService.Plans plans = service.plan(List.of(known("lucene9")), List.of(known("lucene7")))
                 .get(30, TimeUnit.SECONDS);
@@ -56,7 +56,7 @@ class RuntimeServiceTest {
     @Test
     void aPlanThatFailsSaysWhy() throws Exception {
         try (URLClassLoader empty = new URLClassLoader(new URL[0], null)) {
-            RuntimeService service = service(empty, Optional.empty());
+            RuntimeService service = service(empty, null);
 
             assertThat(service.plan(List.of(known("lucene9")), List.of()))
                     .failsWithin(30, TimeUnit.SECONDS)
@@ -68,7 +68,7 @@ class RuntimeServiceTest {
     @Test
     void theMirrorUsedIsFirstFromNowOnAndSaved() throws Exception {
         Path saved = tmp.resolve("config/mirror");
-        RuntimeService service = service(RuntimeServiceTest.class.getClassLoader(), Optional.of(saved));
+        RuntimeService service = service(RuntimeServiceTest.class.getClassLoader(), saved);
         Mirror other = new Mirror(URI.create("https://mirror.example/maven2/"), "Other", Mirror.Origin.TYPED);
 
         service.useMirror(other);
@@ -80,7 +80,7 @@ class RuntimeServiceTest {
 
     @Test
     void anInstallJobUsesTheMirrorsAsTheyAreThen() throws Exception {
-        RuntimeService service = service(RuntimeServiceTest.class.getClassLoader(), Optional.empty());
+        RuntimeService service = service(RuntimeServiceTest.class.getClassLoader(), null);
         RuntimeService.Plans plans =
                 service.plan(List.of(known("lucene7")), List.of()).get(30, TimeUnit.SECONDS);
 
@@ -94,12 +94,12 @@ class RuntimeServiceTest {
         RuntimeService service = new RuntimeService(
                 new RuntimeInstall(
                         tmp.resolve("runtimes"), repository.base(), RuntimeServiceTest.class.getClassLoader()),
-                new MirrorSettings(List.of("mirrors, line 2: not a URL"), Optional.empty()));
+                new MirrorSettings(List.of("mirrors, line 2: not a URL"), null));
 
         assertThat(service.mirrorProblems()).containsExactly("mirrors, line 2: not a URL");
     }
 
-    private RuntimeService service(ClassLoader resources, Optional<Path> saveFile) {
+    private RuntimeService service(ClassLoader resources, @Nullable Path saveFile) {
         return new RuntimeService(
                 new RuntimeInstall(
                         tmp.resolve("runtimes"),

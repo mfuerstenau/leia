@@ -35,6 +35,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
@@ -275,7 +276,10 @@ public final class RuntimeWindow {
     public void tick() {
         ticks++;
         if (phase == Phase.INSTALLING && job != null) {
-            job.snapshot().question().ifPresent(this::asked);
+            InstallJob.Question question = job.snapshot().question();
+            if (question != null) {
+                asked(question);
+            }
         }
     }
 
@@ -676,7 +680,7 @@ public final class RuntimeWindow {
                     "Copied from local caches, not downloaded:",
                     Palette.current().heading())));
             for (RuntimeInstall.Download download : runtime.localCopies()) {
-                LocalCaches.Local local = download.local().orElseThrow();
+                LocalCaches.Local local = Objects.requireNonNull(download.local());
                 lines.add(Line.from("• " + download.jar().name() + ", "
                         + TextFormat.size(download.jar().size()) + ", from "
                         + local.cache().name()));
@@ -688,7 +692,7 @@ public final class RuntimeWindow {
                 "To download into runtimes/" + runtime.known().folder() + ":",
                 Palette.current().heading())));
         for (RuntimeInstall.Download download : runtime.downloads()) {
-            if (download.local().isPresent()) {
+            if (download.local() != null) {
                 continue;
             }
             // Unindented: a URL or a SHA-256 wraps on a narrow screen, and loses its indent then.
@@ -808,7 +812,7 @@ public final class RuntimeWindow {
         int line = 0;
         for (InstallJob.RuntimeProgress runtime : snapshot.runtimes()) {
             line++;
-            if (runtime.failure().isPresent()) {
+            if (runtime.failure() != null) {
                 line++;
             }
             for (InstallJob.JarProgress jar : runtime.jars()) {
@@ -828,9 +832,10 @@ public final class RuntimeWindow {
             lines.add(Line.from(Span.styled(
                     runtime.known().name() + " · runtimes/" + runtime.known().folder(),
                     Palette.current().heading())));
-            runtime.failure()
-                    .ifPresent(failed -> lines.add(Line.from(
-                            Span.styled("  ✗ " + failed, Palette.current().error()))));
+            if (runtime.failure() != null) {
+                lines.add(Line.from(Span.styled(
+                        "  ✗ " + runtime.failure(), Palette.current().error())));
+            }
             for (InstallJob.JarProgress jar : runtime.jars()) {
                 lines.add(line(jar, spinner));
                 jar.failures()
@@ -855,12 +860,12 @@ public final class RuntimeWindow {
                 Line.from(
                         Span.styled("  ✓ ", Palette.current().success()),
                         Span.raw(jar.name() + ", " + size + " downloaded"
-                                + jar.source().map(source -> " from " + source).orElse("")));
+                                + (jar.source() != null ? " from " + jar.source() : "")));
             case COPIED ->
                 Line.from(
                         Span.styled("  ✓ ", Palette.current().success()),
                         Span.raw(jar.name() + ", " + size + " copied from "
-                                + jar.source().orElse("")));
+                                + Objects.requireNonNullElse(jar.source(), "")));
             case KEPT -> Line.from(Span.raw("  = " + jar.name() + ", " + size + " kept"));
             case FAILED ->
                 Line.from(Span.styled(

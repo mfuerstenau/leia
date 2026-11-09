@@ -6,14 +6,15 @@ import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.stream.Stream;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The default folder of jars, which are loaded at every start after those of {@code --jar}, and
  * whether they were (ADR 0024).
  *
- * @param dir the folder; empty if the platform doesn't say where it is
+ * @param dir the folder; null if the platform doesn't say where it is
  */
-public record DefaultJars(Optional<Path> dir, State state) {
+public record DefaultJars(@Nullable Path dir, State state) {
 
     public enum State {
         /** Loaded, as one more jar path after those of {@code --jar}. */
@@ -26,21 +27,21 @@ public record DefaultJars(Optional<Path> dir, State state) {
 
     /** No default folder: the platform doesn't say where it is. */
     public static DefaultJars none() {
-        return new DefaultJars(Optional.empty(), State.NO_JARS);
+        return new DefaultJars(null, State.NO_JARS);
     }
 
-    /** Looks into {@code dir}: its jars are loaded if it has any, unless {@code skip}. */
-    public static DefaultJars find(Optional<Path> dir, boolean skip) {
+    /** Looks into {@code dir}, if not null: its jars are loaded if it has any, unless {@code skip}. */
+    public static DefaultJars find(@Nullable Path dir, boolean skip) {
         State state = State.SKIPPED;
         if (!skip) {
-            state = dir.filter(DefaultJars::hasJars).isPresent() ? State.LOADED : State.NO_JARS;
+            state = dir != null && hasJars(dir) ? State.LOADED : State.NO_JARS;
         }
         return new DefaultJars(dir, state);
     }
 
     /** The folder to load, if its jars are loaded. */
     public Optional<Path> loadedDir() {
-        return dir.filter(unused -> state == State.LOADED);
+        return Optional.ofNullable(dir).filter(unused -> state == State.LOADED);
     }
 
     /** Whether a file name is a jar's, as the server sees it: it ends with {@code .jar}, in any case. */

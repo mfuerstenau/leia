@@ -40,16 +40,15 @@ class PositionedTokensTest {
 
         assertThat(tokens)
                 .containsExactly(
-                        new Token(0, OptionalInt.empty(), "the", false),
-                        new Token(1, OptionalInt.empty(), "quick", false),
-                        new Token(1, OptionalInt.empty(), "fast", false),
-                        new Token(4, OptionalInt.empty(), "the", false));
+                        new Token(0, null, "the", false),
+                        new Token(1, null, "quick", false),
+                        new Token(1, null, "fast", false),
+                        new Token(4, null, "the", false));
     }
 
     @Test
     void keepsTheOffsetAndWhetherTheTermIsBinary() {
-        assertThat(PositionedTokens.of(List.of(at("ff00", true, 2, 7))))
-                .containsExactly(new Token(2, OptionalInt.of(7), "ff00", true));
+        assertThat(PositionedTokens.of(List.of(at("ff00", true, 2, 7)))).containsExactly(new Token(2, 7, "ff00", true));
     }
 
     @Test

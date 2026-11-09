@@ -9,13 +9,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class PlatformTest {
 
-    private static final Optional<Path> HOME = Optional.of(Path.of("/home/u"));
+    private static final Path HOME = Path.of("/home/u");
 
     @TempDir
     Path tmp;
@@ -24,13 +24,13 @@ class PlatformTest {
     void theCurrentPlatformIsThisJvmsWithoutLeiaJarOutsideOfIt() {
         Platform current = Platform.current(PlatformTest.class);
 
-        assertThat(current.home()).contains(Path.of(System.getProperty("user.home")));
+        assertThat(current.home()).isEqualTo(Path.of(System.getProperty("user.home")));
         assertThat(current.windows())
                 .isEqualTo(System.getProperty("os.name")
                         .toLowerCase(java.util.Locale.ROOT)
                         .startsWith("windows"));
         assertThat(current.env().apply("PATH")).isEqualTo(System.getenv("PATH"));
-        assertThat(current.leiaJar()).as("the test classes are a folder").isEmpty();
+        assertThat(current.leiaJar()).as("the test classes are a folder").isNull();
     }
 
     @Test
@@ -69,7 +69,7 @@ class PlatformTest {
 
     @Test
     void knowsNoFolderWithoutVariablesOrHome() {
-        Platform platform = linux(Map.of(), Optional.empty());
+        Platform platform = linux(Map.of(), null);
 
         assertThat(platform.stateDirs()).isEmpty();
         assertThat(platform.logFile()).isEmpty();
@@ -104,7 +104,7 @@ class PlatformTest {
                         "XDG_STATE_HOME", "/state")::get,
                 HOME,
                 true,
-                Optional.empty());
+                null);
 
         assertThat(platform.stateDirs()).containsExactly(Path.of("/local/leia"));
         assertThat(platform.dataDirs()).containsExactly(Path.of("/local/leia"));
@@ -117,15 +117,15 @@ class PlatformTest {
 
     @Test
     void fallsBackToTheFoldersBelowTheHomeOnWindowsOnlyWithoutTheVariable() {
-        Platform platform = new Platform(Map.<String, String>of()::get, HOME, true, Optional.empty());
+        Platform platform = new Platform(Map.<String, String>of()::get, HOME, true, null);
 
         assertThat(platform.configDirs()).containsExactly(Path.of("/home/u/AppData/Roaming/leia"));
         assertThat(platform.stateDirs()).containsExactly(Path.of("/home/u/AppData/Local/leia"));
         assertThat(platform.systemDataDirs()).isEmpty();
         // The variable can point to a share; the folder below the home isn't then added.
-        Platform redirected = new Platform(Map.of("APPDATA", "/share/roaming")::get, HOME, true, Optional.empty());
+        Platform redirected = new Platform(Map.of("APPDATA", "/share/roaming")::get, HOME, true, null);
         assertThat(redirected.configDirs()).containsExactly(Path.of("/share/roaming/leia"));
-        assertThat(new Platform(Map.<String, String>of()::get, Optional.empty(), true, Optional.empty()).configDirs())
+        assertThat(new Platform(Map.<String, String>of()::get, null, true, null).configDirs())
                 .isEmpty();
     }
 
@@ -139,7 +139,7 @@ class PlatformTest {
                         tmp.resolve("user").toString(),
                         "XDG_CONFIG_DIRS",
                         tmp.resolve("system").toString()),
-                Optional.empty());
+                null);
         assertThat(platform.themeFile()).isEmpty();
 
         Files.writeString(system.resolve("theme"), "nord\n");
@@ -160,7 +160,7 @@ class PlatformTest {
                         tmp.resolve("user").toString(),
                         "XDG_CONFIG_DIRS",
                         tmp.resolve("system").toString()),
-                Optional.empty());
+                null);
         assertThat(platform.mirrorsFile()).isEmpty();
         assertThat(platform.mirrorFile()).hasValue(user.resolve("mirror"));
 
@@ -179,7 +179,7 @@ class PlatformTest {
     void readsABackedUpConfigFolderWhenTheVariableMovedAway() throws IOException {
         Path home = Files.createDirectories(tmp.resolve("home"));
         Files.createDirectories(home.resolve(".config/leia/themes"));
-        Platform platform = linux(Map.of("XDG_CONFIG_HOME", tmp.resolve("gone").toString()), Optional.of(home));
+        Platform platform = linux(Map.of("XDG_CONFIG_HOME", tmp.resolve("gone").toString()), home);
 
         assertThat(platform.themesDirs()).containsExactly(home.resolve(".config/leia/themes"));
         // The variable's folder can be created, so it is where the theme is written.
@@ -197,7 +197,7 @@ class PlatformTest {
                         tmp.resolve("user").toString(),
                         "XDG_CONFIG_DIRS",
                         tmp.resolve("system") + ":" + tmp.resolve("system2")),
-                Optional.empty());
+                null);
 
         assertThat(platform.themesDirs()).containsExactly(user, system);
     }
@@ -208,7 +208,7 @@ class PlatformTest {
         Files.createFile(system.resolve("planted.jar"));
         Path home = Files.createDirectories(tmp.resolve("home"));
         Platform platform =
-                linux(Map.of("XDG_CONFIG_DIRS", tmp.resolve("system").toString()), Optional.of(home));
+                linux(Map.of("XDG_CONFIG_DIRS", tmp.resolve("system").toString()), home);
 
         assertThat(platform.defaultJarsDir()).hasValue(home.resolve(".config/leia/jars"));
 
@@ -216,7 +216,7 @@ class PlatformTest {
         Path second = Files.createDirectories(home.resolve(".config/leia/jars"));
         assertThat(platform.defaultJarsDir()).hasValue(second);
         Path first = Files.createDirectories(tmp.resolve("xdg/leia/jars"));
-        Platform both = linux(Map.of("XDG_CONFIG_HOME", tmp.resolve("xdg").toString()), Optional.of(home));
+        Platform both = linux(Map.of("XDG_CONFIG_HOME", tmp.resolve("xdg").toString()), home);
         assertThat(both.defaultJarsDir()).hasValue(first);
         Files.createFile(second.resolve("a.jar"));
         assertThat(both.defaultJarsDir()).hasValue(second);
@@ -252,12 +252,12 @@ class PlatformTest {
     void writesTheStateAndTheLogToTheNextCandidateAndNeverToTheTemporaryFolder() throws IOException {
         Path file = Files.createFile(tmp.resolve("file"));
         Path home = Files.createDirectories(tmp.resolve("home"));
-        Platform moved = linux(Map.of("XDG_STATE_HOME", file.toString()), Optional.of(home));
+        Platform moved = linux(Map.of("XDG_STATE_HOME", file.toString()), home);
 
         assertThat(moved.stateWriteDir()).hasValue(home.resolve(".local/state/leia"));
         assertThat(moved.logFile()).hasValue(home.resolve(".local/state/leia/leia.log"));
         assertThat(moved.historyFile()).hasValue(home.resolve(".local/state/leia/history"));
-        Platform none = linux(Map.of("XDG_STATE_HOME", file.toString()), Optional.of(file));
+        Platform none = linux(Map.of("XDG_STATE_HOME", file.toString()), file);
         assertThat(none.stateWriteDir()).isEmpty();
         assertThat(none.logFile()).isEmpty();
         assertThat(none.historyFile()).isEmpty();
@@ -267,7 +267,7 @@ class PlatformTest {
     void readsTheHistoryFromTheFirstStateFolderThatHasOne() throws IOException {
         Path home = Files.createDirectories(tmp.resolve("home"));
         Path old = Files.createDirectories(home.resolve(".local/state/leia"));
-        Platform platform = linux(Map.of("XDG_STATE_HOME", tmp.resolve("new").toString()), Optional.of(home));
+        Platform platform = linux(Map.of("XDG_STATE_HOME", tmp.resolve("new").toString()), home);
 
         // Nothing yet: read where it is written.
         assertThat(platform.historyReadFile()).hasValue(tmp.resolve("new/leia/history"));
@@ -280,12 +280,11 @@ class PlatformTest {
     void keepsTheCacheInTheFirstWritableCandidateOrNowhere() throws IOException {
         Path home = Files.createDirectories(tmp.resolve("home"));
 
-        assertThat(linux(Map.of("XDG_CACHE_HOME", tmp.resolve("c").toString()), Optional.of(home))
+        assertThat(linux(Map.of("XDG_CACHE_HOME", tmp.resolve("c").toString()), home)
                         .cacheDir())
                 .hasValue(tmp.resolve("c/leia"));
         Path file = Files.createFile(tmp.resolve("file"));
-        assertThat(linux(Map.of("XDG_CACHE_HOME", file.toString()), Optional.of(file))
-                        .cacheDir())
+        assertThat(linux(Map.of("XDG_CACHE_HOME", file.toString()), file).cacheDir())
                 .isEmpty();
     }
 
@@ -335,16 +334,12 @@ class PlatformTest {
                         RuntimesDir.user(Path.of("/data/leia/runtimes")),
                         RuntimesDir.user(Path.of("/home/u/.local/share/leia/runtimes")),
                         new RuntimesDir(Path.of("/sys/leia/runtimes"), true));
-        assertThat(new Platform(
-                                Map.of("LOCALAPPDATA", "/local", "PROGRAMDATA", "/program")::get,
-                                HOME,
-                                true,
-                                Optional.of(jar))
+        assertThat(new Platform(Map.of("LOCALAPPDATA", "/local", "PROGRAMDATA", "/program")::get, HOME, true, jar)
                         .runtimesDirs())
                 .containsExactly(
                         RuntimesDir.user(Path.of("/local/leia/runtimes")),
                         new RuntimesDir(Path.of("/program/leia/runtimes"), true));
-        assertThat(new Platform(Map.<String, String>of()::get, Optional.empty(), false, Optional.of(jar))
+        assertThat(new Platform(Map.<String, String>of()::get, null, false, jar)
                         .runtimesDirs().stream().filter(dir -> !dir.system()))
                 .isEmpty();
     }
@@ -354,7 +349,7 @@ class PlatformTest {
         Path jar = tmp.resolve("opt/leia/leia.jar");
         Path beside = Files.createDirectories(tmp.resolve("opt/leia/runtimes"));
         Path home = Files.createDirectories(tmp.resolve("home"));
-        Platform platform = new Platform(Map.<String, String>of()::get, Optional.of(home), false, Optional.of(jar));
+        Platform platform = new Platform(Map.<String, String>of()::get, home, false, jar);
         assertThat(platform.runtimesInstallDir()).hasValue(beside);
 
         assumeTrue(beside.toFile().setWritable(false) && !Files.isWritable(beside), "root can write anywhere");
@@ -406,10 +401,10 @@ class PlatformTest {
     }
 
     private static Platform withJar(Map<String, String> env, Path jar) {
-        return new Platform(env::get, HOME, false, Optional.of(jar));
+        return new Platform(env::get, HOME, false, jar);
     }
 
-    private static Platform linux(Map<String, String> env, Optional<Path> home) {
-        return new Platform(env::get, home, false, Optional.empty());
+    private static Platform linux(Map<String, String> env, @Nullable Path home) {
+        return new Platform(env::get, home, false, null);
     }
 }
