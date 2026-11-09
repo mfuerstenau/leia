@@ -35,7 +35,7 @@ final class Lucene9Knn implements Knn {
     @Override
     public ParsedQuery approximate(String field, Vector target, int k, @Nullable ParsedQuery filter) {
         index.vectorField(field);
-        Query filterQuery = Optional.ofNullable(filter).map(Lucene9Index::query).orElse(null);
+        Query filterQuery = filter == null ? null : Lucene9Index.query(filter);
         return new Lucene9Index.Lucene9Query(
                 switch (target) {
                     case Vector.Floats floats -> new KnnFloatVectorQuery(field, floats.values(), k, filterQuery);
@@ -47,7 +47,7 @@ final class Lucene9Knn implements Knn {
     public ParsedQuery exact(String field, Vector target, @Nullable ParsedQuery filter) {
         index.vectorField(field);
         return new Lucene9Index.Lucene9Query(
-                new ExactKnnQuery(field, target, Optional.ofNullable(filter).map(Lucene9Index::query)));
+                new ExactKnnQuery(field, target, filter == null ? null : Lucene9Index.query(filter)));
     }
 
     @Override

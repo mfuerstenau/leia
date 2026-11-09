@@ -3,13 +3,11 @@ package io.github.mfuerstenau.leia.lucene3;
 import io.github.mfuerstenau.leia.runtime.Search.AnalyzerSpec;
 import io.github.mfuerstenau.leia.runtime.Search.InvalidAnalyzerException;
 import io.github.mfuerstenau.leia.runtime.Search.UnsupportedAnalyzerException;
-import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import io.github.mfuerstenau.leia.runtime.support.WordFiles;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.Set;
 import java.util.TreeSet;
 import org.apache.lucene.analysis.Analyzer;
@@ -24,6 +22,7 @@ import org.apache.lucene.analysis.standard.ClassicAnalyzer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.util.Constants;
 import org.apache.lucene.util.Version;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The analyzers of lucene-core 3.6 for the query parser (ADR 0045), each of {@link Version#LUCENE_36}.
@@ -54,7 +53,7 @@ final class Lucene3Analyzers {
      */
     static Analyzer analyzer(AnalyzerSpec spec) throws UnsupportedAnalyzerException, InvalidAnalyzerException {
         return switch (spec) {
-            case AnalyzerSpec.Standard _ -> named(STANDARD, Optional.empty(), OptionalInt.empty());
+            case AnalyzerSpec.Standard _ -> named(STANDARD, null, null);
             case AnalyzerSpec.Preset preset -> {
                 String name = preset.simpleName();
                 if (NAMES.contains(name)
@@ -67,11 +66,9 @@ final class Lucene3Analyzers {
                     throw new UnsupportedAnalyzerException(
                             "options of " + name + " other than stop words and the longest token");
                 }
-                Optional<AnalyzerSpec.WordSet> stopwordSet = Optional.ofNullable(preset.stopwords());
-                Optional<List<String>> stopwords = stopwordSet.isPresent()
-                        ? Optional.of(WordFiles.words("stop words", stopwordSet.get()))
-                        : Optional.empty();
-                yield named(name, stopwords, Optionals.optionalInt(preset.maxTokenLength()));
+                AnalyzerSpec.WordSet stopwordSet = preset.stopwords();
+                List<String> stopwords = stopwordSet != null ? WordFiles.words("stop words", stopwordSet) : null;
+                yield named(name, stopwords, preset.maxTokenLength());
             }
             case AnalyzerSpec.Custom _ -> throw new UnsupportedAnalyzerException("custom analyzers");
             case AnalyzerSpec.Wrapped wrapped -> {
@@ -101,7 +98,7 @@ final class Lucene3Analyzers {
         };
     }
 
-    private static Analyzer named(String name, Optional<List<String>> stopwords, OptionalInt maxTokenLength)
+    private static Analyzer named(String name, @Nullable List<String> stopwords, @Nullable Integer maxTokenLength)
             throws UnsupportedAnalyzerException {
         if (!NAMES.contains(name)) {
             throw new UnsupportedAnalyzerException("Lucene " + Constants.LUCENE_MAIN_VERSION + " has no analyzer "
@@ -109,34 +106,37 @@ final class Lucene3Analyzers {
         }
         boolean takesStopwords = Set.of(STANDARD, CLASSIC, STOP).contains(name);
         boolean takesMaxTokenLength = Set.of(STANDARD, CLASSIC).contains(name);
-        if (stopwords.isPresent() && !takesStopwords) {
+        if (stopwords != null && !takesStopwords) {
             throw new UnsupportedAnalyzerException(
                     "The " + name + " of Lucene " + Constants.LUCENE_MAIN_VERSION + " takes no stop words");
         }
-        if (maxTokenLength.isPresent() && !takesMaxTokenLength) {
+        if (maxTokenLength != null && !takesMaxTokenLength) {
             throw new UnsupportedAnalyzerException(
                     "The " + name + " of Lucene " + Constants.LUCENE_MAIN_VERSION + " takes no longest token");
         }
-        Optional<CharArraySet> stopSet = stopwords.map(words -> new CharArraySet(Version.LUCENE_36, words, false));
+        @Nullable
+        CharArraySet stopSet = stopwords == null ? null : new CharArraySet(Version.LUCENE_36, stopwords, false);
         return switch (name) {
             case STANDARD -> {
-                StandardAnalyzer analyzer = stopSet.isPresent()
-                        ? new StandardAnalyzer(Version.LUCENE_36, stopSet.get())
+                StandardAnalyzer analyzer = stopSet != null
+                        ? new StandardAnalyzer(Version.LUCENE_36, stopSet)
                         : new StandardAnalyzer(Version.LUCENE_36);
-                maxTokenLength.ifPresent(analyzer::setMaxTokenLength);
+                if (maxTokenLength != null) {
+                    analyzer.setMaxTokenLength(maxTokenLength);
+                }
                 yield analyzer;
             }
             case CLASSIC -> {
-                ClassicAnalyzer analyzer = stopSet.isPresent()
-                        ? new ClassicAnalyzer(Version.LUCENE_36, stopSet.get())
+                ClassicAnalyzer analyzer = stopSet != null
+                        ? new ClassicAnalyzer(Version.LUCENE_36, stopSet)
                         : new ClassicAnalyzer(Version.LUCENE_36);
-                maxTokenLength.ifPresent(analyzer::setMaxTokenLength);
+                if (maxTokenLength != null) {
+                    analyzer.setMaxTokenLength(maxTokenLength);
+                }
                 yield analyzer;
             }
             case STOP ->
-                stopSet.isPresent()
-                        ? new StopAnalyzer(Version.LUCENE_36, stopSet.get())
-                        : new StopAnalyzer(Version.LUCENE_36);
+                stopSet != null ? new StopAnalyzer(Version.LUCENE_36, stopSet) : new StopAnalyzer(Version.LUCENE_36);
             case "WhitespaceAnalyzer" -> new WhitespaceAnalyzer(Version.LUCENE_36);
             case "SimpleAnalyzer" -> new SimpleAnalyzer(Version.LUCENE_36);
             case "KeywordAnalyzer" -> new KeywordAnalyzer();

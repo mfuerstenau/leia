@@ -60,6 +60,7 @@ import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -1974,11 +1975,11 @@ class Lucene9IndexTest {
      */
     private static void assertSegmentsReadAsPages(RuntimeIndex index) throws IOException {
         Documents documents = index.documents().orElseThrow();
-        for (Optional<Set<String>> fields : List.of(Optional.<Set<String>>empty(), Optional.of(Set.of("id")))) {
+        for (Set<String> fields : Arrays.asList(null, Set.of("id"))) {
             for (boolean includeDeleted : new boolean[] {false, true}) {
                 assertThat(bySegment(index, fields, includeDeleted, IntUnaryOperator.identity()))
                         .containsExactlyElementsOf(
-                                documents.storedValues(0, index.maxDoc(), fields.orElse(null), includeDeleted).stream()
+                                documents.storedValues(0, index.maxDoc(), fields, includeDeleted).stream()
                                         .map(document -> described(document, document.docId()))
                                         .toList());
             }
@@ -2004,7 +2005,7 @@ class Lucene9IndexTest {
 
     /** The stored documents of every segment, read a segment at a time, as {@link #described}. */
     private static List<String> bySegment(
-            RuntimeIndex index, Optional<Set<String>> fields, boolean includeDeleted, IntUnaryOperator next)
+            RuntimeIndex index, @Nullable Set<String> fields, boolean includeDeleted, IntUnaryOperator next)
             throws IOException {
         Documents documents = index.documents().orElseThrow();
         List<String> read = new ArrayList<>();
@@ -2015,7 +2016,7 @@ class Lucene9IndexTest {
                 List<Long> progress = new ArrayList<>();
                 documents.storedValues(
                         segment,
-                        fields.orElse(null),
+                        fields,
                         includeDeleted,
                         next,
                         document -> read.add(described(document, base + document.docId())),

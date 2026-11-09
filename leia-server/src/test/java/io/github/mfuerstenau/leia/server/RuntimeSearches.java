@@ -183,6 +183,23 @@ final class RuntimeSearches {
                                 new DocValuesRange(Optional.of(text("0")), Optional.of(text("1")), true, true))))
                 // As sortable bits, a small long is a tiny positive double.
                 .containsExactlyInAnyOrder(0, 3, 4, 5, 6);
+        // Raw doubles take the bits as they are: an open bound and an exclusive one.
+        assertThat(searchFilterAndExplain(
+                        backend,
+                        docValues(
+                                "dv_num",
+                                DocValuesNumber.DOUBLE,
+                                null,
+                                new DocValuesRange(Optional.empty(), Optional.of(text("1")), true, false))))
+                .containsExactlyInAnyOrder(0, 3, 4, 5, 6);
+        assertThat(searchFilterAndExplain(
+                        backend,
+                        docValues(
+                                "dv_num",
+                                DocValuesNumber.DOUBLE,
+                                null,
+                                new DocValuesRange(Optional.of(text("0")), Optional.empty(), false, true))))
+                .containsExactlyInAnyOrder(0, 3, 4, 5, 6);
         assertThat(searchFilterAndExplain(
                         backend, docValues("dv_sorted_num", longs, List.of(text("-5"), text("-7")), null)))
                 .containsExactlyInAnyOrder(4, 6);
@@ -210,6 +227,16 @@ final class RuntimeSearches {
                                         true,
                                         false))))
                 .containsExactlyInAnyOrder(4, 5);
+        // Only a lower bound.
+        assertThat(searchFilterAndExplain(
+                        backend,
+                        docValues(
+                                "dv_bin",
+                                null,
+                                null,
+                                new DocValuesRange(
+                                        Optional.of(new BytesValue("6235", true)), Optional.empty(), true, true))))
+                .containsExactlyInAnyOrder(4, 5, 6);
         RpcException binary = backend.fails(
                 Methods.START_SEARCH,
                 params(docValues("dv_bin", longs, List.of(text("1")), null), 10),

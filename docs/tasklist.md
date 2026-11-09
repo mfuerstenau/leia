@@ -10,7 +10,7 @@ The lane is done: on new code the gate passes, and the accepted rules are whitel
 
 ## Optional only as a return type
 
-Goal: every module follows the rule in `AGENTS.md`, "Code conventions". `Optional*` is not used as a method parameter or field type, record components included. Optional inputs are overloads or JSpecify's `@Nullable`, with the exception of `leia-protocol`'s records (hard rule 3). `leia-client`, `leia-app`, `leia-tui`, `leia-mcp`, `leia-runtime`, `leia-server` and `leia-core` are done (ADR 0127). `runtime.support.Optionals` (`orNull`, `optionalInt`, `optionalLong`, `optionalDouble`) converts at the boundaries. `leia-client` set the pattern:
+Goal: every module follows the rule in `AGENTS.md`, "Code conventions". `Optional*` is not used as a method parameter or field type, record components included. Optional inputs are overloads or JSpecify's `@Nullable`, with the exception of `leia-protocol`'s records (hard rule 3). `leia-client`, `leia-app`, `leia-tui`, `leia-mcp`, `leia-runtime`, `leia-server`, `leia-core` and the runtime adapters `leia-lucene3`, `leia-lucene5`, `leia-lucene7`, `leia-lucene9` and `leia-lucene10` are done (ADR 0127). `runtime.support.Optionals` (`orNull`, `optionalInt`, `optionalLong`, `optionalDouble`) converts at the boundaries. `leia-client` set the pattern:
 - records keep their components, now `@Nullable`, and their accessors become nullable;
 - `OptionalInt` and `OptionalLong` become `Integer` and `Long`;
 - `Optional` stays as a return type and for locals;
@@ -18,7 +18,6 @@ Goal: every module follows the rule in `AGENTS.md`, "Code conventions". `Optiona
 
 Each module is one task, its callers included. The counts are from a regex scan of 2026-11-09 (parameters, fields and components, main + tests) and are approximate. Watch the AssertJ pitfalls: `isEmpty()` and `contains(x)` still compile on a `String` or `List` but mean something else; use `isNull()` and `isEqualTo(x)`.
 
-- [ ] **leia-lucene3, leia-lucene5, leia-lucene7, leia-lucene9, leia-lucene10** (~7–23 each). The adapters' own code and test-index writers, such as `Lucene5Presets.Preset` and helpers like `Lucene5Commits.format`. One task per runtime, or one for all.
 - [ ] **leia-protocol**: check that nothing outside its records takes or holds an `Optional`, such as a helper method or a `Methods` entry.
 
 ## Lucene 2 to 10 (ADR 0044)
