@@ -1204,17 +1204,13 @@ class Lucene9IndexTest {
                 Files.copy(file, copy.resolve(file.getFileName()));
             }
         }
-        try (Stream<Path> files = Files.list(copy)) {
-            Files.delete(files.filter(file -> file.toString().endsWith(".si"))
-                    .findFirst()
-                    .orElseThrow());
-        }
+        // _0 belongs to both commits, _1 only to the second: which file the directory lists first must not matter.
+        Files.delete(copy.resolve("_1.si"));
 
         Commits.CommitList list = new Lucene9Runtime().commits().orElseThrow().commits(copy, DirectoryKind.NIO);
 
         assertThat(list.unreadable()).hasSize(1);
-        assertThat(list.unreadable().getFirst().message()).startsWith("Corrupt index, missing file: _");
-        assertThat(list.unreadable().getFirst().message()).endsWith(".si").doesNotContain("/");
+        assertThat(list.unreadable().getFirst().message()).isEqualTo("Corrupt index, missing file: _1.si");
     }
 
     @Test

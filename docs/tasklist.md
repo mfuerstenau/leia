@@ -11,7 +11,7 @@ The lane is done: on new code the gate passes, and the accepted rules are whitel
 Next: check every module with the SonarQube MCP server (the `sonar-check` skill), and for each one make sure there are no open issues and code coverage is at least 85%:
 - [x] `leia-server`, `leia-core` (checked already).
 - [x] `leia-protocol`, `leia-runtime`, `leia-client`, `leia-mcp`, `leia-tui`, `leia-app` (0 open issues; coverage 86.6% to 99.8%, counted across modules by a merged jacoco report, kept local to the check).
-- [ ] The runtime adapters `leia-lucene3`, `leia-lucene5`, `leia-lucene7`, `leia-lucene9`, `leia-lucene10`.
+- [x] The runtime adapters `leia-lucene3`, `leia-lucene5`, `leia-lucene7`, `leia-lucene9`, `leia-lucene10` (0 open issues; coverage 86.5% to 91.2%, counted across modules).
 - [ ] `leia-test-servers`, if its code is analysed at all (test-only, so it may be excluded).
 
 Fix findings in the code, not with `@SuppressWarnings` or `//NOSONAR`; add tests for the coverage gaps. Mind that SonarJava doesn't follow assertions into other files' helpers (S2699): name shared assertion helpers `assert…`. Coverage counts only the module's own `test` task unless the init script also picks up `jarsTest`, `runtimeLoadTest` and `serverTest`.
