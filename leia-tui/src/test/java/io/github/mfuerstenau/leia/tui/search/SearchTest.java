@@ -1640,6 +1640,12 @@ class SearchTest {
                                 "title:red", "title:red", 2, TotalHitsRelation.EQUAL_TO, hits, 3, Optional.empty()))));
 
         assertThat(render(search)).contains("sorted by price ↑", "Sorted by", "4621819117588971520", "–");
+        // The direction in the title has the theme's sort marker colour (ADR 0130).
+        assertThat(TestScreens.stylesOf(TestScreens.buffer(frame -> search.render(frame, frame.area()), 100, 24), "↑"))
+                .extracting(style -> style.fg())
+                .contains(io.github.mfuerstenau.leia.tui.theme.Palette.current()
+                        .sortMarker()
+                        .fg());
     }
 
     @Test

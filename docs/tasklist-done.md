@@ -531,3 +531,7 @@ Goal: the runtimes are downloaded from within leia's UI, and `--download-runtime
 - [x] Fix what NullAway finds, and make JSpecify `compileOnly` in `leia-server`, `leia-tui` and `leia-app`.
 - [x] **leia-protocol, leia-lucene3, leia-lucene5, leia-lucene7, leia-lucene9** (ADR 0128): all marked `@NullMarked` (a `package-info.java` each; `RawPostings` and `SegmentFiles` in Lucene's package on the class). Optional components of the protocol stay `Optional*` (hard rule 3). In the adapters, nullable fields, locals and Lucene overrides are `@Nullable`, `Failures.message` and `getTargetException()` replace `getMessage()` and `getCause()`, and a preset's optional constructor goes through `Objects.requireNonNull`.
 - [x] Turn on Error Prone's default checks besides NullAway (ADR 0129): they fail the build through `-Werror`, on main and testFixtures. `MissingSummary` and `ArrayRecordComponent` are disabled by name; the 124 findings of the first run are fixed (stale `Optional` links, `@throws` on records, locale, parentheses, `split` limits, `Route.Runtime` renamed `Route.Loaded`, …) or suppressed where deliberate, with a reason.
+
+## Themes
+
+- [x] The sort markers in a colour of their own (ADR 0130): a slot `sortMarker`, optional with `accent` as its fallback, styles the `▲`/`▼` of the overview's and a document's sorted column (`Panels.sortedTitle`) and the `↑`/`↓` of the search hits' "sorted by" title (`Panels.sortMarked`). Bold violet in the bundled themes, only palette colours in `nord` (nord15) and the Solarized pair (violet), bold alone in `mono`.

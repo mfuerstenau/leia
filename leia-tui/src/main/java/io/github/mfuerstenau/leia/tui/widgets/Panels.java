@@ -11,6 +11,7 @@ import dev.tamboui.widgets.Clear;
 import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.block.BorderType;
 import dev.tamboui.widgets.block.Borders;
+import dev.tamboui.widgets.block.Title;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import dev.tamboui.widgets.table.Cell;
 import dev.tamboui.widgets.table.Row;
@@ -36,6 +37,49 @@ public final class Panels {
         }
         return block.build();
     }
+
+    /** A {@link #panel(String, boolean)} whose title has styles of its own, such as a {@link #sortMarked} one. */
+    public static Block panel(Line title, boolean focused) {
+        Palette palette = Palette.current();
+        Block.Builder block =
+                box().title(Title.from(title)).borderStyle(focused ? palette.borderFocused() : palette.border());
+        if (focused) {
+            block.borderType(BorderType.THICK);
+        }
+        return block.build();
+    }
+
+    /**
+     * The title of a sorted column: {@code title}, a space and {@code ▼} or {@code ▲} in the theme's {@link
+     * Palette#sortMarker() sortMarker} (ADR 0130).
+     */
+    public static Line sortedTitle(String title, boolean descending) {
+        return Line.from(
+                Span.raw(title + " "),
+                Span.styled(descending ? "▼" : "▲", Palette.current().sortMarker()));
+    }
+
+    /** {@code text} with every {@code ↑}, {@code ↓}, {@code ▲} and {@code ▼} in the theme's {@link Palette#sortMarker() sortMarker}. */
+    public static List<Span> sortMarked(String text) {
+        List<Span> spans = new ArrayList<>();
+        int start = 0;
+        for (int i = 0; i < text.length(); i++) {
+            if (SORT_MARKERS.indexOf(text.charAt(i)) >= 0) {
+                if (i > start) {
+                    spans.add(Span.raw(text.substring(start, i)));
+                }
+                spans.add(
+                        Span.styled(text.substring(i, i + 1), Palette.current().sortMarker()));
+                start = i + 1;
+            }
+        }
+        if (start < text.length()) {
+            spans.add(Span.raw(text.substring(start)));
+        }
+        return spans;
+    }
+
+    private static final String SORT_MARKERS = "↑↓▲▼";
 
     /**
      * A block with a border all round, for a popup or a frame, in the theme's {@link Palette#base()
@@ -93,6 +137,14 @@ public final class Panels {
      */
     public static Cell right(String text, int width) {
         return Cell.from(" ".repeat(Math.max(width - CharWidth.of(text), 0)) + text);
+    }
+
+    /** {@code line} right-aligned in a cell of {@code width}, its styles kept. */
+    public static Cell right(Line line, int width) {
+        List<Span> spans = new ArrayList<>();
+        spans.add(Span.raw(" ".repeat(Math.max(width - line.width(), 0))));
+        spans.addAll(line.spans());
+        return Cell.from(Line.from(spans));
     }
 
     /**

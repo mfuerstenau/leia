@@ -321,6 +321,7 @@ label         = 74
 selection     = black on 39
 selectionUnfocused = 39 bold
 secondary     = 244 italic
+sortMarker    = 170 bold
 logo          = gazelle
 ```
 
@@ -339,9 +340,10 @@ logo          = gazelle
 | `label` | a key or a label, in front of its value |
 | `selection`, `selectionUnfocused` | the selected row in the focused table, and in one without focus |
 | `secondary` | what comes second of its kind, such as a stacked token |
+| `sortMarker` | the `▲`/`▼` of a sorted column and the `↑`/`↓` of a search's sort; optional, `accent` if left out |
 | `logo` | the start screen's logo, an icon (not a style) |
 
-- Every slot is set once; `#` starts a comment.
+- Every slot is set once, and only `sortMarker` may be left out; `#` starts a comment.
 - A style is `none`, or a colour, `on` a background colour, and modifiers, each part optional.
 - A colour is a name (`red`, `light-blue`, `dark-gray`, …), 0–255, or `#RRGGBB` (24-bit).
 - Modifiers: `bold`, `dim`, `italic`, `underlined`, `reversed`.

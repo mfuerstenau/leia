@@ -3,6 +3,7 @@ package io.github.mfuerstenau.leia.tui.overview;
 import static io.github.mfuerstenau.leia.tui.TestScreens.key;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.tamboui.buffer.Buffer;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.tui.event.KeyModifiers;
@@ -22,6 +23,7 @@ import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
 import io.github.mfuerstenau.leia.protocol.terms.FieldTerms;
 import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
 import io.github.mfuerstenau.leia.tui.TestScreens;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -419,6 +421,15 @@ class OverviewTest {
         done(overview, "e", 5);
         assertThat(names(overview)).containsExactly("c", "a", "d", "b", "e");
         assertThat(render(overview, 140, 30)).contains("# ▲");
+        // Only the marker has the theme's sort marker colour, not the column's title (ADR 0130).
+        Buffer screen = TestScreens.buffer(frame -> overview.render(frame, frame.area()), 140, 30);
+        assertThat(TestScreens.stylesOf(screen, "▲"))
+                .singleElement()
+                .satisfies(style -> assertThat(style.fg())
+                        .isEqualTo(Palette.current().sortMarker().fg()));
+        assertThat(TestScreens.stylesOf(screen, "#"))
+                .allSatisfy(style -> assertThat(style.fg())
+                        .isNotEqualTo(Palette.current().sortMarker().fg()));
 
         overview.handleKey(key('S'));
         assertThat(names(overview)).containsExactly("e", "b", "d", "a", "c");

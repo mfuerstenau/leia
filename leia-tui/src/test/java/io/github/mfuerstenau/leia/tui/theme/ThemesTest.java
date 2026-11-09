@@ -75,6 +75,7 @@ class ThemesTest {
                         Style.EMPTY.reversed(),
                         Style.EMPTY.bold(),
                         Style.EMPTY.italic(),
+                        Style.EMPTY.magenta().bold(),
                         icon("gazelle")));
     }
 
@@ -100,6 +101,7 @@ class ThemesTest {
                         Style.EMPTY.reversed(),
                         Style.EMPTY.bold(),
                         Style.EMPTY.italic(),
+                        indexed(90).bold(),
                         icon("gazelle")));
         Color background = Color.hex("#2E3440");
         Color grey = Color.hex("#7B88A1");
@@ -126,6 +128,7 @@ class ThemesTest {
                         Style.EMPTY.reversed(),
                         Style.EMPTY.bold(),
                         Style.EMPTY.italic(),
+                        Style.EMPTY.fg(Color.hex("#B48EAD")).bold(),
                         icon("gazelle-aurora")));
     }
 
@@ -160,6 +163,7 @@ class ThemesTest {
                         Style.EMPTY.reversed(),
                         Style.EMPTY.bold(),
                         Style.EMPTY.italic(),
+                        Style.EMPTY.fg(violet).bold(),
                         icon("gazelle-solarized-dark")));
         assertThat(bundled("solarized-light"))
                 .isEqualTo(new Palette(
@@ -181,6 +185,7 @@ class ThemesTest {
                         Style.EMPTY.reversed(),
                         Style.EMPTY.bold(),
                         Style.EMPTY.italic(),
+                        Style.EMPTY.fg(violet).bold(),
                         icon("gazelle-solarized-light")));
     }
 
@@ -268,6 +273,22 @@ class ThemesTest {
         assertThat(palette.selection()).isEqualTo(Style.EMPTY.reversed());
         assertThat(palette.selectionUnfocused()).isEqualTo(Style.EMPTY.bold());
         assertThat(palette.secondary()).isEqualTo(Style.EMPTY.italic());
+    }
+
+    @ParameterizedTest
+    @FieldSource("BUNDLED")
+    void everyBundledThemeMarksTheSortBoldAndInAColourOfItsOwn(String id) {
+        // In a colour no table uses, so that the sorted column is found at a glance; mono has none (ADR 0130).
+        Palette palette = bundled(id);
+
+        assertThat(palette.sortMarker().addModifiers()).contains(dev.tamboui.style.Modifier.BOLD);
+        if (id.equals("mono")) {
+            assertThat(palette.sortMarker()).isEqualTo(Style.EMPTY.bold());
+        } else {
+            assertThat(palette.sortMarker().fg())
+                    .isPresent()
+                    .isNotEqualTo(palette.accent().fg());
+        }
     }
 
     @Test

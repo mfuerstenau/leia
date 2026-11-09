@@ -30,6 +30,8 @@ import org.jspecify.annotations.Nullable;
  * @param selection the selected row or tab, in the focused table
  * @param selectionUnfocused the selected row of a table that has no focus
  * @param secondary what comes second of its kind: a token at a position increment of 0
+ * @param sortMarker the {@code ▲}/{@code ▼} and {@code ↑}/{@code ↓} that mark the sorted column and its direction, in a
+ *     colour of their own; a theme file may leave it out for its {@code accent} (ADR 0130)
  * @param logo the start screen's logo, characters and colours of its own (ADR 0099)
  */
 public record Palette(
@@ -51,6 +53,7 @@ public record Palette(
         Style selection,
         Style selectionUnfocused,
         Style secondary,
+        Style sortMarker,
         Icon logo) {
 
     private static volatile @Nullable Theme current;

@@ -563,8 +563,12 @@ public final class Overview {
         List<Cell> header = new ArrayList<>();
         for (int i = 0; i < shown; i++) {
             Column column = COLUMNS.get(i);
-            String title = i == sort.column() ? column.title() + (descending ? " ▼" : " ▲") : column.title();
-            header.add(cell(column, title, columnWidths[i]));
+            if (i == sort.column()) {
+                Line title = Panels.sortedTitle(column.title(), descending);
+                header.add(column.rightAligned() ? right(title, columnWidths[i]) : Cell.from(title));
+            } else {
+                header.add(cell(column, column.title(), columnWidths[i]));
+            }
         }
         List<Row> rows = fieldRows.stream()
                 .map(texts -> {

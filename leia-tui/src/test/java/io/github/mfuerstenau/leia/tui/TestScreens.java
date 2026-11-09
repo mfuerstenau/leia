@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.tui;
 
 import dev.tamboui.buffer.Buffer;
 import dev.tamboui.layout.Rect;
+import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
@@ -38,6 +39,20 @@ public final class TestScreens {
             rows.add(row.toString());
         }
         return String.join("\n", rows);
+    }
+
+    /** The style of every cell of {@code buffer} that shows {@code symbol}, row by row. */
+    public static List<Style> stylesOf(Buffer buffer, String symbol) {
+        Rect area = buffer.area();
+        List<Style> styles = new ArrayList<>();
+        for (int y = area.y(); y < area.bottom(); y++) {
+            for (int x = area.x(); x < area.right(); x++) {
+                if (buffer.get(x, y).symbol().equals(symbol)) {
+                    styles.add(buffer.get(x, y).style());
+                }
+            }
+        }
+        return styles;
     }
 
     /** The text that {@code draw} puts on a screen of {@code width} by {@code height}. */

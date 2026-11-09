@@ -2178,13 +2178,14 @@ public final class Documents {
             });
         }
         String[] titles = {"#", "Field", FLAGS_LABEL, "Norm", "Value"};
-        String marker = descending ? " ▼" : " ▲";
-        String[] shown = titles.clone();
-        shown[sort.column()] += marker;
         int[] widths = columnWidths(titles, cells);
         Row header = Row.from(
-                        right(shown[0], widths[0]),
-                        Cell.from(shown[1]),
+                        sort.column() == 0
+                                ? right(Panels.sortedTitle(titles[0], descending), widths[0])
+                                : right(titles[0], widths[0]),
+                        sort.column() == 1
+                                ? Cell.from(Panels.sortedTitle(titles[1], descending))
+                                : Cell.from(titles[1]),
                         Cell.from(FLAGS_LABEL),
                         right("Norm", widths[3]),
                         Cell.from("Value"))

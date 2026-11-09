@@ -78,6 +78,9 @@ public final class ThemeParser {
             .map(RecordComponent::getName)
             .toList();
 
+    /** The roles a file may leave out, each with the role whose style it then takes (ADR 0130). */
+    private static final Map<String, String> OPTIONAL = Map.of("sortMarker", "accent");
+
     private ThemeParser() {}
 
     /** The palette of a theme file whose logo is one of leia's own icons. */
@@ -126,8 +129,9 @@ public final class ThemeParser {
                 throw new Invalid(where + "unknown role '" + key + "'");
             }
         }
-        List<String> missing = new ArrayList<>(
-                ROLES.stream().filter(role -> !styles.containsKey(role)).toList());
+        List<String> missing = new ArrayList<>(ROLES.stream()
+                .filter(role -> !styles.containsKey(role) && !OPTIONAL.containsKey(role))
+                .toList());
         if (logo == null) {
             missing.add(LOGO);
         }
@@ -153,11 +157,17 @@ public final class ThemeParser {
                 role(styles, "selection"),
                 role(styles, "selectionUnfocused"),
                 role(styles, "secondary"),
+                role(styles, "sortMarker"),
                 Objects.requireNonNull(logo));
     }
 
     private static Style role(Map<String, Style> styles, String role) {
-        return Objects.requireNonNull(styles.get(role));
+        Style style = styles.get(role);
+        if (style != null) {
+            return style;
+        }
+        // The check for missing roles let only an optional one through.
+        return Objects.requireNonNull(styles.get(Objects.requireNonNull(OPTIONAL.get(role))));
     }
 
     private static Style style(String where, String value) throws Invalid {

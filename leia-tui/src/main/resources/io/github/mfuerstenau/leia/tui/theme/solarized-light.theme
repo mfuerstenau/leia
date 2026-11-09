@@ -17,4 +17,5 @@ label         = bold
 selection     = reversed
 selectionUnfocused = bold
 secondary     = italic
+sortMarker    = #6C71C4 bold
 logo          = gazelle-solarized-light

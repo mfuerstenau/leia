@@ -2372,25 +2372,31 @@ public final class Search {
         return "searching… " + percent + "%";
     }
 
-    private String hitsTitle(HitList list, @Nullable String searching) {
-        String title = " " + list.total() + " in " + list.tookMillis + " ms ";
+    /** The title of the hit list; the sort's arrows in the theme's sort marker style (ADR 0130). */
+    private Line hitsTitle(HitList list, @Nullable String searching) {
+        List<Span> spans = new ArrayList<>();
+        spans.add(Span.raw(" " + list.total() + " in " + list.tookMillis + " ms "));
         Optional<String> sort = scoring.sortText();
         if (sort.isPresent()) {
-            title += "· sorted by " + sort.get() + " ";
+            spans.add(Span.raw("· sorted by "));
+            spans.addAll(Panels.sortMarked(sort.get()));
+            spans.add(Span.raw(" "));
         }
+        String state = "";
         if (searching != null) {
-            title += "· " + searching + " ";
+            state += "· " + searching + " ";
         } else if (highlighting != null && highlighting.error == null) {
-            title += "· finding the matches… ";
+            state += "· finding the matches… ";
         } else if (list.error != null) {
-            title += "· cannot read more ";
+            state += "· cannot read more ";
         } else if (!list.more && list.hits.size() >= StartSearchParams.MAX_WINDOW) {
-            title += "· first " + StartSearchParams.MAX_WINDOW + " only ";
+            state += "· first " + StartSearchParams.MAX_WINDOW + " only ";
         }
-        return title;
+        spans.add(Span.raw(state));
+        return Line.from(spans);
     }
 
-    private void renderHitList(Frame frame, Rect area, HitList list, String title, boolean focused) {
+    private void renderHitList(Frame frame, Rect area, HitList list, Line title, boolean focused) {
         if (list.hits.isEmpty()) {
             message(frame, area, title, focused, Line.from("No document matches."));
             return;
@@ -2473,6 +2479,10 @@ public final class Search {
     }
 
     private static void message(Frame frame, Rect area, String title, boolean focused, Line line) {
+        frame.renderWidget(Panels.wrapped(List.of(line), panel(title, focused), area), area);
+    }
+
+    private static void message(Frame frame, Rect area, Line title, boolean focused, Line line) {
         frame.renderWidget(Panels.wrapped(List.of(line), panel(title, focused), area), area);
     }
 

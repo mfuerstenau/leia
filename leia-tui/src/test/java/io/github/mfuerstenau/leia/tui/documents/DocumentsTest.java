@@ -49,6 +49,7 @@ import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.documents.Documents.Request;
 import io.github.mfuerstenau.leia.tui.points.PointFormats;
 import io.github.mfuerstenau.leia.tui.terms.Terms.TermHit;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.GoMenu;
 import io.github.mfuerstenau.leia.tui.widgets.Jump;
 import java.util.ArrayList;
@@ -327,6 +328,12 @@ class DocumentsTest {
 
         documents.handleKey(key('S'));
         assertThat(render(documents, 100, 20)).contains("Field ▼");
+        // Only the marker has the theme's sort marker colour (ADR 0130).
+        assertThat(TestScreens.stylesOf(
+                        TestScreens.buffer(frame -> documents.render(frame, frame.area()), 100, 20), "▼"))
+                .singleElement()
+                .satisfies(style -> assertThat(style.fg())
+                        .isEqualTo(Palette.current().sortMarker().fg()));
         assertThat(order(documents)).containsExactly("rank", "id", "extra", "body");
 
         // The next key starts ascending again.

@@ -17,4 +17,5 @@ label         = bold
 selection     = reversed
 selectionUnfocused = bold
 secondary     = italic
+sortMarker    = 90 bold
 logo          = gazelle

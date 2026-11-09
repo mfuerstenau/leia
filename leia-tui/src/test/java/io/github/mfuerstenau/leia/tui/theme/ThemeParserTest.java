@@ -113,6 +113,29 @@ class ThemeParserTest {
     }
 
     @Test
+    void aThemeWithoutSortMarkerTakesItsAccent() throws Exception {
+        // sortMarker came after ADR 0121, and is optional so that the user's themes keep loading (ADR 0130).
+        Palette palette = ThemeParser.parse("t.theme", "base = none\n" + REST);
+
+        assertThat(palette.sortMarker()).isEqualTo(Style.EMPTY.cyan());
+    }
+
+    @Test
+    void readsSortMarker() throws Exception {
+        Palette palette = ThemeParser.parse("t.theme", "base = none\nsortMarker = magenta bold\n" + REST);
+
+        assertThat(palette.sortMarker()).isEqualTo(Style.EMPTY.magenta().bold());
+    }
+
+    @Test
+    void refusesSortMarkerSetTwice() {
+        assertThatThrownBy(
+                        () -> ThemeParser.parse("t.theme", "base = none\nsortMarker = red\nsortMarker = blue\n" + REST))
+                .isInstanceOf(ThemeParser.Invalid.class)
+                .hasMessage("t.theme:3: sortMarker is set twice");
+    }
+
+    @Test
     void reportsEveryMissingRole() {
         assertThatThrownBy(() -> ThemeParser.parse("t.theme", "# nothing\nerror = red\n"))
                 .isInstanceOf(ThemeParser.Invalid.class)

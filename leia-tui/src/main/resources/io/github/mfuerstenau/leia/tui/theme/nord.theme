@@ -17,4 +17,5 @@ label         = bold
 selection     = reversed
 selectionUnfocused = bold
 secondary     = italic
+sortMarker    = #B48EAD bold
 logo          = gazelle-aurora
