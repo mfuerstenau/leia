@@ -45,6 +45,7 @@ import org.apache.lucene.analysis.StopwordAnalyzerBase;
 import org.apache.lucene.analysis.TokenFilterFactory;
 import org.apache.lucene.analysis.TokenizerFactory;
 import org.apache.lucene.analysis.WordlistLoader;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The analyzers that can be created by class name (ADR 0015): the public, concrete {@link Analyzer}
@@ -89,63 +90,62 @@ final class PresetAnalyzers {
      */
     private record Preset(
             Class<? extends Analyzer> type,
-            Optional<Constructor<? extends Analyzer>> noArguments,
-            Optional<Constructor<? extends Analyzer>> stopwords,
-            Optional<Constructor<? extends Analyzer>> stopwordsAndStemExclusion,
-            Optional<Constructor<? extends Analyzer>> stemOverride,
-            Optional<Constructor<? extends Analyzer>> japanese,
-            Optional<Constructor<? extends Analyzer>> korean,
-            Optional<Constructor<? extends Analyzer>> collation,
-            Optional<Constructor<? extends Analyzer>> japaneseCompletion,
-            Optional<Constructor<? extends Analyzer>> maxTokenLength,
-            Optional<Method> maxTokenLengthSetter,
-            Optional<Method> defaultStopSet) {
+            @Nullable Constructor<? extends Analyzer> noArguments,
+            @Nullable Constructor<? extends Analyzer> stopwords,
+            @Nullable Constructor<? extends Analyzer> stopwordsAndStemExclusion,
+            @Nullable Constructor<? extends Analyzer> stemOverride,
+            @Nullable Constructor<? extends Analyzer> japanese,
+            @Nullable Constructor<? extends Analyzer> korean,
+            @Nullable Constructor<? extends Analyzer> collation,
+            @Nullable Constructor<? extends Analyzer> japaneseCompletion,
+            @Nullable Constructor<? extends Analyzer> maxTokenLength,
+            @Nullable Method maxTokenLengthSetter,
+            @Nullable Method defaultStopSet) {
 
         String name() {
             return type.getSimpleName();
         }
 
         WordSetSupport stopwordSupport() {
-            if (stopwords.isEmpty()) {
+            if (stopwords == null) {
                 // JapaneseAnalyzer takes them only with its options.
-                return japanese.isPresent() && hasDefaultStopwords() ? WordSetSupport.OPTIONAL : WordSetSupport.NONE;
+                return japanese != null && hasDefaultStopwords() ? WordSetSupport.OPTIONAL : WordSetSupport.NONE;
             }
-            return noArguments.isPresent() ? WordSetSupport.OPTIONAL : WordSetSupport.REQUIRED;
+            return noArguments != null ? WordSetSupport.OPTIONAL : WordSetSupport.REQUIRED;
         }
 
         List<PresetOption> options() {
             List<PresetOption> options = new ArrayList<>();
-            if (maxTokenLength.isPresent() || maxTokenLengthSetter.isPresent()) {
+            if (maxTokenLength != null || maxTokenLengthSetter != null) {
                 options.add(PresetOption.MAX_TOKEN_LENGTH);
             }
-            if (stemOverride.isPresent() && hasDefaultStopwords()) {
+            if (stemOverride != null && hasDefaultStopwords()) {
                 options.add(PresetOption.STEM_OVERRIDE);
             }
-            if (japanese.isPresent() && hasDefaultStopwords()) {
+            if (japanese != null && hasDefaultStopwords()) {
                 options.add(PresetOption.JAPANESE);
             }
-            if (korean.isPresent()) {
+            if (korean != null) {
                 options.add(PresetOption.KOREAN);
             }
-            if (collation.isPresent()) {
+            if (collation != null) {
                 options.add(PresetOption.COLLATION);
             }
-            if (japaneseCompletion.isPresent()) {
+            if (japaneseCompletion != null) {
                 options.add(PresetOption.JAPANESE_COMPLETION);
             }
             return options;
         }
 
         WordSetSupport stemExclusionSupport() {
-            return stopwordsAndStemExclusion.isPresent() && hasDefaultStopwords()
+            return stopwordsAndStemExclusion != null && hasDefaultStopwords()
                     ? WordSetSupport.OPTIONAL
                     : WordSetSupport.NONE;
         }
 
         /** Whether the default stop words can be found, for stem exclusions without stop words. */
         boolean hasDefaultStopwords() {
-            return (StopwordAnalyzerBase.class.isAssignableFrom(type) && noArguments.isPresent())
-                    || defaultStopSet.isPresent();
+            return (StopwordAnalyzerBase.class.isAssignableFrom(type) && noArguments != null) || defaultStopSet != null;
         }
     }
 
@@ -188,87 +188,74 @@ final class PresetAnalyzers {
             throw new InvalidAnalyzerException("no preset analyzer '" + spec.className() + "'", null);
         }
         check(preset, spec);
-        Optional<CharArraySet> stopwords = given("stop words", spec.stopwords());
-        Optional<CharArraySet> stemExclusion = given("stem exclusions", spec.stemExclusion());
+        CharArraySet stopwords = given("stop words", spec.stopwords());
+        CharArraySet stemExclusion = given("stem exclusions", spec.stemExclusion());
         Analyzer analyzer;
-        if (preset.collation().isPresent()) {
-            Constructor<? extends Analyzer> constructor = preset.collation().orElseThrow();
-            Collation collation = spec.collation().orElse(new Collation("", Optional.empty(), Optional.empty()));
+        if (preset.collation() != null) {
+            Constructor<? extends Analyzer> constructor = preset.collation();
+            Collation collation = spec.collation() != null ? spec.collation() : new Collation("", null, null);
             return construct(preset, constructor, Collations.collator(constructor, collation));
-        } else if (spec.japaneseCompletion().isPresent()) {
-            Constructor<? extends Analyzer> constructor =
-                    preset.japaneseCompletion().orElseThrow();
+        } else if (spec.japaneseCompletion() != null) {
+            Constructor<? extends Analyzer> constructor = preset.japaneseCompletion();
             analyzer = construct(
                     preset,
                     constructor,
-                    KuromojiNori.japaneseCompletionArguments(
-                            constructor, spec.japaneseCompletion().orElseThrow()));
-        } else if (preset.japanese().isPresent()
-                && (stopwords.isPresent() || spec.japanese().isPresent())) {
-            Constructor<? extends Analyzer> constructor = preset.japanese().orElseThrow();
-            Japanese options =
-                    spec.japanese().orElse(new Japanese(Optional.empty(), Optional.empty(), Optional.empty()));
+                    KuromojiNori.japaneseCompletionArguments(constructor, spec.japaneseCompletion()));
+        } else if (preset.japanese() != null && (stopwords != null || spec.japanese() != null)) {
+            Constructor<? extends Analyzer> constructor = preset.japanese();
+            Japanese options = spec.japanese() != null ? spec.japanese() : new Japanese(null, null, null);
             CharArraySet set = stopwordsOrDefault(stopwords, preset);
             analyzer = construct(preset, constructor, KuromojiNori.japaneseArguments(constructor, set, options));
-        } else if (spec.korean().isPresent()) {
-            Constructor<? extends Analyzer> constructor = preset.korean().orElseThrow();
+        } else if (spec.korean() != null) {
+            Constructor<? extends Analyzer> constructor = preset.korean();
+            analyzer = construct(preset, constructor, KuromojiNori.koreanArguments(constructor, spec.korean()));
+        } else if (spec.stemOverride() != null) {
+            CharArrayMap<String> dictionary = read(spec.stemOverride());
             analyzer = construct(
                     preset,
-                    constructor,
-                    KuromojiNori.koreanArguments(constructor, spec.korean().orElseThrow()));
-        } else if (spec.stemOverride().isPresent()) {
-            CharArrayMap<String> dictionary = read(spec.stemOverride().orElseThrow());
-            analyzer = construct(
-                    preset,
-                    preset.stemOverride().orElseThrow(),
+                    preset.stemOverride(),
                     stopwordsOrDefault(stopwords, preset),
-                    stemExclusion.orElse(CharArraySet.EMPTY_SET),
+                    stemExclusion != null ? stemExclusion : CharArraySet.EMPTY_SET,
                     dictionary);
-        } else if (stemExclusion.isPresent()) {
+        } else if (stemExclusion != null) {
             analyzer = construct(
-                    preset,
-                    preset.stopwordsAndStemExclusion().orElseThrow(),
-                    stopwordsOrDefault(stopwords, preset),
-                    stemExclusion.orElseThrow());
-        } else if (stopwords.isPresent()) {
-            analyzer = construct(preset, preset.stopwords().orElseThrow(), stopwords.orElseThrow());
-        } else if (spec.maxTokenLength().isPresent() && preset.maxTokenLength().isPresent()) {
-            return construct(
-                    preset,
-                    preset.maxTokenLength().orElseThrow(),
-                    spec.maxTokenLength().getAsInt());
+                    preset, preset.stopwordsAndStemExclusion(), stopwordsOrDefault(stopwords, preset), stemExclusion);
+        } else if (stopwords != null) {
+            analyzer = construct(preset, preset.stopwords(), stopwords);
+        } else if (spec.maxTokenLength() != null && preset.maxTokenLength() != null) {
+            return construct(preset, preset.maxTokenLength(), spec.maxTokenLength());
         } else {
-            analyzer = construct(preset, preset.noArguments().orElseThrow());
+            analyzer = construct(preset, preset.noArguments());
         }
-        if (spec.maxTokenLength().isPresent()) {
-            setMaxTokenLength(preset, analyzer, spec.maxTokenLength().getAsInt());
+        if (spec.maxTokenLength() != null) {
+            setMaxTokenLength(preset, analyzer, spec.maxTokenLength());
         }
         return analyzer;
     }
 
     /** Whether the preset takes what {@code spec} gives it, and the values are in range. */
     private static void check(Preset preset, AnalyzerSpec.Preset spec) throws InvalidAnalyzerException {
-        if (spec.stopwords().isPresent() && preset.stopwordSupport() == WordSetSupport.NONE) {
+        if (spec.stopwords() != null && preset.stopwordSupport() == WordSetSupport.NONE) {
             throw new InvalidAnalyzerException(preset.name() + " takes no stop words", null);
         }
-        if (spec.stemExclusion().isPresent() && preset.stemExclusionSupport() == WordSetSupport.NONE) {
+        if (spec.stemExclusion() != null && preset.stemExclusionSupport() == WordSetSupport.NONE) {
             throw new InvalidAnalyzerException(preset.name() + " takes no stem exclusions", null);
         }
-        if (spec.stopwords().isEmpty() && preset.stopwordSupport() == WordSetSupport.REQUIRED) {
+        if (spec.stopwords() == null && preset.stopwordSupport() == WordSetSupport.REQUIRED) {
             throw new InvalidAnalyzerException(preset.name() + " needs stop words", null);
         }
-        checkOption(preset, spec.maxTokenLength().isPresent(), PresetOption.MAX_TOKEN_LENGTH, "max token length");
-        checkOption(preset, spec.stemOverride().isPresent(), PresetOption.STEM_OVERRIDE, "stem overrides");
-        checkOption(preset, spec.japanese().isPresent(), PresetOption.JAPANESE, "Japanese options");
-        checkOption(preset, spec.korean().isPresent(), PresetOption.KOREAN, "Korean options");
-        checkOption(preset, spec.collation().isPresent(), PresetOption.COLLATION, "collation");
+        checkOption(preset, spec.maxTokenLength() != null, PresetOption.MAX_TOKEN_LENGTH, "max token length");
+        checkOption(preset, spec.stemOverride() != null, PresetOption.STEM_OVERRIDE, "stem overrides");
+        checkOption(preset, spec.japanese() != null, PresetOption.JAPANESE, "Japanese options");
+        checkOption(preset, spec.korean() != null, PresetOption.KOREAN, "Korean options");
+        checkOption(preset, spec.collation() != null, PresetOption.COLLATION, "collation");
         checkOption(
                 preset,
-                spec.japaneseCompletion().isPresent(),
+                spec.japaneseCompletion() != null,
                 PresetOption.JAPANESE_COMPLETION,
                 "Japanese completion options");
-        if (spec.maxTokenLength().isPresent()) {
-            int length = spec.maxTokenLength().getAsInt();
+        if (spec.maxTokenLength() != null) {
+            int length = spec.maxTokenLength();
             if (length < 1 || length > MAX_TOKEN_LENGTH) {
                 throw new InvalidAnalyzerException(
                         "max token length: must be from 1 to " + MAX_TOKEN_LENGTH + ", not " + length, null);
@@ -287,7 +274,7 @@ final class PresetAnalyzers {
     private static void setMaxTokenLength(Preset preset, Analyzer analyzer, int length)
             throws InvalidAnalyzerException {
         try {
-            preset.maxTokenLengthSetter().orElseThrow().invoke(analyzer, length);
+            preset.maxTokenLengthSetter().invoke(analyzer, length);
         } catch (InvocationTargetException e) {
             analyzer.close();
             throw failed(preset, e.getCause());
@@ -297,26 +284,25 @@ final class PresetAnalyzers {
         }
     }
 
-    /** The set of {@code words}, if given. */
-    private static Optional<CharArraySet> given(String what, Optional<WordSet> words) throws InvalidAnalyzerException {
-        return words.isPresent() ? Optional.of(read(what, words.orElseThrow())) : Optional.empty();
+    /** The set of {@code words}; null if they are not given. */
+    private static @Nullable CharArraySet given(String what, @Nullable WordSet words) throws InvalidAnalyzerException {
+        return words != null ? read(what, words) : null;
     }
 
-    private static CharArraySet stopwordsOrDefault(Optional<CharArraySet> stopwords, Preset preset)
+    private static CharArraySet stopwordsOrDefault(@Nullable CharArraySet stopwords, Preset preset)
             throws InvalidAnalyzerException {
-        return stopwords.isPresent() ? stopwords.orElseThrow() : defaultStopwords(preset);
+        return stopwords != null ? stopwords : defaultStopwords(preset);
     }
 
     /** What the preset uses without stop words of its own. */
     private static CharArraySet defaultStopwords(Preset preset) throws InvalidAnalyzerException {
-        if (StopwordAnalyzerBase.class.isAssignableFrom(preset.type())
-                && preset.noArguments().isPresent()) {
-            try (Analyzer analyzer = construct(preset, preset.noArguments().orElseThrow())) {
+        if (StopwordAnalyzerBase.class.isAssignableFrom(preset.type()) && preset.noArguments() != null) {
+            try (Analyzer analyzer = construct(preset, preset.noArguments())) {
                 return ((StopwordAnalyzerBase) analyzer).getStopwordSet();
             }
         }
         try {
-            return (CharArraySet) preset.defaultStopSet().orElseThrow().invoke(null);
+            return (CharArraySet) preset.defaultStopSet().invoke(null);
         } catch (InvocationTargetException e) {
             throw failed(preset, e.getCause());
         } catch (ReflectiveOperationException | LinkageError e) {
@@ -521,17 +507,18 @@ final class PresetAnalyzers {
         }
         return Optional.of(new Preset(
                 analyzer,
-                noArguments,
-                stopwords,
-                constructor(analyzer, CharArraySet.class, CharArraySet.class),
-                constructor(analyzer, CharArraySet.class, CharArraySet.class, CharArrayMap.class),
-                KuromojiNori.japaneseConstructor(analyzer),
-                KuromojiNori.koreanConstructor(analyzer),
-                collation,
-                KuromojiNori.japaneseCompletionConstructor(analyzer),
-                className.equals(WHITESPACE) ? constructor(analyzer, int.class) : Optional.empty(),
-                maxTokenLengthSetter(analyzer),
-                defaultStopSet(analyzer)));
+                noArguments.orElse(null),
+                stopwords.orElse(null),
+                constructor(analyzer, CharArraySet.class, CharArraySet.class).orElse(null),
+                constructor(analyzer, CharArraySet.class, CharArraySet.class, CharArrayMap.class)
+                        .orElse(null),
+                KuromojiNori.japaneseConstructor(analyzer).orElse(null),
+                KuromojiNori.koreanConstructor(analyzer).orElse(null),
+                collation.orElse(null),
+                KuromojiNori.japaneseCompletionConstructor(analyzer).orElse(null),
+                className.equals(WHITESPACE) ? constructor(analyzer, int.class).orElse(null) : null,
+                maxTokenLengthSetter(analyzer).orElse(null),
+                defaultStopSet(analyzer).orElse(null)));
     }
 
     /** The public {@code setMaxTokenLength(int)}, if there is one. */

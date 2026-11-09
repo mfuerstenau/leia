@@ -4,9 +4,8 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
-import java.util.OptionalInt;
 import org.apache.lucene.analysis.Analyzer;
+import org.jspecify.annotations.Nullable;
 
 /**
  * What {@link Analyzers#build} makes an {@link Analyzer} from (ADR 0014): {@code StandardAnalyzer},
@@ -24,58 +23,41 @@ public sealed interface AnalyzerSpec {
      * words and stem exclusions of its own (ADR 0017), and the options it takes (ADR 0023).
      *
      * @param className the class's fully qualified name, one that {@link Analyzers#components} lists
-     * @param stopwords the stop words; empty for the analyzer's default ones
-     * @param stemExclusion the words kept from stemming; empty for none
-     * @param maxTokenLength the longest token; empty for the analyzer's default
-     * @param stemOverride the words whose stem is given; empty for the analyzer's default ones
-     * @param japanese the options of Kuromoji's {@code JapaneseAnalyzer}; empty for its defaults
-     * @param korean the options of Nori's {@code KoreanAnalyzer}; empty for its defaults
-     * @param collation the collator of a collation analyzer; empty for the root locale and the
+     * @param stopwords the stop words; null for the analyzer's default ones
+     * @param stemExclusion the words kept from stemming; null for none
+     * @param maxTokenLength the longest token; null for the analyzer's default
+     * @param stemOverride the words whose stem is given; null for the analyzer's default ones
+     * @param japanese the options of Kuromoji's {@code JapaneseAnalyzer}; null for its defaults
+     * @param korean the options of Nori's {@code KoreanAnalyzer}; null for its defaults
+     * @param collation the collator of a collation analyzer; null for the root locale and the
      *     collator's defaults (ADR 0038)
-     * @param japaneseCompletion the options of Kuromoji's {@code JapaneseCompletionAnalyzer}; empty
+     * @param japaneseCompletion the options of Kuromoji's {@code JapaneseCompletionAnalyzer}; null
      *     for its defaults (ADR 0038)
      */
     record Preset(
             String className,
-            Optional<WordSet> stopwords,
-            Optional<WordSet> stemExclusion,
-            OptionalInt maxTokenLength,
-            Optional<StemDictionary> stemOverride,
-            Optional<Japanese> japanese,
-            Optional<Korean> korean,
-            Optional<Collation> collation,
-            Optional<JapaneseCompletion> japaneseCompletion)
+            @Nullable WordSet stopwords,
+            @Nullable WordSet stemExclusion,
+            @Nullable Integer maxTokenLength,
+            @Nullable StemDictionary stemOverride,
+            @Nullable Japanese japanese,
+            @Nullable Korean korean,
+            @Nullable Collation collation,
+            @Nullable JapaneseCompletion japaneseCompletion)
             implements AnalyzerSpec {
 
         public Preset {
             Objects.requireNonNull(className);
-            Objects.requireNonNull(stopwords);
-            Objects.requireNonNull(stemExclusion);
-            Objects.requireNonNull(maxTokenLength);
-            Objects.requireNonNull(stemOverride);
-            Objects.requireNonNull(japanese);
-            Objects.requireNonNull(korean);
-            Objects.requireNonNull(collation);
-            Objects.requireNonNull(japaneseCompletion);
         }
 
         /** The analyzer with these word sets, and no other options. */
-        public Preset(String className, Optional<WordSet> stopwords, Optional<WordSet> stemExclusion) {
-            this(
-                    className,
-                    stopwords,
-                    stemExclusion,
-                    OptionalInt.empty(),
-                    Optional.empty(),
-                    Optional.empty(),
-                    Optional.empty(),
-                    Optional.empty(),
-                    Optional.empty());
+        public Preset(String className, @Nullable WordSet stopwords, @Nullable WordSet stemExclusion) {
+            this(className, stopwords, stemExclusion, null, null, null, null, null, null);
         }
 
         /** The analyzer with its default stop words and no stem exclusions. */
         public Preset(String className) {
-            this(className, Optional.empty(), Optional.empty());
+            this(className, null, null);
         }
     }
 
@@ -128,20 +110,16 @@ public sealed interface AnalyzerSpec {
 
     /**
      * The options of Kuromoji's {@code JapaneseAnalyzer} (ADR 0023); each is the analyzer's default
-     * when empty.
+     * when null.
      *
      * @param userDictionary a user dictionary file in Kuromoji's CSV format, UTF-8
      * @param mode the tokenizer's mode
      * @param stopTags the parts of speech that are removed, such as {@code 助詞-格助詞-一般}
      */
-    record Japanese(Optional<Path> userDictionary, Optional<JapaneseMode> mode, Optional<WordSet> stopTags) {
-
-        public Japanese {
-            Objects.requireNonNull(userDictionary);
-            Objects.requireNonNull(mode);
-            Objects.requireNonNull(stopTags);
-        }
-    }
+    record Japanese(
+            @Nullable Path userDictionary,
+            @Nullable JapaneseMode mode,
+            @Nullable WordSet stopTags) {}
 
     /** {@code JapaneseTokenizer.Mode}. */
     enum JapaneseMode {
@@ -152,7 +130,7 @@ public sealed interface AnalyzerSpec {
 
     /**
      * The options of Nori's {@code KoreanAnalyzer} (ADR 0023); each is the analyzer's default when
-     * empty.
+     * null.
      *
      * @param userDictionary a user dictionary file in Nori's format, UTF-8
      * @param decompoundMode what happens to compound words
@@ -160,18 +138,10 @@ public sealed interface AnalyzerSpec {
      * @param outputUnknownUnigrams whether unknown words are also split into unigrams
      */
     record Korean(
-            Optional<Path> userDictionary,
-            Optional<KoreanDecompoundMode> decompoundMode,
-            Optional<WordSet> stopTags,
-            Optional<Boolean> outputUnknownUnigrams) {
-
-        public Korean {
-            Objects.requireNonNull(userDictionary);
-            Objects.requireNonNull(decompoundMode);
-            Objects.requireNonNull(stopTags);
-            Objects.requireNonNull(outputUnknownUnigrams);
-        }
-    }
+            @Nullable Path userDictionary,
+            @Nullable KoreanDecompoundMode decompoundMode,
+            @Nullable WordSet stopTags,
+            @Nullable Boolean outputUnknownUnigrams) {}
 
     /** {@code KoreanTokenizer.DecompoundMode}. */
     enum KoreanDecompoundMode {
@@ -182,19 +152,19 @@ public sealed interface AnalyzerSpec {
 
     /**
      * The collator of a collation analyzer (ADR 0038): the JDK's or ICU's, whichever the analyzer
-     * takes; each setting is the collator's default when empty.
+     * takes; each setting is the collator's default when null.
      *
      * @param locale a BCP 47 language tag; empty for the root locale
      * @param strength the collator's strength
      * @param decomposition the collator's decomposition
      */
     record Collation(
-            String locale, Optional<CollationStrength> strength, Optional<CollationDecomposition> decomposition) {
+            String locale,
+            @Nullable CollationStrength strength,
+            @Nullable CollationDecomposition decomposition) {
 
         public Collation {
             Objects.requireNonNull(locale);
-            Objects.requireNonNull(strength);
-            Objects.requireNonNull(decomposition);
         }
     }
 
@@ -216,18 +186,13 @@ public sealed interface AnalyzerSpec {
 
     /**
      * The options of Kuromoji's {@code JapaneseCompletionAnalyzer} (ADR 0038); each is the
-     * analyzer's default when empty.
+     * analyzer's default when null.
      *
      * @param userDictionary a user dictionary file in Kuromoji's CSV format, UTF-8
      * @param mode the romanization mode
      */
-    record JapaneseCompletion(Optional<Path> userDictionary, Optional<JapaneseCompletionMode> mode) {
-
-        public JapaneseCompletion {
-            Objects.requireNonNull(userDictionary);
-            Objects.requireNonNull(mode);
-        }
-    }
+    record JapaneseCompletion(
+            @Nullable Path userDictionary, @Nullable JapaneseCompletionMode mode) {}
 
     /** {@code JapaneseCompletionFilter.Mode}. */
     enum JapaneseCompletionMode {
@@ -238,18 +203,19 @@ public sealed interface AnalyzerSpec {
     /**
      * A {@code CustomAnalyzer}: char filters, one tokenizer, then token filters.
      *
-     * @param configDir the directory that resource files are read from before the classpath; empty
+     * @param configDir the directory that resource files are read from before the classpath; null
      *     for the classpath only
      */
     record Custom(
-            List<Component> charFilters, Component tokenizer, List<Component> tokenFilters, Optional<Path> configDir)
-            implements AnalyzerSpec {
+            List<Component> charFilters,
+            Component tokenizer,
+            List<Component> tokenFilters,
+            @Nullable Path configDir) implements AnalyzerSpec {
 
         public Custom {
             charFilters = List.copyOf(charFilters);
             Objects.requireNonNull(tokenizer);
             tokenFilters = List.copyOf(tokenFilters);
-            Objects.requireNonNull(configDir);
         }
     }
 
@@ -259,13 +225,13 @@ public sealed interface AnalyzerSpec {
      *
      * @param analyzer what is wrapped
      */
-    record Wrapped(AnalyzerSpec analyzer, Optional<Shingles> shingles, Optional<LimitTokenCount> limitTokenCount)
-            implements AnalyzerSpec {
+    record Wrapped(
+            AnalyzerSpec analyzer,
+            @Nullable Shingles shingles,
+            @Nullable LimitTokenCount limitTokenCount) implements AnalyzerSpec {
 
         public Wrapped {
             Objects.requireNonNull(analyzer);
-            Objects.requireNonNull(shingles);
-            Objects.requireNonNull(limitTokenCount);
         }
     }
 

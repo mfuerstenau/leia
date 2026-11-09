@@ -9,7 +9,6 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.IntPoint;
@@ -42,8 +41,8 @@ class PointsTest {
             // 2000 + 2 points (one document has two), in 2000 + 1 documents.
             assertThat(tree.size()).isEqualTo(FIRST_SEGMENT + 2);
             assertThat(tree.docCount()).isEqualTo(FIRST_SEGMENT + 1);
-            assertThat(tree.min().map(PointsTest::value)).contains(-5);
-            assertThat(tree.max().map(PointsTest::value)).contains(FIRST_SEGMENT - 1);
+            assertThat(value(tree.min())).isEqualTo(-5);
+            assertThat(value(tree.max())).isEqualTo(FIRST_SEGMENT - 1);
             // The segment without the field is left out.
             assertThat(tree.segments())
                     .extracting(
@@ -54,8 +53,8 @@ class PointsTest {
                             segment -> value(segment.min()),
                             segment -> value(segment.max()))
                     .containsExactly(
-                            tuple(0, Optional.of("_0"), 0, (long) FIRST_SEGMENT, 0, FIRST_SEGMENT - 1),
-                            tuple(2, Optional.of("_2"), FIRST_SEGMENT + 1, 2L, -5, 7));
+                            tuple(0, "_0", 0, (long) FIRST_SEGMENT, 0, FIRST_SEGMENT - 1),
+                            tuple(2, "_2", FIRST_SEGMENT + 1, 2L, -5, 7));
         }
     }
 

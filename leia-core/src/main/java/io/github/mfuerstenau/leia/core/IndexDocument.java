@@ -1,10 +1,9 @@
 package io.github.mfuerstenau.leia.core;
 
 import java.util.List;
-import java.util.Optional;
-import java.util.OptionalLong;
 import org.apache.lucene.index.DocValuesType;
 import org.apache.lucene.util.BytesRef;
+import org.jspecify.annotations.Nullable;
 
 /**
  * What one document holds, field by field. A deleted document still has its data until a merge
@@ -21,19 +20,19 @@ public record IndexDocument(int docId, boolean deleted, List<Field> fields) {
      * scanning the field's terms.
      *
      * @param name the field name
-     * @param norm the document's norm; empty if the field has no norms or the document has none
+     * @param norm the document's norm; null if the field has no norms or the document has none
      * @param stored the stored values, in the order they were added
-     * @param docValues the document's doc values; empty if it has none in this field
+     * @param docValues the document's doc values; null if it has none in this field
      * @param hasTermVector whether the document has a term vector for the field
-     * @param vector the document's KNN vector; empty if it has none in this field (ADR 0040)
+     * @param vector the document's KNN vector; null if it has none in this field (ADR 0040)
      */
     public record Field(
             String name,
-            OptionalLong norm,
+            @Nullable Long norm,
             List<StoredValue> stored,
-            Optional<DocValues> docValues,
+            @Nullable DocValues docValues,
             boolean hasTermVector,
-            Optional<KnnVector> vector) {}
+            @Nullable KnnVector vector) {}
 
     /** A stored value, with the type it was stored as. */
     public sealed interface StoredValue {

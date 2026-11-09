@@ -11,7 +11,6 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.stream.Collectors;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
@@ -35,6 +34,7 @@ import org.apache.lucene.search.SortField;
 import org.apache.lucene.search.similarities.Similarity;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -52,7 +52,7 @@ class SimilarityAndSortTest {
     void sortsByNumericDocValuesWithTheScores() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             Map<Integer, Float> scores =
-                    search(index, BM25, Optional.empty(), 0).stream().collect(Collectors.toMap(Hit::docId, Hit::score));
+                    search(index, BM25, null, 0).stream().collect(Collectors.toMap(Hit::docId, Hit::score));
 
             List<Hit> hits = search(index, BM25, sort(index, "n", SortType.LONG, false), 0);
 
@@ -66,7 +66,7 @@ class SimilarityAndSortTest {
             assertThat(search(index, BM25, sort(index, "n", SortType.LONG, true), 0))
                     .extracting(Hit::docId)
                     .containsExactly(3, 0, 2, 1);
-            assertThat(search(index, BM25, Optional.empty(), 0))
+            assertThat(search(index, BM25, null, 0))
                     .allSatisfy(hit -> assertThat(hit.sortValues()).isEmpty());
         }
     }
@@ -91,14 +91,7 @@ class SimilarityAndSortTest {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             // n has 8-byte points; Lucene's pruning would refuse to read it as INT.
             List<Hit> ints = index.search(
-                            query(),
-                            BM25,
-                            sort(index, "n", SortType.INT, false),
-                            0,
-                            2,
-                            false,
-                            Optional.empty(),
-                            ScanProgress.NONE)
+                            query(), BM25, sort(index, "n", SortType.INT, false), 0, 2, false, null, ScanProgress.NONE)
                     .hits();
 
             assertThat(ints).extracting(Hit::docId).containsExactly(1, 2);
@@ -127,15 +120,15 @@ class SimilarityAndSortTest {
     void breaksTiesWithTheSecondSortFieldAndPages() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             FieldTypes fields = new FieldTypes(index);
-            Optional<Sort> sort = Optional.of(new Sort(
+            Sort sort = new Sort(
                     SortType.STRING.sortField(fields.get("group"), false),
-                    SortType.LONG.sortField(fields.get("n"), true)));
+                    SortType.LONG.sortField(fields.get("n"), true));
 
             List<Hit> hits = search(index, BM25, sort, 0);
 
             assertThat(hits).extracting(Hit::docId).containsExactly(0, 2, 3, 1);
             assertThat(hits.getFirst().sortValues()).containsExactly(term("a"), number(5L));
-            SearchResults page = index.search(query(), BM25, sort, 1, 2, true, Optional.empty(), ScanProgress.NONE);
+            SearchResults page = index.search(query(), BM25, sort, 1, 2, true, null, ScanProgress.NONE);
             assertThat(page.hits()).extracting(Hit::docId).containsExactly(2, 3);
         }
     }
@@ -200,14 +193,14 @@ class SimilarityAndSortTest {
     @Test
     void sortsByScoreAndDocumentId() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            List<Hit> lowestFirst = search(index, BM25, Optional.of(new Sort(SortType.score(true))), 0);
+            List<Hit> lowestFirst = search(index, BM25, new Sort(SortType.score(true)), 0);
             assertThat(lowestFirst).extracting(Hit::score).isSorted();
             assertThat(lowestFirst.getFirst().score())
                     .isLessThan(lowestFirst.getLast().score());
             assertThat(lowestFirst)
                     .allSatisfy(hit -> assertThat(hit.sortValues()).containsExactly(number(hit.score())));
 
-            List<Hit> highestId = search(index, BM25, Optional.of(new Sort(SortType.doc(true))), 0);
+            List<Hit> highestId = search(index, BM25, new Sort(SortType.doc(true)), 0);
             assertThat(highestId).extracting(Hit::docId).containsExactly(3, 2, 1, 0);
             assertThat(highestId.getFirst().sortValues()).containsExactly(number(3));
 
@@ -216,7 +209,7 @@ class SimilarityAndSortTest {
             List<Hit> grouped = search(
                     index,
                     BM25,
-                    Optional.of(new Sort(SortType.STRING.sortField(fields.get("group"), false), SortType.score(false))),
+                    new Sort(SortType.STRING.sortField(fields.get("group"), false), SortType.score(false)),
                     0);
             assertThat(grouped).extracting(Hit::docId).containsExactly(2, 0, 1, 3);
         }
@@ -304,33 +297,29 @@ class SimilarityAndSortTest {
         return Queries.term("body", new BytesRef("fox"));
     }
 
-    private static List<Hit> search(ReadOnlyIndex index, Similarity similarity, Optional<Sort> sort, int offset)
+    private static List<Hit> search(ReadOnlyIndex index, Similarity similarity, @Nullable Sort sort, int offset)
             throws IOException, InvalidQueryException {
-        return index.search(query(), similarity, sort, offset, 10, true, Optional.empty(), ScanProgress.NONE)
+        return index.search(query(), similarity, sort, offset, 10, true, null, ScanProgress.NONE)
                 .hits();
     }
 
     private static List<Hit> search(ReadOnlyIndex index, Similarity similarity, Query query)
             throws IOException, InvalidQueryException {
-        return index.search(query, similarity, Optional.empty(), 0, 10, true, Optional.empty(), ScanProgress.NONE)
+        return index.search(query, similarity, null, 0, 10, true, null, ScanProgress.NONE)
                 .hits();
     }
 
-    private static Optional<Sort> sort(ReadOnlyIndex index, String field, SortType type, boolean reverse) {
+    private static Sort sort(ReadOnlyIndex index, String field, SortType type, boolean reverse) {
         SortField sortField = type.sortField(new FieldTypes(index).get(field), reverse);
-        return Optional.of(new Sort(sortField));
+        return new Sort(sortField);
     }
 
-    private static Optional<Sort> sort(
-            ReadOnlyIndex index, String field, SortType type, boolean reverse, SortSelector selector) {
-        return Optional.of(
-                new Sort(type.sortField(new FieldTypes(index).get(field), reverse, selector, SortMissing.DEFAULT)));
+    private static Sort sort(ReadOnlyIndex index, String field, SortType type, boolean reverse, SortSelector selector) {
+        return new Sort(type.sortField(new FieldTypes(index).get(field), reverse, selector, SortMissing.DEFAULT));
     }
 
-    private static Optional<Sort> sort(
-            ReadOnlyIndex index, String field, SortType type, boolean reverse, SortMissing missing) {
-        return Optional.of(
-                new Sort(type.sortField(new FieldTypes(index).get(field), reverse, SortSelector.MIN, missing)));
+    private static Sort sort(ReadOnlyIndex index, String field, SortType type, boolean reverse, SortMissing missing) {
+        return new Sort(type.sortField(new FieldTypes(index).get(field), reverse, SortSelector.MIN, missing));
     }
 
     private static List<Integer> docIds(
@@ -342,15 +331,15 @@ class SimilarityAndSortTest {
     }
 
     private static SortValue none() {
-        return new SortValue(Optional.empty(), Optional.empty());
+        return new SortValue(null, null);
     }
 
     private static SortValue number(Number number) {
-        return new SortValue(Optional.of(number), Optional.empty());
+        return new SortValue(number, null);
     }
 
     private static SortValue term(String term) {
-        return new SortValue(Optional.empty(), Optional.of(new BytesRef(term)));
+        return new SortValue(null, new BytesRef(term));
     }
 
     private record FieldTypes(ReadOnlyIndex index) {

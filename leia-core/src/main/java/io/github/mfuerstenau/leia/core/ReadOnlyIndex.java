@@ -52,6 +52,7 @@ import org.apache.lucene.store.Directory;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.PriorityQueue;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A path opened for reading only (ADR 0021): one or more index directories, each with a {@link
@@ -341,7 +342,7 @@ public final class ReadOnlyIndex implements OpenedIndex {
                 part.reader().numDocs(),
                 part.reader().maxDoc(),
                 commit.getIndexCreatedVersionMajor(),
-                Optional.ofNullable(commit.getMinSegmentLuceneVersion()));
+                commit.getMinSegmentLuceneVersion());
     }
 
     /** {@code e} with the index directory it is about in front of its message. */
@@ -484,7 +485,7 @@ public final class ReadOnlyIndex implements OpenedIndex {
                             docBase + leaf.docBase,
                             leaf.reader().maxDoc(),
                             leaf.reader().numDocs(),
-                            Optional.ofNullable(info.getId()).map(HexFormat.of()::formatHex),
+                            info.getId() != null ? HexFormat.of().formatHex(info.getId()) : null,
                             List.copyOf(new TreeSet<>(info.files()))));
                 } else {
                     segments.add(new IndexStats.SegmentStats(
@@ -516,10 +517,9 @@ public final class ReadOnlyIndex implements OpenedIndex {
 
     private FieldStats fieldStats(FieldInfo field) throws IOException {
         Terms terms = MultiTerms.getTerms(reader, field.getName());
-        Optional<FieldStats.TermStats> termStats = terms == null
-                ? Optional.empty()
-                : Optional.of(new FieldStats.TermStats(
-                        terms.getDocCount(), terms.getSumDocFreq(), terms.getSumTotalTermFreq()));
+        FieldStats.TermStats termStats = terms == null
+                ? null
+                : new FieldStats.TermStats(terms.getDocCount(), terms.getSumDocFreq(), terms.getSumTotalTermFreq());
         return new FieldStats(
                 field.getName(),
                 field.getFieldNumber(),
@@ -691,13 +691,13 @@ public final class ReadOnlyIndex implements OpenedIndex {
      * the segment. {@code progress} receives the terms and points gone through and can stop the scan
      * by throwing a {@link CancellationException}. A deleted document is rebuilt too.
      *
-     * @param fields the fields with postings or points to rebuild, in order; empty for every such
+     * @param fields the fields with postings or points to rebuild, in order; null for every such
      *     field, in field number order
      * @throws IllegalArgumentException if there is no such document id or field, or a field has
      *     neither postings nor points
      * @throws IOException if reading the term vectors, postings or points fails
      */
-    public List<Reconstruct.Field> reconstruct(int docId, Optional<List<String>> fields, ScanProgress progress)
+    public List<Reconstruct.Field> reconstruct(int docId, @Nullable List<String> fields, ScanProgress progress)
             throws IOException {
         checkDocId(docId);
         return Reconstruct.reconstruct(reader, docId, rebuildableFields(fields), progress);
@@ -711,7 +711,7 @@ public final class ReadOnlyIndex implements OpenedIndex {
      *     neither postings nor points
      * @throws IOException if reading the term vectors fails
      */
-    public OptionalLong reconstructCount(int docId, Optional<List<String>> fields) throws IOException {
+    public OptionalLong reconstructCount(int docId, @Nullable List<String> fields) throws IOException {
         checkDocId(docId);
         return Reconstruct.count(reader, docId, rebuildableFields(fields));
     }
@@ -720,21 +720,21 @@ public final class ReadOnlyIndex implements OpenedIndex {
      * The given fields, which must have postings or points, or else every field with postings or
      * points in field number order.
      */
-    private List<String> rebuildableFields(Optional<List<String>> fields) {
-        if (fields.isEmpty()) {
+    private List<String> rebuildableFields(@Nullable List<String> fields) {
+        if (fields == null) {
             return StreamSupport.stream(fieldInfos.spliterator(), false)
                     .filter(ReadOnlyIndex::rebuildable)
                     .sorted(Comparator.comparingInt(FieldInfo::getFieldNumber))
                     .map(FieldInfo::getName)
                     .toList();
         }
-        for (String field : fields.get()) {
+        for (String field : fields) {
             checkField(field);
             if (!rebuildable(fieldInfos.fieldInfo(field))) {
                 throw new IllegalArgumentException("Field " + field + " has neither terms nor points");
             }
         }
-        return List.copyOf(fields.get());
+        return List.copyOf(fields);
     }
 
     private static boolean rebuildable(FieldInfo field) {
@@ -852,12 +852,12 @@ public final class ReadOnlyIndex implements OpenedIndex {
      * A page of a field's terms in term order, from {@code from} on, or from the first term. A field
      * without postings has no terms.
      *
-     * @param from the first term of the page, or else the term after it; empty for the first term
+     * @param from the first term of the page, or else the term after it; null for the first term
      * @param limit the most terms the page has, at least 1
      * @throws IllegalArgumentException if there is no such field, or {@code limit} is below 1
      * @throws IOException if reading the terms fails
      */
-    public TermPage terms(String field, Optional<BytesRef> from, int limit) throws IOException {
+    public TermPage terms(String field, @Nullable BytesRef from, int limit) throws IOException {
         checkField(field);
         checkLimit(limit);
         return TermReader.terms(reader, field, from, limit);
@@ -875,7 +875,7 @@ public final class ReadOnlyIndex implements OpenedIndex {
      * @throws IOException if reading the postings fails
      */
     public Optional<PostingsPage> postings(String field, BytesRef term, int fromDoc, int limit) throws IOException {
-        return postings(field, term, fromDoc, limit, Optional.empty());
+        return postings(field, term, fromDoc, limit, null);
     }
 
     /**
@@ -888,7 +888,7 @@ public final class ReadOnlyIndex implements OpenedIndex {
      * @throws IOException if reading the postings fails
      */
     public Optional<PostingsPage> postings(
-            String field, BytesRef term, int fromDoc, int limit, Optional<PostingsPage.Filter> filter)
+            String field, BytesRef term, int fromDoc, int limit, PostingsPage.@Nullable Filter filter)
             throws IOException {
         return postings(field, term, fromDoc, limit, filter, 0);
     }
@@ -903,7 +903,7 @@ public final class ReadOnlyIndex implements OpenedIndex {
      * @throws IOException if reading the postings fails
      */
     public Optional<PostingsPage> postings(
-            String field, BytesRef term, int fromDoc, int limit, Optional<PostingsPage.Filter> filter, int maxPositions)
+            String field, BytesRef term, int fromDoc, int limit, PostingsPage.@Nullable Filter filter, int maxPositions)
             throws IOException {
         checkField(field);
         if (maxPositions < 0) {
@@ -940,10 +940,10 @@ public final class ReadOnlyIndex implements OpenedIndex {
      * query is rewritten and the hits are collected. The search runs in the calling thread.
      *
      * @param similarity what scores the hits
-     * @param sort the order of the hits; empty for the best score first
+     * @param sort the order of the hits; null for the best score first
      * @param exactTotalHits whether to count every hit; otherwise counting stops after {@value
      *     Searcher#TOTAL_HITS_THRESHOLD}
-     * @param fields the stored fields to read per hit; empty for all of them
+     * @param fields the stored fields to read per hit; null for all of them
      * @throws IllegalArgumentException if {@code offset} is negative, {@code limit} is below 1, or their sum
      *     overflows
      * @throws InvalidQueryException if the rewritten query has too many clauses
@@ -952,20 +952,20 @@ public final class ReadOnlyIndex implements OpenedIndex {
     public SearchResults search(
             Query query,
             Similarity similarity,
-            Optional<Sort> sort,
+            @Nullable Sort sort,
             int offset,
             int limit,
             boolean exactTotalHits,
-            Optional<Set<String>> fields,
+            @Nullable Set<String> fields,
             ScanProgress progress)
             throws IOException, InvalidQueryException {
-        return search(query, similarity, sort, offset, limit, exactTotalHits, fields, Optional.empty(), progress);
+        return search(query, similarity, sort, offset, limit, exactTotalHits, fields, null, progress);
     }
 
     /**
-     * Runs {@code query} as {@link #search(Query, Similarity, Optional, int, int, boolean, Optional,
-     * ScanProgress)} does, and highlights the query's matches in each hit's stored text values in
-     * {@code fields} with {@code highlight} (ADR 0042): the best passages per field.
+     * Runs {@code query} as {@link #search(Query, Similarity, Sort, int, int, boolean, Set, ScanProgress)}
+     * does, and highlights the query's matches in each hit's stored text values in {@code fields}
+     * with {@code highlight} (ADR 0042): the best passages per field; null highlights nothing.
      *
      * @throws IllegalArgumentException if {@code offset} is negative, {@code limit} is below 1, or their sum
      *     overflows
@@ -975,12 +975,12 @@ public final class ReadOnlyIndex implements OpenedIndex {
     public SearchResults search(
             Query query,
             Similarity similarity,
-            Optional<Sort> sort,
+            @Nullable Sort sort,
             int offset,
             int limit,
             boolean exactTotalHits,
-            Optional<Set<String>> fields,
-            Optional<HighlightSpec> highlight,
+            @Nullable Set<String> fields,
+            @Nullable HighlightSpec highlight,
             ScanProgress progress)
             throws IOException, InvalidQueryException {
         checkLimit(limit);
@@ -1013,10 +1013,12 @@ public final class ReadOnlyIndex implements OpenedIndex {
      * @throws IOException if reading the index fails
      */
     public DocumentHighlight highlight(
-            Query query, HighlightSpec spec, int docId, Optional<String> field, int maxSpans, ScanProgress progress)
+            Query query, HighlightSpec spec, int docId, @Nullable String field, int maxSpans, ScanProgress progress)
             throws IOException, InvalidQueryException {
         checkDocId(docId);
-        field.ifPresent(this::checkField);
+        if (field != null) {
+            checkField(field);
+        }
         if (maxSpans < 0) {
             throw new IllegalArgumentException("maxSpans must not be negative: " + maxSpans);
         }
@@ -1055,12 +1057,12 @@ public final class ReadOnlyIndex implements OpenedIndex {
      * The stored values of the documents for {@link StoredScan#scan} and {@link StoredScan#matches}
      * (ADR 0055): of the live documents, and of the deleted ones too if {@code includeDeleted}.
      *
-     * @param fields the stored fields to read; empty for all of them
+     * @param fields the stored fields to read; null for all of them
      * @throws IllegalArgumentException if a field doesn't exist
      */
-    public StoredScan.StoredSource storedValues(Optional<Set<String>> fields, boolean includeDeleted) {
-        if (fields.isPresent()) {
-            fields.get().forEach(this::checkField);
+    public StoredScan.StoredSource storedValues(@Nullable Set<String> fields, boolean includeDeleted) {
+        if (fields != null) {
+            fields.forEach(this::checkField);
         }
         return StoredScan.source(reader, fields, includeDeleted);
     }
@@ -1070,7 +1072,7 @@ public final class ReadOnlyIndex implements OpenedIndex {
      * decompressed once (ADR 0114), as {@link StoredScan#segment} reads them.
      *
      * @param segment the segment's position in the reader's leaves, as {@link #storedFields} takes it
-     * @param fields the stored fields to read; empty for all of them
+     * @param fields the stored fields to read; null for all of them
      * @param next the first segment-local document at or after the one it gets that is to be read, or
      *     the segment's maxDoc or more for none
      * @throws IllegalArgumentException if there is no such segment or a field doesn't exist
@@ -1078,14 +1080,14 @@ public final class ReadOnlyIndex implements OpenedIndex {
      */
     public void storedValues(
             int segment,
-            Optional<Set<String>> fields,
+            @Nullable Set<String> fields,
             boolean includeDeleted,
             IntUnaryOperator next,
             Consumer<StoredScan.Document> sink,
             ScanProgress progress)
             throws IOException {
-        if (fields.isPresent()) {
-            fields.get().forEach(this::checkField);
+        if (fields != null) {
+            fields.forEach(this::checkField);
         }
         StoredScan.segment(leaf(segment).reader(), fields, includeDeleted, next, sink, progress);
     }

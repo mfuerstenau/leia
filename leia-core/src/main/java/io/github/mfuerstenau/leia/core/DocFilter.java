@@ -7,6 +7,7 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.util.FixedBitSet;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The documents that match a query (ADR 0031), or have a stored value in which a pattern is found
@@ -20,7 +21,7 @@ public final class DocFilter {
     private final String query;
     private final String rewrittenQuery;
     private final Duration took;
-    private final OptionalLong timedOutValues;
+    private final @Nullable Long timedOutValues;
 
     /**
      * A matching document.
@@ -31,10 +32,10 @@ public final class DocFilter {
     public record Match(int docId, int index) {}
 
     DocFilter(FixedBitSet matches, String query, String rewrittenQuery, Duration took) {
-        this(matches, query, rewrittenQuery, took, OptionalLong.empty());
+        this(matches, query, rewrittenQuery, took, null);
     }
 
-    DocFilter(FixedBitSet matches, String query, String rewrittenQuery, Duration took, OptionalLong timedOutValues) {
+    DocFilter(FixedBitSet matches, String query, String rewrittenQuery, Duration took, @Nullable Long timedOutValues) {
         this.matches = matches;
         this.matchCount = matches.cardinality();
         this.query = query;
@@ -86,7 +87,7 @@ public final class DocFilter {
      * their documents may be missing. Empty for a query.
      */
     public OptionalLong timedOutValues() {
-        return timedOutValues;
+        return timedOutValues != null ? OptionalLong.of(timedOutValues) : OptionalLong.empty();
     }
 
     /** Whether {@code docId} matches; an id outside 0 to maxDoc - 1 doesn't. */

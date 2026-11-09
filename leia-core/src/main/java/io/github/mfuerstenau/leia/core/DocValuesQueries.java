@@ -12,6 +12,7 @@ import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.MatchNoDocsQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.util.BytesRef;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Builds queries over the doc values of one field (ADR 0033). They read every value of the field
@@ -89,8 +90,8 @@ public final class DocValuesQueries {
                                 ? SortedSetDocValuesField.newSlowSetQuery(field.name, values.values())
                                 : SortedDocValuesField.newSlowSetQuery(field.name, values.values());
                     case DocValuesMatch.Range<BytesRef> range -> {
-                        BytesRef lower = range.lower().orElse(null);
-                        BytesRef upper = range.upper().orElse(null);
+                        BytesRef lower = range.lower();
+                        BytesRef upper = range.upper();
                         yield set
                                 ? SortedSetDocValuesField.newSlowRangeQuery(
                                         field.name, lower, upper, range.includeLower(), range.includeUpper())
@@ -116,9 +117,9 @@ public final class DocValuesQueries {
      */
     public static Query prefix(FieldInfo field, BytesRef prefix) {
         if (prefix.length == 0) {
-            return bytes(field, new DocValuesMatch.Range<>(Optional.empty(), Optional.empty(), true, true));
+            return bytes(field, new DocValuesMatch.Range<>(null, null, true, true));
         }
-        return bytes(field, new DocValuesMatch.Range<>(Optional.of(prefix), successor(prefix), true, false));
+        return bytes(field, new DocValuesMatch.Range<>(prefix, successor(prefix).orElse(null), true, false));
     }
 
     /**
@@ -143,9 +144,9 @@ public final class DocValuesQueries {
     private static Query longRange(FieldInfo field, boolean sorted, DocValuesMatch.Range<String> range) {
         long lower = Long.MIN_VALUE;
         long upper = Long.MAX_VALUE;
-        Optional<String> from = range.lower();
-        if (from.isPresent()) {
-            lower = DocValuesNumber.parseLong(from.get());
+        String from = range.lower();
+        if (from != null) {
+            lower = DocValuesNumber.parseLong(from);
             if (!range.includeLower()) {
                 if (lower == Long.MAX_VALUE) {
                     return none(field);
@@ -153,9 +154,9 @@ public final class DocValuesQueries {
                 lower++;
             }
         }
-        Optional<String> to = range.upper();
-        if (to.isPresent()) {
-            upper = DocValuesNumber.parseLong(to.get());
+        String to = range.upper();
+        if (to != null) {
+            upper = DocValuesNumber.parseLong(to);
             if (!range.includeUpper()) {
                 if (upper == Long.MIN_VALUE) {
                     return none(field);
@@ -175,29 +176,29 @@ public final class DocValuesQueries {
      */
     private static Query floatingRange(
             FieldInfo field, boolean sorted, DocValuesNumber number, DocValuesMatch.Range<String> range) {
-        Optional<Double> lower = range.lower().map(number::parseFloating);
-        Optional<Double> upper = range.upper().map(number::parseFloating);
-        if (lower.isPresent() && !range.includeLower()) {
-            if (lower.get() == Double.POSITIVE_INFINITY) {
+        Double lower = range.lower() != null ? number.parseFloating(range.lower()) : null;
+        Double upper = range.upper() != null ? number.parseFloating(range.upper()) : null;
+        if (lower != null && !range.includeLower()) {
+            if (lower == Double.POSITIVE_INFINITY) {
                 return none(field);
             }
-            lower = Optional.of(number.nextUp(lower.get()));
+            lower = number.nextUp(lower);
         }
-        if (upper.isPresent() && !range.includeUpper()) {
-            if (upper.get() == Double.NEGATIVE_INFINITY) {
+        if (upper != null && !range.includeUpper()) {
+            if (upper == Double.NEGATIVE_INFINITY) {
                 return none(field);
             }
-            upper = Optional.of(number.nextDown(upper.get()));
+            upper = number.nextDown(upper);
         }
-        if (lower.isPresent() && upper.isPresent() && Double.compare(lower.get(), upper.get()) > 0) {
+        if (lower != null && upper != null && Double.compare(lower, upper) > 0) {
             return none(field);
         }
         if (!number.raw()) {
             return longRange(
                     field,
                     sorted,
-                    lower.map(number::encode).orElse(Long.MIN_VALUE),
-                    upper.map(number::encode).orElse(Long.MAX_VALUE));
+                    lower != null ? number.encode(lower) : Long.MIN_VALUE,
+                    upper != null ? number.encode(upper) : Long.MAX_VALUE);
         }
         return rawRange(field, sorted, number, lower, upper);
     }
@@ -207,26 +208,19 @@ public final class DocValuesQueries {
      * negative ones reversed.
      */
     private static Query rawRange(
-            FieldInfo field, boolean sorted, DocValuesNumber number, Optional<Double> lower, Optional<Double> upper) {
+            FieldInfo field, boolean sorted, DocValuesNumber number, @Nullable Double lower, @Nullable Double upper) {
         BooleanQuery.Builder parts = new BooleanQuery.Builder();
-        if (upper.isEmpty() || Double.compare(upper.get(), 0.0) >= 0) {
-            double from = lower.filter(value -> Double.compare(value, 0.0) > 0).orElse(0.0);
+        if (upper == null || Double.compare(upper, 0.0) >= 0) {
+            double from = lower != null && Double.compare(lower, 0.0) > 0 ? lower : 0.0;
             parts.add(
                     longRange(
-                            field,
-                            sorted,
-                            number.encode(from),
-                            upper.map(number::encode).orElse(Long.MAX_VALUE)),
+                            field, sorted, number.encode(from), upper != null ? number.encode(upper) : Long.MAX_VALUE),
                     Occur.SHOULD);
         }
-        if (lower.isEmpty() || Double.compare(lower.get(), -0.0) <= 0) {
-            double from = upper.filter(value -> Double.compare(value, -0.0) < 0).orElse(-0.0);
+        if (lower == null || Double.compare(lower, -0.0) <= 0) {
+            double from = upper != null && Double.compare(upper, -0.0) < 0 ? upper : -0.0;
             parts.add(
-                    longRange(
-                            field,
-                            sorted,
-                            number.encode(from),
-                            lower.map(number::encode).orElse(-1L)),
+                    longRange(field, sorted, number.encode(from), lower != null ? number.encode(lower) : -1L),
                     Occur.SHOULD);
         }
         BooleanQuery query = parts.build();

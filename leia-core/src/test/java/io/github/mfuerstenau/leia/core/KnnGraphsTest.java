@@ -7,8 +7,6 @@ import static org.assertj.core.api.Assertions.tuple;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.Random;
 import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.codecs.FilterCodec;
@@ -60,9 +58,8 @@ class KnnGraphsTest {
                             KnnGraphs.SegmentGraph::docBase,
                             KnnGraphs.SegmentGraph::vectors)
                     .containsExactly(
-                            tuple(0, Optional.of("_0"), 0, FIRST_SEGMENT - 1),
-                            tuple(1, Optional.of("_1"), FIRST_SEGMENT, SECOND_SEGMENT));
-            KnnGraphs.Shape shape = graph.segments().getFirst().shape().orElseThrow();
+                            tuple(0, "_0", 0, FIRST_SEGMENT - 1), tuple(1, "_1", FIRST_SEGMENT, SECOND_SEGMENT));
+            KnnGraphs.Shape shape = graph.segments().getFirst().shape();
             List<Integer> sizes = shape.levelSizes();
             assertThat(sizes).hasSizeGreaterThanOrEqualTo(3);
             assertThat(sizes.getFirst()).isEqualTo(FIRST_SEGMENT - 1);
@@ -70,7 +67,7 @@ class KnnGraphsTest {
                 assertThat(sizes.get(level)).isPositive().isLessThan(sizes.get(level - 1));
             }
             assertThat(shape.entry().topLevel()).isEqualTo(sizes.size() - 1);
-            assertThat(shape.maxConn()).isEqualTo(OptionalInt.of(M));
+            assertThat(shape.maxConn()).isEqualTo(M);
         }
     }
 
@@ -80,9 +77,7 @@ class KnnGraphsTest {
             KnnGraphs.Graph graph = index.knnGraph("tiny");
 
             assertThat(graph.segments())
-                    .extracting(
-                            KnnGraphs.SegmentGraph::vectors,
-                            segment -> segment.shape().isPresent())
+                    .extracting(KnnGraphs.SegmentGraph::vectors, segment -> segment.shape() != null)
                     .containsExactly(tuple(TINY, false));
             assertThatThrownBy(() -> index.knnGraphNodes("tiny", 0, 0, 0, 10))
                     .isInstanceOf(IllegalArgumentException.class)
@@ -103,8 +98,7 @@ class KnnGraphsTest {
             assertThat(page.nodes().get(DELETED - 1).deleted()).isTrue();
             assertThat(page.nodes().stream().filter(KnnGraphs.Node::deleted)).hasSize(1);
 
-            KnnGraphs.Shape shape =
-                    index.knnGraph("hnsw").segments().getFirst().shape().orElseThrow();
+            KnnGraphs.Shape shape = index.knnGraph("hnsw").segments().getFirst().shape();
             int top = shape.levelSizes().size() - 1;
             KnnGraphs.NodePage topNodes = index.knnGraphNodes("hnsw", 0, top, 0, KnnGraphs.MAX_NODES);
             assertThat(topNodes.total()).isEqualTo(shape.levelSizes().get(top));
@@ -122,12 +116,8 @@ class KnnGraphsTest {
     @Test
     void readsANodesNeighboursOnEachOfItsLevelsWithTheirScores() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            KnnGraphs.Node entry = index.knnGraph("hnsw")
-                    .segments()
-                    .getFirst()
-                    .shape()
-                    .orElseThrow()
-                    .entry();
+            KnnGraphs.Node entry =
+                    index.knnGraph("hnsw").segments().getFirst().shape().entry();
             KnnGraphs.NodeNeighbours node = index.knnGraphNode("hnsw", 0, entry.ord());
 
             assertThat(node.node()).isEqualTo(entry);

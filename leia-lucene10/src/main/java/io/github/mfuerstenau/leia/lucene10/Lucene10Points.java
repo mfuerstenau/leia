@@ -24,12 +24,12 @@ final class Lucene10Points implements Points {
                 tree.bytesPerDimension(),
                 tree.size(),
                 tree.docCount(),
-                tree.min().map(Lucene10Index::bytes).orElse(null),
-                tree.max().map(Lucene10Index::bytes).orElse(null),
+                tree.min() != null ? Lucene10Index.bytes(tree.min()) : null,
+                tree.max() != null ? Lucene10Index.bytes(tree.max()) : null,
                 tree.segments().stream()
                         .map(segment -> new Segment(
                                 segment.segment(),
-                                segment.name().orElse(null),
+                                segment.name(),
                                 segment.docBase(),
                                 segment.maxDoc(),
                                 segment.size(),

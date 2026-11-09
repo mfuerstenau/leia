@@ -10,7 +10,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.TreeMap;
 import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.codecs.DocValuesFormat;
@@ -30,6 +29,7 @@ import org.apache.lucene.index.SegmentInfos;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.util.StringHelper;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Reads the commits of an index directory from their {@code segments_N}, {@code .si} and {@code
@@ -80,8 +80,7 @@ final class CommitReader {
         }
         List<CommitDetails.CommitFile> files = new ArrayList<>();
         for (String file : infos.files(true)) {
-            files.add(new CommitDetails.CommitFile(
-                    file, Optional.ofNullable(segmentOfFile.get(file)), size(directory, file)));
+            files.add(new CommitDetails.CommitFile(file, segmentOfFile.get(file), size(directory, file)));
         }
         files.sort(Comparator.comparing(CommitDetails.CommitFile::name));
 
@@ -127,11 +126,11 @@ final class CommitReader {
             Directory directory, SegmentCommitInfo segment, int docBase, List<CommitDetails.CommitFile> files) {
         SegmentInfo info = segment.info;
         List<CommitDetails.FieldFormats> fieldFormats = List.of();
-        Optional<IOException> fieldInfosError = Optional.empty();
+        IOException fieldInfosError = null;
         try {
             fieldFormats = fieldFormats(directory, segment);
         } catch (IOException e) {
-            fieldInfosError = Optional.of(e);
+            fieldInfosError = e;
         }
         return new CommitDetails.Segment(
                 info.name,
@@ -144,14 +143,14 @@ final class CommitReader {
                 generation(segment.getFieldInfosGen()),
                 generation(segment.getDocValuesGen()),
                 info.getVersion(),
-                Optional.ofNullable(info.getMinVersion()),
+                info.getMinVersion(),
                 info.getCodec().getName(),
                 formats(info.getCodec()),
                 fieldFormats,
                 fieldInfosError,
                 info.getUseCompoundFile(),
                 info.getHasBlocks(),
-                Optional.ofNullable(info.getIndexSort()).map(Object::toString),
+                info.getIndexSort() != null ? info.getIndexSort().toString() : null,
                 segmentSize(info.name, files),
                 new TreeMap<>(info.getDiagnostics()),
                 new TreeMap<>(info.getAttributes()));
@@ -203,37 +202,39 @@ final class CommitReader {
     }
 
     /** The per-field attribute {@code key} if the field has the format, otherwise the codec's. */
-    private static Optional<String> format(FieldInfo field, boolean has, String key, Object codecFormat) {
+    private static @Nullable String format(FieldInfo field, boolean has, String key, Object codecFormat) {
         if (!has) {
-            return Optional.empty();
+            return null;
         }
-        return Optional.of(Optional.ofNullable(field.getAttribute(key)).orElseGet(() -> formatName(codecFormat)));
+        String attribute = field.getAttribute(key);
+        return attribute != null ? attribute : formatName(codecFormat);
     }
 
     /** Lucene's generations are -1 when there is none. */
-    private static OptionalLong generation(long generation) {
-        return generation < 0 ? OptionalLong.empty() : OptionalLong.of(generation);
+    private static @Nullable Long generation(long generation) {
+        return generation < 0 ? null : Long.valueOf(generation);
     }
 
-    private static OptionalLong size(Directory directory, String file) throws IOException {
+    private static @Nullable Long size(Directory directory, String file) throws IOException {
         try {
-            return OptionalLong.of(directory.fileLength(file));
+            return directory.fileLength(file);
         } catch (NoSuchFileException | FileNotFoundException _) {
-            return OptionalLong.empty();
+            return null;
         }
     }
 
-    private static OptionalLong segmentSize(String segment, List<CommitDetails.CommitFile> files) {
+    private static @Nullable Long segmentSize(String segment, List<CommitDetails.CommitFile> files) {
         long sum = 0;
         for (CommitDetails.CommitFile file : files) {
-            if (file.segment().filter(segment::equals).isPresent()) {
-                if (file.size().isEmpty()) {
-                    return OptionalLong.empty();
+            if (segment.equals(file.segment())) {
+                Long size = file.size();
+                if (size == null) {
+                    return null;
                 }
-                sum += file.size().getAsLong();
+                sum += size;
             }
         }
-        return OptionalLong.of(sum);
+        return sum;
     }
 
     private static CommitDetails.CodecFormats formats(Codec codec) {

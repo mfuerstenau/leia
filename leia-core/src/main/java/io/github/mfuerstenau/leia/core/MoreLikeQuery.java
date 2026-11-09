@@ -73,11 +73,11 @@ final class MoreLikeQuery extends Query {
         mlt.setFieldNames(options.fields().toArray(String[]::new));
         mlt.setMinTermFreq(options.minTermFreq());
         mlt.setMinDocFreq(options.minDocFreq());
-        mlt.setMaxDocFreq(options.maxDocFreq().orElse(MoreLikeThis.DEFAULT_MAX_DOC_FREQ));
+        mlt.setMaxDocFreq(Objects.requireNonNullElse(options.maxDocFreq(), MoreLikeThis.DEFAULT_MAX_DOC_FREQ));
         mlt.setMaxQueryTerms(options.maxQueryTerms());
         mlt.setBoost(options.boost());
         mlt.setMinWordLen(options.minWordLen());
-        mlt.setMaxWordLen(options.maxWordLen().orElse(MoreLikeThis.DEFAULT_MAX_WORD_LENGTH));
+        mlt.setMaxWordLen(Objects.requireNonNullElse(options.maxWordLen(), MoreLikeThis.DEFAULT_MAX_WORD_LENGTH));
         mlt.setStopWords(options.stopWords().isEmpty() ? null : options.stopWords());
         return switch (source) {
             case Source.Doc(int docId) -> mlt.like(docId);
@@ -119,7 +119,9 @@ final class MoreLikeQuery extends Query {
                 .append(options.minTermFreq())
                 .append(", minDocFreq ")
                 .append(options.minDocFreq());
-        options.maxDocFreq().ifPresent(max -> text.append(", maxDocFreq ").append(max));
+        if (options.maxDocFreq() != null) {
+            text.append(", maxDocFreq ").append(options.maxDocFreq());
+        }
         text.append(", maxQueryTerms ").append(options.maxQueryTerms());
         if (options.boost()) {
             text.append(", boost");
@@ -127,7 +129,9 @@ final class MoreLikeQuery extends Query {
         if (options.minWordLen() > 0) {
             text.append(", minWordLen ").append(options.minWordLen());
         }
-        options.maxWordLen().ifPresent(max -> text.append(", maxWordLen ").append(max));
+        if (options.maxWordLen() != null) {
+            text.append(", maxWordLen ").append(options.maxWordLen());
+        }
         if (!options.stopWords().isEmpty()) {
             text.append(", stopWords ")
                     .append(options.stopWords().stream().sorted().toList());

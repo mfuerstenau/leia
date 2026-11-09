@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Optional;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FilterLeafReader;
 import org.apache.lucene.index.IndexReader;
@@ -14,6 +13,7 @@ import org.apache.lucene.index.PointValues;
 import org.apache.lucene.index.SegmentReader;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A point field's BKD tree, segment by segment (ADR 0041). Moving through the tree reads only its
@@ -31,8 +31,8 @@ public final class Points {
      *     only these
      * @param size the points, deleted documents' included
      * @param docCount the documents with points, summed over the segments
-     * @param min the smallest value of each index dimension, packed; empty without points
-     * @param max the largest value of each index dimension, packed; empty without points
+     * @param min the smallest value of each index dimension, packed; null without points
+     * @param max the largest value of each index dimension, packed; null without points
      * @param segments the segments with points in the field, in reader order
      */
     public record Tree(
@@ -42,20 +42,20 @@ public final class Points {
             int bytesPerDimension,
             long size,
             long docCount,
-            Optional<BytesRef> min,
-            Optional<BytesRef> max,
+            @Nullable BytesRef min,
+            @Nullable BytesRef max,
             List<Segment> segments) {}
 
     /**
      * The tree of a field in one segment.
      *
      * @param segment the segment's position among the reader's leaves
-     * @param name the segment's name, such as {@code _0}; empty if the leaf isn't a segment reader
+     * @param name the segment's name, such as {@code _0}; null if the leaf isn't a segment reader
      * @param docBase the document id of the segment's first document
      */
     public record Segment(
             int segment,
-            Optional<String> name,
+            @Nullable String name,
             int docBase,
             int maxDoc,
             long size,
@@ -119,8 +119,8 @@ public final class Points {
                 field.getPointNumBytes(),
                 segments.stream().mapToLong(Segment::size).sum(),
                 segments.stream().mapToLong(Segment::docCount).sum(),
-                Optional.ofNullable(min).map(BytesRef::new),
-                Optional.ofNullable(max).map(BytesRef::new),
+                min != null ? new BytesRef(min) : null,
+                max != null ? new BytesRef(max) : null,
                 List.copyOf(segments));
     }
 
@@ -213,9 +213,7 @@ public final class Points {
                 leaf);
     }
 
-    private static Optional<String> segmentName(LeafReader leaf) {
-        return FilterLeafReader.unwrap(leaf) instanceof SegmentReader segment
-                ? Optional.of(segment.getSegmentName())
-                : Optional.empty();
+    private static @Nullable String segmentName(LeafReader leaf) {
+        return FilterLeafReader.unwrap(leaf) instanceof SegmentReader segment ? segment.getSegmentName() : null;
     }
 }

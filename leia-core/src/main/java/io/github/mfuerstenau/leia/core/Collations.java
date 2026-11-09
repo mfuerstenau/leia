@@ -66,9 +66,9 @@ final class Collations {
 
     private static Collator jdk(Locale locale, Collation collation) throws InvalidAnalyzerException {
         Collator collator = Collator.getInstance(locale);
-        if (collation.strength().isPresent()) {
+        if (collation.strength() != null) {
             collator.setStrength(
-                    switch (collation.strength().orElseThrow()) {
+                    switch (collation.strength()) {
                         case PRIMARY -> Collator.PRIMARY;
                         case SECONDARY -> Collator.SECONDARY;
                         case TERTIARY -> Collator.TERTIARY;
@@ -78,9 +78,9 @@ final class Collations {
                                     "collation: the JDK's collator has no strength QUATERNARY", null);
                     });
         }
-        if (collation.decomposition().isPresent()) {
+        if (collation.decomposition() != null) {
             collator.setDecomposition(
-                    switch (collation.decomposition().orElseThrow()) {
+                    switch (collation.decomposition()) {
                         case NO -> Collator.NO_DECOMPOSITION;
                         case CANONICAL -> Collator.CANONICAL_DECOMPOSITION;
                         case FULL -> Collator.FULL_DECOMPOSITION;
@@ -91,19 +91,19 @@ final class Collations {
 
     /** ICU's collator for the language tag, with its {@code -u-} keywords. */
     private static Object icu(Class<?> collatorType, Collation collation) throws InvalidAnalyzerException {
-        if (collation.decomposition().orElse(null) == CollationDecomposition.FULL) {
+        if (collation.decomposition() == CollationDecomposition.FULL) {
             throw new InvalidAnalyzerException("collation: ICU's collator has no decomposition FULL", null);
         }
         try {
             Class<?> localeType = Class.forName(ICU_LOCALE, true, collatorType.getClassLoader());
             Object locale = localeType.getMethod("forLanguageTag", String.class).invoke(null, collation.locale());
             Object collator = collatorType.getMethod("getInstance", localeType).invoke(null, locale);
-            if (collation.strength().isPresent()) {
-                CollationStrength strength = collation.strength().orElseThrow();
+            if (collation.strength() != null) {
+                CollationStrength strength = collation.strength();
                 set(collatorType, collator, "setStrength", strength.name());
             }
-            if (collation.decomposition().isPresent()) {
-                CollationDecomposition decomposition = collation.decomposition().orElseThrow();
+            if (collation.decomposition() != null) {
+                CollationDecomposition decomposition = collation.decomposition();
                 set(collatorType, collator, "setDecomposition", decomposition.name() + "_DECOMPOSITION");
             }
             return collator;

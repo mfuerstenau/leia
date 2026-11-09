@@ -6,7 +6,6 @@ import io.github.mfuerstenau.leia.core.IndexOpenException;
 import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.support.Failures;
-import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Optional;
@@ -49,8 +48,7 @@ final class Lucene10Commits implements Commits {
                     commit(details.commit()),
                     details.segments().stream().map(Lucene10Commits::segment).toList(),
                     details.files().stream()
-                            .map(file -> new CommitFile(
-                                    file.name(), file.segment().orElse(null), Optionals.orNull(file.size())))
+                            .map(file -> new CommitFile(file.name(), file.segment(), file.size()))
                             .toList()));
         }
     }
@@ -85,10 +83,10 @@ final class Lucene10Commits implements Commits {
                 segment.maxDoc(),
                 segment.docBase(),
                 segment.delCount(),
-                Optionals.orNull(segment.delGen()),
+                segment.delGen(),
                 segment.version().toString(),
                 segment.compound(),
-                Optionals.orNull(segment.sizeInBytes()),
+                segment.sizeInBytes(),
                 segment.diagnostics(),
                 segment.attributes(),
                 segment.id(),
@@ -108,17 +106,14 @@ final class Lucene10Commits implements Commits {
                         formats.compound()),
                 segment.fieldFormats().stream()
                         .map(field -> new FieldFormats(
-                                field.field(),
-                                field.postings().orElse(null),
-                                field.docValues().orElse(null),
-                                field.knnVectors().orElse(null)))
+                                field.field(), field.postings(), field.docValues(), field.knnVectors()))
                         .toList(),
                 segment.fieldInfosMessage().orElse(null),
-                Optionals.orNull(segment.fieldInfosGen()),
-                Optionals.orNull(segment.docValuesGen()),
+                segment.fieldInfosGen(),
+                segment.docValuesGen(),
                 segment.softDelCount(),
-                segment.minVersion().map(Version::toString).orElse(null),
-                segment.indexSort().orElse(null),
+                segment.minVersion() != null ? segment.minVersion().toString() : null,
+                segment.indexSort(),
                 segment.hasBlocks());
     }
 }

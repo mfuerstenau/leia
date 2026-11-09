@@ -9,7 +9,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.function.Predicate;
 import java.util.stream.StreamSupport;
 import org.apache.lucene.index.BinaryDocValues;
@@ -31,6 +30,7 @@ import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Reads one document from the segment that holds it, with the segment's own document id (ADR
@@ -62,18 +62,18 @@ final class DocumentReader {
             FieldInfo segmentField = leaf.getFieldInfos().fieldInfo(name);
             result.add(new IndexDocument.Field(
                     name,
-                    segmentField != null && segmentField.hasNorms() ? norm(leaf, name, doc) : OptionalLong.empty(),
+                    segmentField != null && segmentField.hasNorms() ? norm(leaf, name, doc) : null,
                     List.copyOf(stored.values.getOrDefault(name, List.of())),
-                    segmentField != null ? docValues(leaf, segmentField, doc) : Optional.empty(),
+                    segmentField != null ? docValues(leaf, segmentField, doc).orElse(null) : null,
                     termVectors != null && termVectors.terms(name) != null,
-                    segmentField != null ? vector(leaf, segmentField, doc) : Optional.empty()));
+                    segmentField != null ? vector(leaf, segmentField, doc).orElse(null) : null));
         }
         return new IndexDocument(docId, deleted, List.copyOf(result));
     }
 
-    private static OptionalLong norm(LeafReader leaf, String field, int doc) throws IOException {
+    private static @Nullable Long norm(LeafReader leaf, String field, int doc) throws IOException {
         NumericDocValues norms = leaf.getNormValues(field);
-        return norms != null && norms.advanceExact(doc) ? OptionalLong.of(norms.longValue()) : OptionalLong.empty();
+        return norms != null && norms.advanceExact(doc) ? Long.valueOf(norms.longValue()) : null;
     }
 
     private static Optional<DocValues> docValues(LeafReader leaf, FieldInfo field, int doc) throws IOException {

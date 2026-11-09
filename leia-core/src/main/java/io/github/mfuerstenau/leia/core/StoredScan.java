@@ -6,7 +6,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.IntUnaryOperator;
@@ -16,6 +15,7 @@ import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.ReaderUtil;
 import org.apache.lucene.index.StoredFields;
 import org.apache.lucene.util.Bits;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The stored values of documents, as the stored scan of the server reads them through a runtime (ADR
@@ -58,11 +58,11 @@ public final class StoredScan {
     }
 
     /**
-     * The stored values of {@code reader} in {@code fields} (all if empty): of the live documents,
+     * The stored values of {@code reader} in {@code fields} (all if null): of the live documents,
      * and of the deleted ones too if {@code includeDeleted}. It keeps each leaf's stored fields across
      * reads, so a scan opens them once.
      */
-    static StoredSource source(IndexReader reader, Optional<Set<String>> fields, boolean includeDeleted) {
+    static StoredSource source(IndexReader reader, @Nullable Set<String> fields, boolean includeDeleted) {
         List<LeafReaderContext> leaves = reader.leaves();
         StoredFields[] storedFields = new StoredFields[leaves.size()];
         return new StoredSource() {
@@ -92,8 +92,7 @@ public final class StoredScan {
                     if (storedFields[leafIndex] == null) {
                         storedFields[leafIndex] = leaf.storedFields();
                     }
-                    StoredValues values = new StoredValues(
-                            name -> fields.isEmpty() || fields.get().contains(name));
+                    StoredValues values = new StoredValues(name -> fields == null || fields.contains(name));
                     storedFields[leafIndex].document(doc, values);
                     documents.add(new Document(docId, deleted, values.values));
                 }
@@ -103,7 +102,7 @@ public final class StoredScan {
     }
 
     /**
-     * The stored values of the documents of {@code leaf} in {@code fields} (all if empty), in document
+     * The stored values of the documents of {@code leaf} in {@code fields} (all if null), in document
      * order, through the codec's merge instance, which decompresses each block of documents once (ADR
      * 0114): of the documents {@code next} names, live ones and the deleted ones too if {@code
      * includeDeleted}. The documents' ids are those in the leaf.
@@ -114,7 +113,7 @@ public final class StoredScan {
      */
     static void segment(
             LeafReader leaf,
-            Optional<Set<String>> fields,
+            @Nullable Set<String> fields,
             boolean includeDeleted,
             IntUnaryOperator next,
             Consumer<Document> sink,
@@ -134,8 +133,7 @@ public final class StoredScan {
             if (deleted && !includeDeleted) {
                 continue;
             }
-            StoredValues values =
-                    new StoredValues(name -> fields.isEmpty() || fields.get().contains(name));
+            StoredValues values = new StoredValues(name -> fields == null || fields.contains(name));
             stored.document(doc, values);
             sink.accept(new Document(doc, deleted, values.values));
         }

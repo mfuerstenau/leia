@@ -2,9 +2,9 @@ package io.github.mfuerstenau.leia.core;
 
 import java.time.Duration;
 import java.util.List;
-import java.util.Optional;
 import org.apache.lucene.search.TotalHits;
 import org.apache.lucene.util.BytesRef;
+import org.jspecify.annotations.Nullable;
 
 /**
  * One page of the hits of a search (ADR 0010).
@@ -14,7 +14,7 @@ import org.apache.lucene.util.BytesRef;
  * @param totalHits how many documents match: exactly, or at least this many if counting stopped
  * @param hits the hits of the page, best first
  * @param took how long the search took
- * @param moreLikeThisTerms for a More-Like-This query, the terms it chose, best first (ADR 0028)
+ * @param moreLikeThisTerms for a More-Like-This query, the terms it chose, best first; null for any other query (ADR 0028)
  */
 public record SearchResults(
         String query,
@@ -22,7 +22,7 @@ public record SearchResults(
         TotalHits totalHits,
         List<Hit> hits,
         Duration took,
-        Optional<List<LikeTerm>> moreLikeThisTerms) {
+        @Nullable List<LikeTerm> moreLikeThisTerms) {
 
     /**
      * A matching document.
@@ -65,17 +65,18 @@ public record SearchResults(
 
     /**
      * The value a hit was sorted by in one sort field (ADR 0012, ADR 0025): a number (of a numeric
-     * field, a score or a document id), or a term of a {@code STRING} sort. Neither is present for a
+     * field, a score or a document id), or a term of a {@code STRING} sort. Both are null for a
      * document without a value in a field sort.
      */
-    public record SortValue(Optional<Number> number, Optional<BytesRef> term) {
+    public record SortValue(
+            @Nullable Number number, @Nullable BytesRef term) {
 
         /** The sort value as Lucene's {@code FieldDoc.fields} holds it. */
         static SortValue of(Object value) {
             return switch (value) {
-                case null -> new SortValue(Optional.empty(), Optional.empty());
-                case Number number -> new SortValue(Optional.of(number), Optional.empty());
-                case BytesRef term -> new SortValue(Optional.empty(), Optional.of(BytesRef.deepCopyOf(term)));
+                case null -> new SortValue(null, null);
+                case Number number -> new SortValue(number, null);
+                case BytesRef term -> new SortValue(null, BytesRef.deepCopyOf(term));
                 default -> throw new IllegalArgumentException("Unexpected sort value: " + value.getClass());
             };
         }

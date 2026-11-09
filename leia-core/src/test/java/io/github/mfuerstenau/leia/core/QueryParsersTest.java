@@ -10,7 +10,6 @@ import java.nio.file.Path;
 import java.time.ZoneId;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.DateTools;
@@ -193,9 +192,7 @@ class QueryParsersTest {
                     .hasToString("published:[2026010100 TO 2026010123]");
             // Without a resolution, the bounds stay text.
             assertThat(parser.parse(
-                            "published:[1/1/26 TO 1/31/26]",
-                            DEFAULTS.withDates(
-                                    Optional.empty(), Optional.of(Locale.US), Optional.of(ZoneId.of("UTC")))))
+                            "published:[1/1/26 TO 1/31/26]", DEFAULTS.withDates(null, Locale.US, ZoneId.of("UTC"))))
                     .hasToString("published:[1/1/26 TO 1/31/26]");
         }
     }
@@ -230,8 +227,7 @@ class QueryParsersTest {
 
     @Test
     void withoutATimeZoneDatesAreReadAsLuceneReadsThem() throws Exception {
-        ParserOptions options =
-                DEFAULTS.withDates(Optional.of(DateTools.Resolution.MINUTE), Optional.of(Locale.US), Optional.empty());
+        ParserOptions options = DEFAULTS.withDates(DateTools.Resolution.MINUTE, Locale.US, null);
         String expression = "published:[1/1/26 TO 1/31/26] OR published:{1/1/26 TO 1/2/26}";
 
         QueryParser classic = new QueryParser("body", ANALYZER);
@@ -248,8 +244,7 @@ class QueryParsersTest {
     void aFieldsOwnResolutionWinsOverTheOthers() throws Exception {
         ParserOptions hours = dates(DateTools.Resolution.DAY, Locale.US, "UTC")
                 .withFieldDateResolutions(Map.of("updated", DateTools.Resolution.HOUR));
-        ParserOptions onlyUpdated = DEFAULTS.withDates(
-                        Optional.empty(), Optional.of(Locale.US), Optional.of(ZoneId.of("UTC")))
+        ParserOptions onlyUpdated = DEFAULTS.withDates(null, Locale.US, ZoneId.of("UTC"))
                 .withFieldDateResolutions(Map.of("updated", DateTools.Resolution.HOUR));
         String expression = "+published:[1/1/26 TO 1/31/26] +updated:[1/1/26 TO 1/1/26]";
 
@@ -264,8 +259,7 @@ class QueryParsersTest {
 
     @Test
     void withoutATimeZoneFieldResolutionsAreReadAsLuceneReadsThem() throws Exception {
-        ParserOptions options = DEFAULTS.withDates(
-                        Optional.of(DateTools.Resolution.DAY), Optional.of(Locale.US), Optional.empty())
+        ParserOptions options = DEFAULTS.withDates(DateTools.Resolution.DAY, Locale.US, null)
                 .withFieldDateResolutions(Map.of("updated", DateTools.Resolution.MINUTE));
         String expression = "published:[1/1/26 TO 1/31/26] OR updated:[1/1/26 TO 1/2/26]";
 
@@ -308,7 +302,7 @@ class QueryParsersTest {
     }
 
     private static ParserOptions dates(DateTools.Resolution resolution, Locale locale, String zone) {
-        return DEFAULTS.withDates(Optional.of(resolution), Optional.of(locale), Optional.of(ZoneId.of(zone)));
+        return DEFAULTS.withDates(resolution, locale, ZoneId.of(zone));
     }
 
     private static Query classic(String expression, ParserOptions options) throws InvalidQueryException {
@@ -322,10 +316,7 @@ class QueryParsersTest {
 
     private static java.util.List<Integer> docs(ReadOnlyIndex index, Query query)
             throws IOException, InvalidQueryException {
-        return index
-                .search(query, BM25, Optional.empty(), 0, 10, true, Optional.empty(), ScanProgress.NONE)
-                .hits()
-                .stream()
+        return index.search(query, BM25, null, 0, 10, true, null, ScanProgress.NONE).hits().stream()
                 .map(Hit::docId)
                 .sorted()
                 .toList();

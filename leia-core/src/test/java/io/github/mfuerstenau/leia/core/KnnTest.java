@@ -8,7 +8,6 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -29,6 +28,7 @@ import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.TotalHits;
 import org.apache.lucene.search.similarities.Similarity;
 import org.apache.lucene.store.FSDirectory;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -47,12 +47,12 @@ class KnnTest {
     @Test
     void readsADocumentsVectors() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            assertThat(field(index.document(3), "f").vector()).hasValue(new KnnVector.Floats(floats(3)));
-            assertThat(field(index.document(3), "b").vector()).hasValue(new KnnVector.Bytes(bytes(3)));
+            assertThat(field(index.document(3), "f").vector()).isEqualTo(new KnnVector.Floats(floats(3)));
+            assertThat(field(index.document(3), "b").vector()).isEqualTo(new KnnVector.Bytes(bytes(3)));
             // In the second segment.
-            assertThat(field(index.document(45), "f").vector()).hasValue(new KnnVector.Floats(floats(45)));
-            assertThat(field(index.document(NO_VECTOR), "f").vector()).isEmpty();
-            assertThat(field(index.document(3), "color").vector()).isEmpty();
+            assertThat(field(index.document(45), "f").vector()).isEqualTo(new KnnVector.Floats(floats(45)));
+            assertThat(field(index.document(NO_VECTOR), "f").vector()).isNull();
+            assertThat(field(index.document(3), "color").vector()).isNull();
             assertThat(index.document(DELETED).deleted()).isTrue();
             assertThat(index.vector(DELETED, "f")).hasValue(new KnnVector.Floats(floats(DELETED)));
             assertThat(index.vector(NO_VECTOR, "b")).isEmpty();
@@ -65,11 +65,11 @@ class KnnTest {
     void findsTheNearestDocumentsApproximately() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             float[] target = floats(3);
-            Query query = KnnQueries.approximate(field(index, "f"), new KnnVector.Floats(target), 5, Optional.empty());
+            Query query = KnnQueries.approximate(field(index, "f"), new KnnVector.Floats(target), 5, null);
             SearchResults results = search(index, query, 10);
 
             // The graph of so few vectors finds the exact nearest.
-            assertThat(ids(results)).containsExactlyElementsOf(nearest(target, 5, Optional.empty()));
+            assertThat(ids(results)).containsExactlyElementsOf(nearest(target, 5, null));
             assertThat(results.hits().getFirst().score()).isEqualTo(1f);
             assertThat(results.totalHits()).isEqualTo(new TotalHits(5, TotalHits.Relation.EQUAL_TO));
             assertThat(results.query()).startsWith("KnnFloatVectorQuery:f[");
@@ -80,12 +80,12 @@ class KnnTest {
     void scoresEveryDocumentWithAVectorExactly() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             float[] target = floats(3);
-            Query query = KnnQueries.exact(field(index, "f"), new KnnVector.Floats(target), Optional.empty());
+            Query query = KnnQueries.exact(field(index, "f"), new KnnVector.Floats(target), null);
             SearchResults results = search(index, query, 100);
 
             // Every live document but the one without a vector.
             assertThat(results.totalHits().value()).isEqualTo(DOCS - 2);
-            assertThat(ids(results)).containsExactlyElementsOf(nearest(target, DOCS, Optional.empty()));
+            assertThat(ids(results)).containsExactlyElementsOf(nearest(target, DOCS, null));
             for (SearchResults.Hit hit : results.hits()) {
                 assertThat(hit.score())
                         .isCloseTo(
@@ -99,7 +99,7 @@ class KnnTest {
     void searchesOnlyTheDocumentsOfTheFilter() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             float[] target = floats(3);
-            Optional<Query> red = Optional.of(new TermQuery(new Term("color", "red")));
+            Query red = new TermQuery(new Term("color", "red"));
             KnnVector vector = new KnnVector.Floats(target);
             List<Integer> expected = nearest(target, 4, red);
 
@@ -117,9 +117,9 @@ class KnnTest {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             byte[] target = bytes(11);
             KnnVector vector = new KnnVector.Bytes(target);
-            List<Integer> exact = ids(search(index, KnnQueries.exact(field(index, "b"), vector, Optional.empty()), 3));
+            List<Integer> exact = ids(search(index, KnnQueries.exact(field(index, "b"), vector, null), 3));
             List<Integer> approximate =
-                    ids(search(index, KnnQueries.approximate(field(index, "b"), vector, 3, Optional.empty()), 3));
+                    ids(search(index, KnnQueries.approximate(field(index, "b"), vector, 3, null), 3));
 
             assertThat(exact.getFirst()).isEqualTo(11);
             assertThat(approximate).containsExactlyElementsOf(exact);
@@ -135,10 +135,9 @@ class KnnTest {
                     throw new CancellationException("cancelled");
                 }
             };
-            Query query = KnnQueries.exact(field(index, "f"), new KnnVector.Floats(floats(3)), Optional.empty());
+            Query query = KnnQueries.exact(field(index, "f"), new KnnVector.Floats(floats(3)), null);
 
-            assertThatThrownBy(() ->
-                            index.search(query, BM25, Optional.empty(), 0, 10, false, Optional.empty(), cancelled))
+            assertThatThrownBy(() -> index.search(query, BM25, null, 0, 10, false, null, cancelled))
                     .isInstanceOf(CancellationException.class);
         }
     }
@@ -152,11 +151,9 @@ class KnnTest {
                     throw new CancellationException("cancelled");
                 }
             };
-            Query query =
-                    KnnQueries.approximate(field(index, "f"), new KnnVector.Floats(floats(3)), 10, Optional.empty());
+            Query query = KnnQueries.approximate(field(index, "f"), new KnnVector.Floats(floats(3)), 10, null);
 
-            assertThatThrownBy(() ->
-                            index.search(query, BM25, Optional.empty(), 0, 10, false, Optional.empty(), cancelled))
+            assertThatThrownBy(() -> index.search(query, BM25, null, 0, 10, false, null, cancelled))
                     .isInstanceOf(CancellationException.class);
         }
     }
@@ -183,7 +180,7 @@ class KnnTest {
                     .hasMessage("the field 'b' compares by cosine, which a vector of zeros has none of");
             // Euclidean distance has a vector of zeros.
             KnnQueries.check(f, new KnnVector.Floats(new float[4]));
-            assertThatThrownBy(() -> KnnQueries.approximate(f, new KnnVector.Floats(new float[4]), 0, Optional.empty()))
+            assertThatThrownBy(() -> KnnQueries.approximate(f, new KnnVector.Floats(new float[4]), 0, null))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessage("k must be at least 1: 0");
         }
@@ -191,7 +188,7 @@ class KnnTest {
 
     private static SearchResults search(ReadOnlyIndex index, Query query, int limit)
             throws IOException, InvalidQueryException {
-        return index.search(query, BM25, Optional.empty(), 0, limit, true, Optional.empty(), ScanProgress.NONE);
+        return index.search(query, BM25, null, 0, limit, true, null, ScanProgress.NONE);
     }
 
     private static List<Integer> ids(SearchResults results) {
@@ -199,10 +196,10 @@ class KnnTest {
     }
 
     /** The live documents with a vector nearest to {@code target}, by brute force. */
-    private static List<Integer> nearest(float[] target, int k, Optional<Query> red) {
+    private static List<Integer> nearest(float[] target, int k, @Nullable Query red) {
         return IntStream.range(0, DOCS)
                 .filter(id -> id != NO_VECTOR && id != DELETED)
-                .filter(id -> red.isEmpty() || color(id).equals("red"))
+                .filter(id -> red == null || color(id).equals("red"))
                 .boxed()
                 .sorted(Comparator.comparingDouble(
                         (Integer id) -> -VectorSimilarityFunction.EUCLIDEAN.compare(target, floats(id))))

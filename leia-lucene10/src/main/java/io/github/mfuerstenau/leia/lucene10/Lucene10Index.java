@@ -34,7 +34,6 @@ import io.github.mfuerstenau.leia.runtime.Scoring;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.StandardSearch;
 import io.github.mfuerstenau.leia.runtime.Terms;
-import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -44,6 +43,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -244,7 +244,7 @@ final class Lucene10Index
                         segment.docBase() - docBase,
                         segment.maxDoc(),
                         segment.numDocs(),
-                        segment.id().orElse(null),
+                        segment.id(),
                         segment.files()));
                 segmentVersions.add(versions.getOrDefault(segment.docBase(), "?"));
             }
@@ -280,7 +280,7 @@ final class Lucene10Index
     }
 
     private static Field field(FieldStats field) {
-        Optional<TermStats> terms = field.terms()
+        Optional<TermStats> terms = Optional.ofNullable(field.terms())
                 .filter(stats -> stats.docCount() >= 0 && stats.sumDocFreq() >= 0)
                 .map(stats -> new TermStats(
                         stats.docCount(),
@@ -316,13 +316,13 @@ final class Lucene10Index
                 document.fields().stream()
                         .map(field -> new DocumentField(
                                 field.name(),
-                                Optionals.orNull(field.norm()),
+                                field.norm(),
                                 field.stored().stream()
                                         .map(Lucene10Index::storedValue)
                                         .toList(),
-                                field.docValues().map(Lucene10Index::docValues).orElse(null),
+                                field.docValues() != null ? docValues(field.docValues()) : null,
                                 field.hasTermVector(),
-                                field.vector().map(Lucene10Index::vector).orElse(null)))
+                                field.vector() != null ? vector(field.vector()) : null))
                         .toList());
     }
 
@@ -378,7 +378,7 @@ final class Lucene10Index
         }
         List<StoredDocument> documents = new ArrayList<>();
         for (StoredScan.Document document :
-                index.storedValues(Optional.ofNullable(fields), includeDeleted).read(fromDoc, toDoc)) {
+                index.storedValues(fields, includeDeleted).read(fromDoc, toDoc)) {
             documents.add(storedDocument(document));
         }
         return List.copyOf(documents);
@@ -395,7 +395,7 @@ final class Lucene10Index
             throws IOException {
         index.storedValues(
                 segment,
-                Optional.ofNullable(fields),
+                fields,
                 includeDeleted,
                 next,
                 document -> sink.accept(storedDocument(document)),
@@ -441,10 +441,10 @@ final class Lucene10Index
 
     private static Position position(TermPosition position) {
         return new Position(
-                Optionals.orNull(position.position()),
-                Optionals.orNull(position.startOffset()),
-                Optionals.orNull(position.endOffset()),
-                position.payload().map(Lucene10Index::bytes).orElse(null));
+                position.position(),
+                position.startOffset(),
+                position.endOffset(),
+                position.payload() != null ? bytes(position.payload()) : null);
     }
 
     @Override
@@ -452,12 +452,12 @@ final class Lucene10Index
         if (!index.hasField(field)) {
             return new TermsPage(List.of(), null);
         }
-        TermPage page = index.terms(field, Optional.ofNullable(from).map(BytesRef::new), limit);
+        TermPage page = index.terms(field, from != null ? new BytesRef(from) : null, limit);
         return new TermsPage(
                 page.terms().stream()
                         .map(term -> new TermEntry(bytes(term.term()), term.docFreq(), term.totalTermFreq()))
                         .toList(),
-                page.next().map(Lucene10Index::bytes).orElse(null));
+                page.next() != null ? bytes(page.next()) : null);
     }
 
     /** {@inheritDoc} Deleted documents are read too, and marked. */
@@ -465,7 +465,7 @@ final class Lucene10Index
     public PostingsPage postings(String field, byte[] term, int fromDoc, int limit, int maxPositions)
             throws IOException {
         Optional<io.github.mfuerstenau.leia.core.PostingsPage> page = index.hasField(field)
-                ? index.postings(field, new BytesRef(term), Math.max(fromDoc, 0), limit, Optional.empty(), maxPositions)
+                ? index.postings(field, new BytesRef(term), Math.max(fromDoc, 0), limit, null, maxPositions)
                 : Optional.empty();
         if (page.isEmpty()) {
             return new PostingsPage(0, 0, List.of(), null);
@@ -477,13 +477,13 @@ final class Lucene10Index
                         .map(posting -> new Posting(
                                 posting.docId(),
                                 // 1 without frequencies, as Lucene's postings have it.
-                                posting.freq().orElse(1),
+                                posting.freq() != null ? posting.freq() : 1,
                                 posting.deleted(),
-                                posting.positions().orElse(List.of()).stream()
+                                Objects.requireNonNullElse(posting.positions(), List.<TermPosition>of()).stream()
                                         .map(Lucene10Index::position)
                                         .toList()))
                         .toList(),
-                Optionals.orNull(page.get().nextDoc()));
+                page.get().nextDoc());
     }
 
     @Override
@@ -639,11 +639,7 @@ final class Lucene10Index
         return switch (match) {
             case Match.Values<T> values -> new DocValuesMatch.Values<>(values.values());
             case Match.Range<T> range ->
-                new DocValuesMatch.Range<>(
-                        Optional.ofNullable(range.lower()),
-                        Optional.ofNullable(range.upper()),
-                        range.includeLower(),
-                        range.includeUpper());
+                new DocValuesMatch.Range<>(range.lower(), range.upper(), range.includeLower(), range.includeUpper());
         };
     }
 
@@ -663,10 +659,10 @@ final class Lucene10Index
                 phraseSlop,
                 fuzzyPrefixLength,
                 enablePositionIncrements,
-                Optional.ofNullable(dates.resolution()).map(Lucene10Index::resolution),
+                dates.resolution() != null ? resolution(dates.resolution()) : null,
                 fields,
-                Optional.ofNullable(dates.locale()),
-                Optional.ofNullable(dates.timeZone()));
+                dates.locale(),
+                dates.timeZone());
     }
 
     private static DateTools.Resolution resolution(DateResolution resolution) {
@@ -716,11 +712,11 @@ final class Lucene10Index
                 options.fields(),
                 options.minTermFreq(),
                 options.minDocFreq(),
-                Optionals.optionalInt(options.maxDocFreq()),
+                options.maxDocFreq(),
                 options.maxQueryTerms(),
                 options.boost(),
                 options.minWordLen(),
-                Optionals.optionalInt(options.maxWordLen()),
+                options.maxWordLen(),
                 options.stopWords());
         try (Analyzer analyzer = Lucene10Analyzers.analyzer(spec)) {
             return new Lucene10Like(
@@ -768,7 +764,7 @@ final class Lucene10Index
             @Nullable List<String> fields,
             LongConsumer progress)
             throws IOException {
-        Optional<Sort> sort = sortKeys.isEmpty() ? Optional.empty() : Optional.of(sort(sortKeys));
+        Sort sort = sortKeys.isEmpty() ? null : sort(sortKeys);
         io.github.mfuerstenau.leia.core.SearchResults results;
         try {
             results = withQuery(
@@ -780,7 +776,7 @@ final class Lucene10Index
                             offset,
                             limit,
                             exactTotalHits,
-                            Optional.ofNullable(fields).map(Set::copyOf),
+                            fields != null ? Set.copyOf(fields) : null,
                             progress::accept));
         } catch (io.github.mfuerstenau.leia.core.InvalidQueryException e) {
             throw new IllegalArgumentException(e.getMessage(), e);
@@ -797,9 +793,8 @@ final class Lucene10Index
                     hit.docId(),
                     hit.score(),
                     hit.sortValues().stream()
-                            .map(value -> new SortValue(
-                                    value.number().orElse(null),
-                                    value.term().map(Lucene10Index::bytes).orElse(null)))
+                            .map(value ->
+                                    new SortValue(value.number(), value.term() != null ? bytes(value.term()) : null))
                             .toList(),
                     values));
         }
@@ -810,12 +805,17 @@ final class Lucene10Index
                 results.totalHits().relation() == TotalHits.Relation.EQUAL_TO,
                 List.copyOf(hits),
                 results.took().toMillis(),
-                results.moreLikeThisTerms()
-                        .map(terms -> terms.stream()
-                                .map(term -> new LikeTerm(
-                                        term.field(), term.term(), term.tf(), term.docFreq(), term.idf(), term.score()))
-                                .toList())
-                        .orElse(null));
+                likeTerms(results.moreLikeThisTerms()));
+    }
+
+    private static @Nullable List<LikeTerm> likeTerms(
+            @Nullable List<io.github.mfuerstenau.leia.core.SearchResults.LikeTerm> terms) {
+        return terms == null
+                ? null
+                : terms.stream()
+                        .map(term -> new LikeTerm(
+                                term.field(), term.term(), term.tf(), term.docFreq(), term.idf(), term.score()))
+                        .toList();
     }
 
     private static org.apache.lucene.search.similarities.Similarity similarity(Similarity similarity) {
@@ -917,18 +917,13 @@ final class Lucene10Index
     @Override
     public ParsedQuery approximate(String field, Vector target, int k, @Nullable ParsedQuery filter) {
         return new Lucene10Query(KnnQueries.approximate(
-                vectorField(field),
-                knnVector(target),
-                k,
-                Optional.ofNullable(filter).map(Lucene10Index::query)));
+                vectorField(field), knnVector(target), k, filter != null ? query(filter) : null));
     }
 
     @Override
     public ParsedQuery exact(String field, Vector target, @Nullable ParsedQuery filter) {
-        return new Lucene10Query(KnnQueries.exact(
-                vectorField(field),
-                knnVector(target),
-                Optional.ofNullable(filter).map(Lucene10Index::query)));
+        return new Lucene10Query(
+                KnnQueries.exact(vectorField(field), knnVector(target), filter != null ? query(filter) : null));
     }
 
     @Override

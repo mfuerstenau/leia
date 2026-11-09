@@ -3,7 +3,6 @@ package io.github.mfuerstenau.leia.core;
 import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.apache.lucene.index.BinaryDocValues;
@@ -19,6 +18,7 @@ import org.apache.lucene.search.ScorerSupplier;
 import org.apache.lucene.search.TwoPhaseIterator;
 import org.apache.lucene.search.Weight;
 import org.apache.lucene.util.BytesRef;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Documents whose {@code BINARY} doc value is one of several values, or lies in a range (ADR 0033).
@@ -30,8 +30,8 @@ final class BinaryDocValuesQuery extends Query {
 
     private final String field;
     private final Set<BytesRef> values;
-    private final Optional<BytesRef> lower;
-    private final Optional<BytesRef> upper;
+    private final @Nullable BytesRef lower;
+    private final @Nullable BytesRef upper;
     private final boolean includeLower;
     private final boolean includeUpper;
 
@@ -40,15 +40,15 @@ final class BinaryDocValuesQuery extends Query {
         switch (match) {
             case DocValuesMatch.Values<BytesRef> exact -> {
                 values = exact.values().stream().map(BytesRef::deepCopyOf).collect(Collectors.toUnmodifiableSet());
-                lower = Optional.empty();
-                upper = Optional.empty();
+                lower = null;
+                upper = null;
                 includeLower = false;
                 includeUpper = false;
             }
             case DocValuesMatch.Range<BytesRef> range -> {
                 values = null;
-                lower = range.lower().map(BytesRef::deepCopyOf);
-                upper = range.upper().map(BytesRef::deepCopyOf);
+                lower = range.lower() != null ? BytesRef.deepCopyOf(range.lower()) : null;
+                upper = range.upper() != null ? BytesRef.deepCopyOf(range.upper()) : null;
                 includeLower = range.includeLower();
                 includeUpper = range.includeUpper();
             }
@@ -59,14 +59,14 @@ final class BinaryDocValuesQuery extends Query {
         if (values != null) {
             return values.contains(value);
         }
-        if (lower.isPresent()) {
-            int order = value.compareTo(lower.get());
+        if (lower != null) {
+            int order = value.compareTo(lower);
             if (order < 0 || (order == 0 && !includeLower)) {
                 return false;
             }
         }
-        if (upper.isPresent()) {
-            int order = value.compareTo(upper.get());
+        if (upper != null) {
+            int order = value.compareTo(upper);
             return order < 0 || (order == 0 && includeUpper);
         }
         return true;
@@ -123,9 +123,9 @@ final class BinaryDocValuesQuery extends Query {
                     .toString();
         }
         return text.append(includeLower ? '[' : '{')
-                .append(lower.map(BytesRef::toString).orElse("*"))
+                .append(lower != null ? lower.toString() : "*")
                 .append(" TO ")
-                .append(upper.map(BytesRef::toString).orElse("*"))
+                .append(upper != null ? upper.toString() : "*")
                 .append(includeUpper ? ']' : '}')
                 .toString();
     }
@@ -136,8 +136,8 @@ final class BinaryDocValuesQuery extends Query {
                 && other instanceof BinaryDocValuesQuery query
                 && field.equals(query.field)
                 && Objects.equals(values, query.values)
-                && lower.equals(query.lower)
-                && upper.equals(query.upper)
+                && Objects.equals(lower, query.lower)
+                && Objects.equals(upper, query.upper)
                 && includeLower == query.includeLower
                 && includeUpper == query.includeUpper;
     }

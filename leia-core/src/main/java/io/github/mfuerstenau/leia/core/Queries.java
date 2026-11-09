@@ -58,10 +58,16 @@ public final class Queries {
             parser.setPhraseSlop(options.phraseSlop());
             parser.setFuzzyPrefixLength(options.fuzzyPrefixLength());
             parser.setEnablePositionIncrements(options.enablePositionIncrements());
-            options.dateResolution().ifPresent(parser::setDateResolution);
+            if (options.dateResolution() != null) {
+                parser.setDateResolution(options.dateResolution());
+            }
             options.fieldDateResolutions().forEach(parser::setDateResolution);
-            options.locale().ifPresent(parser::setLocale);
-            options.timeZone().map(TimeZone::getTimeZone).ifPresent(parser::setTimeZone);
+            if (options.locale() != null) {
+                parser.setLocale(options.locale());
+            }
+            if (options.timeZone() != null) {
+                parser.setTimeZone(TimeZone.getTimeZone(options.timeZone()));
+            }
             parser.setFuzzyMinSim(classic.fuzzyMaxEdits());
             // In this order: the parser refuses auto-generated phrases while it doesn't split.
             parser.setSplitOnWhitespace(classic.splitOnWhitespace());
@@ -104,10 +110,16 @@ public final class Queries {
             parser.setPhraseSlop(options.phraseSlop());
             parser.setFuzzyPrefixLength(options.fuzzyPrefixLength());
             parser.setEnablePositionIncrements(options.enablePositionIncrements());
-            options.dateResolution().ifPresent(parser::setDateResolution);
+            if (options.dateResolution() != null) {
+                parser.setDateResolution(options.dateResolution());
+            }
             parser.setDateResolutionMap(new HashMap<>(options.fieldDateResolutions()));
-            options.locale().ifPresent(parser::setLocale);
-            options.timeZone().map(TimeZone::getTimeZone).ifPresent(parser::setTimeZone);
+            if (options.locale() != null) {
+                parser.setLocale(options.locale());
+            }
+            if (options.timeZone() != null) {
+                parser.setTimeZone(TimeZone.getTimeZone(options.timeZone()));
+            }
             Map<String, PointsConfig> configs = new HashMap<>();
             points.forEach((field, type) -> configs.put(field, new PointsConfig(numberFormat(type), type.type())));
             parser.setPointsConfigMap(configs);

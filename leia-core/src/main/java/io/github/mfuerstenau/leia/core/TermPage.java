@@ -1,17 +1,17 @@
 package io.github.mfuerstenau.leia.core;
 
 import java.util.List;
-import java.util.Optional;
 import org.apache.lucene.util.BytesRef;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A page of the terms of a field, in term order, across all segments. Like the postings statistics,
  * the frequencies include deleted documents.
  *
  * @param terms the terms of the page
- * @param next the term after the page, from which the next page starts; empty after the last term
+ * @param next the term after the page, from which the next page starts; null after the last term
  */
-public record TermPage(List<Entry> terms, Optional<BytesRef> next) {
+public record TermPage(List<Entry> terms, @Nullable BytesRef next) {
 
     /**
      * One term of a field.

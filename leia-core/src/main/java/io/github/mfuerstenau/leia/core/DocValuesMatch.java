@@ -1,7 +1,7 @@
 package io.github.mfuerstenau.leia.core;
 
 import java.util.List;
-import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Which doc values a {@link DocValuesQueries} query matches (ADR 0033): one of several values, or a
@@ -28,7 +28,7 @@ public sealed interface DocValuesMatch<T> {
         }
     }
 
-    /** Values from {@code lower} to {@code upper}; an absent bound is open. */
-    record Range<T>(Optional<T> lower, Optional<T> upper, boolean includeLower, boolean includeUpper)
+    /** Values from {@code lower} to {@code upper}; a null bound is open. */
+    record Range<T>(@Nullable T lower, @Nullable T upper, boolean includeLower, boolean includeUpper)
             implements DocValuesMatch<T> {}
 }

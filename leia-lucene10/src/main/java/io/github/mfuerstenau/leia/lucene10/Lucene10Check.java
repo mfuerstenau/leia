@@ -4,7 +4,6 @@ import io.github.mfuerstenau.leia.core.IndexCheck;
 import io.github.mfuerstenau.leia.runtime.Check;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import java.nio.file.Path;
-import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.LongConsumer;
 
@@ -38,14 +37,14 @@ final class Lucene10Check implements Check {
                 options.segments(),
                 line,
                 progress::accept);
-        Optional<String> error = result.error();
-        if (error.isPresent()) {
-            return CheckResult.failed(error.get());
+        String error = result.error();
+        if (error != null) {
+            return CheckResult.failed(error);
         }
         return new CheckResult(
                 result.clean(),
-                result.error().orElse(null),
-                result.segmentsFile().orElse(null),
+                result.error(),
+                result.segmentsFile(),
                 result.missingSegments(),
                 result.toolOutOfDate(),
                 result.segmentCount(),
@@ -56,13 +55,13 @@ final class Lucene10Check implements Check {
                         .map(segment -> new SegmentCheck(
                                 segment.name(),
                                 segment.maxDoc(),
-                                segment.codec().orElse(null),
+                                segment.codec(),
                                 segment.compound(),
                                 segment.files(),
                                 segment.sizeBytes(),
                                 segment.hasDeletions(),
                                 segment.openReaderPassed(),
-                                segment.error().orElse(null)))
+                                segment.error()))
                         .toList());
     }
 }

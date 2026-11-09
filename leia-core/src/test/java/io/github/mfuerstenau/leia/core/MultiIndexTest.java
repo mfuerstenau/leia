@@ -13,7 +13,6 @@ import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.TreeMap;
 import java.util.stream.Stream;
 import org.apache.lucene.document.Document;
@@ -56,7 +55,7 @@ class MultiIndexTest {
 
             assertThat(index.storedValues(0, "id")).containsExactly(new StoredValue.Text("a1"));
             assertThat(index.storedValues(2, "id")).containsExactly(new StoredValue.Text("b1"));
-            assertThat(index.terms("index", Optional.empty(), 10).terms())
+            assertThat(index.terms("index", null, 10).terms())
                     .extracting(entry -> entry.term().utf8ToString(), TermPage.Entry::docFreq)
                     .containsExactly(tuple("a", 2), tuple("b", 3));
             assertThat(search(index, "index", "b")).containsExactly(2, 3, 4);
@@ -80,8 +79,7 @@ class MultiIndexTest {
                             IndexStats.SegmentStats::maxDoc,
                             IndexStats.SegmentStats::numDocs)
                     .containsExactly("_0", 2, 3, 3);
-            assertThat(stats.field("id").orElseThrow().terms().orElseThrow().docCount())
-                    .isEqualTo(5);
+            assertThat(stats.field("id").orElseThrow().terms().docCount()).isEqualTo(5);
         }
     }
 
@@ -343,15 +341,7 @@ class MultiIndexTest {
 
     private static List<Integer> search(ReadOnlyIndex index, String field, String term) throws Exception {
         return index
-                .search(
-                        new TermQuery(new Term(field, term)),
-                        new BM25Similarity(),
-                        Optional.empty(),
-                        0,
-                        10,
-                        true,
-                        Optional.empty(),
-                        _ -> {})
+                .search(new TermQuery(new Term(field, term)), new BM25Similarity(), null, 0, 10, true, null, _ -> {})
                 .hits()
                 .stream()
                 .map(Hit::docId)

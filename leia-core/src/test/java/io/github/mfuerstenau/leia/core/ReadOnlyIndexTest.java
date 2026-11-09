@@ -13,7 +13,6 @@ import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Map;
-import java.util.Optional;
 import java.util.TreeMap;
 import java.util.stream.Stream;
 import org.apache.lucene.codecs.Codec;
@@ -43,8 +42,8 @@ class ReadOnlyIndexTest {
 
         try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
             assertThat(index.indexes())
-                    .containsExactly(new IndexSummary(
-                            dir, 0, "segments_2", 2, 3, Version.LATEST.major, Optional.of(Version.LATEST)));
+                    .containsExactly(
+                            new IndexSummary(dir, 0, "segments_2", 2, 3, Version.LATEST.major, Version.LATEST));
             assertThat(index.reader().numDocs()).isEqualTo(2);
         }
     }
@@ -55,7 +54,7 @@ class ReadOnlyIndexTest {
 
         try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
             assertThat(index.indexes().getFirst().numDocs()).isZero();
-            assertThat(index.indexes().getFirst().minSegmentLuceneVersion()).isEmpty();
+            assertThat(index.indexes().getFirst().minSegmentLuceneVersion()).isNull();
         }
     }
 
@@ -65,7 +64,7 @@ class ReadOnlyIndexTest {
             IndexSummary summary = index.indexes().getFirst();
             assertThat(summary.createdVersionMajor()).isEqualTo(9);
             assertThat(summary.minSegmentLuceneVersion())
-                    .hasValueSatisfying(version -> assertThat(version.major).isEqualTo(9));
+                    .satisfies(version -> assertThat(version.major).isEqualTo(9));
             assertThat(summary.numDocs()).isEqualTo(2);
             assertThat(summary.maxDoc()).isEqualTo(3);
             assertThat(((DirectoryReader) index.reader()).getIndexCommit().getUserData())
@@ -252,8 +251,8 @@ class ReadOnlyIndexTest {
         ReadOnlyIndex reopened = index.reopen().orElseThrow();
         try (reopened) {
             assertThat(reopened.indexes())
-                    .containsExactly(new IndexSummary(
-                            dir, 0, "segments_2", 4, 4, Version.LATEST.major, Optional.of(Version.LATEST)));
+                    .containsExactly(
+                            new IndexSummary(dir, 0, "segments_2", 4, 4, Version.LATEST.major, Version.LATEST));
             assertThat(reopened.reader().leaves()).hasSize(2);
             assertThat(reopened.reader()
                             .leaves()

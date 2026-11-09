@@ -4,12 +4,11 @@ import io.github.mfuerstenau.leia.core.AnalyzerSpec;
 import io.github.mfuerstenau.leia.core.Analyzers;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Search.InvalidAnalyzerException;
-import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import org.apache.lucene.analysis.Analyzer;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The analyzers of a search and of the analysis tab, built by leia-core's {@link Analyzers} (ADR 0065,
@@ -35,58 +34,23 @@ final class Lucene10Analyzers {
             case Search.AnalyzerSpec.Preset preset ->
                 new AnalyzerSpec.Preset(
                         preset.className(),
-                        Optional.ofNullable(preset.stopwords()).map(Lucene10Analyzers::wordSet),
-                        Optional.ofNullable(preset.stemExclusion()).map(Lucene10Analyzers::wordSet),
-                        Optionals.optionalInt(preset.maxTokenLength()),
-                        Optional.ofNullable(preset.stemOverride()).map(Lucene10Analyzers::stemDictionary),
-                        Optional.ofNullable(preset.japanese())
-                                .map(japanese -> new AnalyzerSpec.Japanese(
-                                        Optional.ofNullable(japanese.userDictionary()),
-                                        Optional.ofNullable(japanese.mode())
-                                                .map(mode -> AnalyzerSpec.JapaneseMode.valueOf(mode.name())),
-                                        Optional.ofNullable(japanese.stopTags()).map(Lucene10Analyzers::wordSet))),
-                        Optional.ofNullable(preset.korean())
-                                .map(korean -> new AnalyzerSpec.Korean(
-                                        Optional.ofNullable(korean.userDictionary()),
-                                        Optional.ofNullable(korean.decompoundMode())
-                                                .map(mode -> AnalyzerSpec.KoreanDecompoundMode.valueOf(mode.name())),
-                                        Optional.ofNullable(korean.stopTags()).map(Lucene10Analyzers::wordSet),
-                                        Optional.ofNullable(korean.outputUnknownUnigrams()))),
-                        Optional.ofNullable(preset.collation())
-                                .map(collation -> new AnalyzerSpec.Collation(
-                                        collation.locale(),
-                                        Optional.ofNullable(collation.strength())
-                                                .map(strength ->
-                                                        AnalyzerSpec.CollationStrength.valueOf(strength.name())),
-                                        Optional.ofNullable(collation.decomposition())
-                                                .map(decomposition -> AnalyzerSpec.CollationDecomposition.valueOf(
-                                                        decomposition.name())))),
-                        Optional.ofNullable(preset.japaneseCompletion())
-                                .map(completion -> new AnalyzerSpec.JapaneseCompletion(
-                                        Optional.ofNullable(completion.userDictionary()),
-                                        Optional.ofNullable(completion.mode())
-                                                .map(mode ->
-                                                        AnalyzerSpec.JapaneseCompletionMode.valueOf(mode.name())))));
+                        wordSet(preset.stopwords()),
+                        wordSet(preset.stemExclusion()),
+                        preset.maxTokenLength(),
+                        stemDictionary(preset.stemOverride()),
+                        japanese(preset.japanese()),
+                        korean(preset.korean()),
+                        collation(preset.collation()),
+                        japaneseCompletion(preset.japaneseCompletion()));
             case Search.AnalyzerSpec.Custom custom ->
                 new AnalyzerSpec.Custom(
                         components(custom.charFilters()),
                         component(custom.tokenizer()),
                         components(custom.tokenFilters()),
-                        Optional.ofNullable(custom.configDir()));
+                        custom.configDir());
             case Search.AnalyzerSpec.Wrapped wrapped ->
                 new AnalyzerSpec.Wrapped(
-                        coreSpec(wrapped.analyzer()),
-                        Optional.ofNullable(wrapped.shingles())
-                                .map(shingles -> new AnalyzerSpec.Shingles(
-                                        shingles.minShingleSize(),
-                                        shingles.maxShingleSize(),
-                                        shingles.tokenSeparator(),
-                                        shingles.outputUnigrams(),
-                                        shingles.outputUnigramsIfNoShingles(),
-                                        shingles.fillerToken())),
-                        Optional.ofNullable(wrapped.limitTokenCount())
-                                .map(limit -> new AnalyzerSpec.LimitTokenCount(
-                                        limit.maxTokenCount(), limit.consumeAllTokens())));
+                        coreSpec(wrapped.analyzer()), shingles(wrapped.shingles()), limit(wrapped.limitTokenCount()));
             case Search.AnalyzerSpec.PerField(
                     Search.AnalyzerSpec fallback,
                     Map<String, Search.AnalyzerSpec> fields) -> {
@@ -99,19 +63,84 @@ final class Lucene10Analyzers {
         };
     }
 
-    private static AnalyzerSpec.WordSet wordSet(Search.AnalyzerSpec.WordSet set) {
+    private static AnalyzerSpec.@Nullable WordSet wordSet(Search.AnalyzerSpec.@Nullable WordSet set) {
         return switch (set) {
+            case null -> null;
             case Search.AnalyzerSpec.WordSet.Words words -> new AnalyzerSpec.WordSet.Words(words.words());
             case Search.AnalyzerSpec.WordSet.File file -> new AnalyzerSpec.WordSet.File(file.path());
         };
     }
 
-    private static AnalyzerSpec.StemDictionary stemDictionary(Search.AnalyzerSpec.StemDictionary dictionary) {
+    private static AnalyzerSpec.@Nullable StemDictionary stemDictionary(
+            Search.AnalyzerSpec.@Nullable StemDictionary dictionary) {
         return switch (dictionary) {
+            case null -> null;
             case Search.AnalyzerSpec.StemDictionary.Entries entries ->
                 new AnalyzerSpec.StemDictionary.Entries(entries.entries());
             case Search.AnalyzerSpec.StemDictionary.File file -> new AnalyzerSpec.StemDictionary.File(file.path());
         };
+    }
+
+    private static AnalyzerSpec.@Nullable Japanese japanese(Search.AnalyzerSpec.@Nullable Japanese japanese) {
+        if (japanese == null) {
+            return null;
+        }
+        Search.AnalyzerSpec.JapaneseMode mode = japanese.mode();
+        return new AnalyzerSpec.Japanese(
+                japanese.userDictionary(),
+                mode != null ? AnalyzerSpec.JapaneseMode.valueOf(mode.name()) : null,
+                wordSet(japanese.stopTags()));
+    }
+
+    private static AnalyzerSpec.@Nullable Korean korean(Search.AnalyzerSpec.@Nullable Korean korean) {
+        if (korean == null) {
+            return null;
+        }
+        Search.AnalyzerSpec.KoreanDecompoundMode mode = korean.decompoundMode();
+        return new AnalyzerSpec.Korean(
+                korean.userDictionary(),
+                mode != null ? AnalyzerSpec.KoreanDecompoundMode.valueOf(mode.name()) : null,
+                wordSet(korean.stopTags()),
+                korean.outputUnknownUnigrams());
+    }
+
+    private static AnalyzerSpec.@Nullable Collation collation(Search.AnalyzerSpec.@Nullable Collation collation) {
+        if (collation == null) {
+            return null;
+        }
+        Search.AnalyzerSpec.CollationStrength strength = collation.strength();
+        Search.AnalyzerSpec.CollationDecomposition decomposition = collation.decomposition();
+        return new AnalyzerSpec.Collation(
+                collation.locale(),
+                strength != null ? AnalyzerSpec.CollationStrength.valueOf(strength.name()) : null,
+                decomposition != null ? AnalyzerSpec.CollationDecomposition.valueOf(decomposition.name()) : null);
+    }
+
+    private static AnalyzerSpec.@Nullable JapaneseCompletion japaneseCompletion(
+            Search.AnalyzerSpec.@Nullable JapaneseCompletion completion) {
+        if (completion == null) {
+            return null;
+        }
+        Search.AnalyzerSpec.JapaneseCompletionMode mode = completion.mode();
+        return new AnalyzerSpec.JapaneseCompletion(
+                completion.userDictionary(),
+                mode != null ? AnalyzerSpec.JapaneseCompletionMode.valueOf(mode.name()) : null);
+    }
+
+    private static AnalyzerSpec.@Nullable Shingles shingles(Search.AnalyzerSpec.@Nullable Shingles shingles) {
+        return shingles == null
+                ? null
+                : new AnalyzerSpec.Shingles(
+                        shingles.minShingleSize(),
+                        shingles.maxShingleSize(),
+                        shingles.tokenSeparator(),
+                        shingles.outputUnigrams(),
+                        shingles.outputUnigramsIfNoShingles(),
+                        shingles.fillerToken());
+    }
+
+    private static AnalyzerSpec.@Nullable LimitTokenCount limit(Search.AnalyzerSpec.@Nullable LimitTokenCount limit) {
+        return limit == null ? null : new AnalyzerSpec.LimitTokenCount(limit.maxTokenCount(), limit.consumeAllTokens());
     }
 
     private static List<AnalyzerSpec.Component> components(List<Search.AnalyzerSpec.Component> components) {

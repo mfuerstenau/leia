@@ -5,7 +5,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalInt;
 import org.apache.lucene.codecs.KnnVectorsReader;
 import org.apache.lucene.codecs.hnsw.HnswGraphProvider;
 import org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat;
@@ -25,6 +24,7 @@ import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.hnsw.HnswGraph;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The HNSW graphs of a KNN vector field, segment by segment (ADR 0085). A node is a vector ordinal of
@@ -49,24 +49,30 @@ public final class KnnGraphs {
      * The graph of a field in one segment.
      *
      * @param segment the segment's position among the reader's leaves
-     * @param name the segment's name, such as {@code _0}; empty if the leaf isn't a segment reader
+     * @param name the segment's name, such as {@code _0}; null if the leaf isn't a segment reader
      * @param docBase the document id of the segment's first document
      * @param vectors the vectors of the field in the segment, deleted documents' included
-     * @param shape the graph; empty if the segment has none that can be read: its format has none,
+     * @param shape the graph; null if the segment has none that can be read: its format has none,
      *     or the segment was too small for Lucene to build one
      */
     public record SegmentGraph(
-            int segment, Optional<String> name, int docBase, int maxDoc, int vectors, Optional<Shape> shape) {}
+            int segment,
+            @Nullable String name,
+            int docBase,
+            int maxDoc,
+            int vectors,
+            @Nullable Shape shape) {}
 
     /**
      * The levels of a graph.
      *
      * @param levelSizes the nodes on each level, from level 0, which has every node, up
      * @param entry the node a search starts from, on the top level
-     * @param maxConn the most neighbours of a node on the levels above 0; empty if the graph doesn't
+     * @param maxConn the most neighbours of a node on the levels above 0; null if the graph doesn't
      *     say
      */
-    public record Shape(List<Integer> levelSizes, Node entry, OptionalInt maxConn) {}
+    public record Shape(
+            List<Integer> levelSizes, Node entry, @Nullable Integer maxConn) {}
 
     /**
      * A node of a graph.
@@ -114,7 +120,7 @@ public final class KnnGraphs {
             if (values == null || values.size() == 0) {
                 continue;
             }
-            Optional<Shape> shape = Optional.empty();
+            Shape shape = null;
             Optional<HnswGraph> graph = hnsw(context.reader(), name);
             if (graph.isPresent()) {
                 SegmentNodes nodes = new SegmentNodes(context, graph.get(), values);
@@ -123,10 +129,10 @@ public final class KnnGraphs {
                     sizes.add(nodes.levelSize(level));
                 }
                 int maxConn = graph.get().maxConn();
-                shape = Optional.of(new Shape(
+                shape = new Shape(
                         List.copyOf(sizes),
                         nodes.node(graph.get().entryNode()),
-                        maxConn == HnswGraph.UNKNOWN_MAX_CONN ? OptionalInt.empty() : OptionalInt.of(maxConn)));
+                        maxConn == HnswGraph.UNKNOWN_MAX_CONN ? null : Integer.valueOf(maxConn));
             }
             segments.add(new SegmentGraph(
                     context.ord,
@@ -294,10 +300,8 @@ public final class KnnGraphs {
         return graph.size() == 0 || graph.numLevels() == 0 ? Optional.empty() : Optional.of(graph);
     }
 
-    private static Optional<String> segmentName(LeafReader leaf) {
-        return FilterLeafReader.unwrap(leaf) instanceof SegmentReader segment
-                ? Optional.of(segment.getSegmentName())
-                : Optional.empty();
+    private static @Nullable String segmentName(LeafReader leaf) {
+        return FilterLeafReader.unwrap(leaf) instanceof SegmentReader segment ? segment.getSegmentName() : null;
     }
 
     /**

@@ -14,6 +14,7 @@ import java.util.Optional;
 import java.util.Set;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.CharArraySet;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Kuromoji's {@code JapaneseAnalyzer} and Nori's {@code KoreanAnalyzer} with options of their own
@@ -109,7 +110,7 @@ final class KuromojiNori {
                     userDictionary(Class.forName(JAPANESE_DICTIONARY, true, loader), options.userDictionary());
             Object mode = constant(
                     Class.forName(JAPANESE_COMPLETION_MODE, true, loader),
-                    options.mode().map(Enum::name).orElse("INDEX"));
+                    options.mode() != null ? options.mode().name() : "INDEX");
             return new Object[] {dictionary, mode};
         } catch (ReflectiveOperationException | LinkageError e) {
             throw new InvalidAnalyzerException("JapaneseCompletionAnalyzer: " + e, e);
@@ -128,16 +129,15 @@ final class KuromojiNori {
             Object dictionary =
                     userDictionary(Class.forName(JAPANESE_DICTIONARY, true, loader), options.userDictionary());
             Class<?> modeType = Class.forName(JAPANESE_MODE, true, loader);
-            Object mode = options.mode().isPresent()
-                    ? constant(modeType, options.mode().orElseThrow().name())
+            Object mode = options.mode() != null
+                    ? constant(modeType, options.mode().name())
                     : Class.forName(JAPANESE_TOKENIZER, true, loader)
                             .getField("DEFAULT_MODE")
                             .get(null);
             Set<?> stopTags;
-            if (options.stopTags().isPresent()) {
+            if (options.stopTags() != null) {
                 Set<String> tags = new HashSet<>();
-                for (Object tag :
-                        PresetAnalyzers.read("stop tags", options.stopTags().orElseThrow())) {
+                for (Object tag : PresetAnalyzers.read("stop tags", options.stopTags())) {
                     tags.add(new String((char[]) tag));
                 }
                 stopTags = tags;
@@ -162,19 +162,18 @@ final class KuromojiNori {
         try {
             Object dictionary =
                     userDictionary(Class.forName(KOREAN_DICTIONARY, true, loader), options.userDictionary());
-            Object mode = options.decompoundMode().isPresent()
+            Object mode = options.decompoundMode() != null
                     ? constant(
                             Class.forName(KOREAN_MODE, true, loader),
-                            options.decompoundMode().orElseThrow().name())
+                            options.decompoundMode().name())
                     : Class.forName(KOREAN_TOKENIZER, true, loader)
                             .getField("DEFAULT_DECOMPOUND")
                             .get(null);
             Set<?> stopTags;
-            if (options.stopTags().isPresent()) {
+            if (options.stopTags() != null) {
                 Class<?> tagType = Class.forName(KOREAN_TAG, true, loader);
                 Set<Object> tags = new HashSet<>();
-                for (Object tag :
-                        PresetAnalyzers.read("stop tags", options.stopTags().orElseThrow())) {
+                for (Object tag : PresetAnalyzers.read("stop tags", options.stopTags())) {
                     String name = new String((char[]) tag);
                     Object constant = constant(tagType, name);
                     if (constant == null) {
@@ -188,25 +187,23 @@ final class KuromojiNori {
                         .getField("DEFAULT_STOP_TAGS")
                         .get(null);
             }
-            return new Object[] {
-                dictionary, mode, stopTags, options.outputUnknownUnigrams().orElse(false)
-            };
+            return new Object[] {dictionary, mode, stopTags, Boolean.TRUE.equals(options.outputUnknownUnigrams())};
         } catch (ReflectiveOperationException | LinkageError e) {
             throw new InvalidAnalyzerException("KoreanAnalyzer: " + e, e);
         }
     }
 
     /** The user dictionary in the file, read with the module's {@code UserDictionary.open}; null for none. */
-    private static Object userDictionary(Class<?> type, Optional<Path> file)
+    private static @Nullable Object userDictionary(Class<?> type, @Nullable Path file)
             throws InvalidAnalyzerException, ReflectiveOperationException {
-        if (file.isEmpty()) {
+        if (file == null) {
             return null;
         }
         Method open = type.getMethod("open", Reader.class);
         if (!Modifier.isStatic(open.getModifiers())) {
             throw new NoSuchMethodException(type.getName() + ".open(Reader) is not static");
         }
-        return PresetAnalyzers.readFile("user dictionary", file.orElseThrow(), reader -> open.invoke(null, reader));
+        return PresetAnalyzers.readFile("user dictionary", file, reader -> open.invoke(null, reader));
     }
 
     /** The enum constant of {@code type} named {@code name}; null if there is none. */
