@@ -11,12 +11,18 @@ plugins {
     id("leia.java-library-conventions")
 }
 
+val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
+
 val runtimePackage = "io.github.mfuerstenau.leia." + project.name.removePrefix("leia-")
 
 dependencies {
     // compileOnly: the interface is leia's, and leia.jar brings it.
     "compileOnly"(project(":leia-runtime"))
     "testImplementation"(project(":leia-runtime"))
+    // JSpecify's @Nullable on the interface's records (ADR 0127): compile-only, so that it is never in
+    // the folder and the adapter's list stays as it is.
+    "compileOnly"(libs.findLibrary("jspecify").get())
+    "testCompileOnly"(libs.findLibrary("jspecify").get())
 }
 
 tasks.jar {

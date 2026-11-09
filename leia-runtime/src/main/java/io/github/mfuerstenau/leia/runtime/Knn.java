@@ -3,6 +3,7 @@ package io.github.mfuerstenau.leia.runtime;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The KNN vectors of a {@link RuntimeIndex} and the queries for the documents nearest to a target
@@ -21,7 +22,7 @@ public interface Knn {
      * @throws IllegalArgumentException if the index has no vectors in {@code field}
      */
     Search.ParsedQuery approximate(
-            String field, RuntimeIndex.Vector target, int k, Optional<Search.ParsedQuery> filter);
+            String field, RuntimeIndex.Vector target, int k, Search.@Nullable ParsedQuery filter);
 
     /**
      * Every document with a vector in {@code field}, scored by its similarity to {@code target}; with
@@ -30,7 +31,7 @@ public interface Knn {
      * @param filter a query from {@link Search#parse}
      * @throws IllegalArgumentException if the index has no vectors in {@code field}
      */
-    Search.ParsedQuery exact(String field, RuntimeIndex.Vector target, Optional<Search.ParsedQuery> filter);
+    Search.ParsedQuery exact(String field, RuntimeIndex.Vector target, Search.@Nullable ParsedQuery filter);
 
     /**
      * The vector of document {@code docId}, a deleted one too, in {@code field}; empty if it has none.

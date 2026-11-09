@@ -229,13 +229,8 @@ public final class Main {
             try (LeiaBackend started = backend.get()) {
                 VersionResult version =
                         started.call(Methods.VERSION, new VersionParams()).get();
-                McpServer server = new McpServer(
-                        started,
-                        version,
-                        cli.directory(),
-                        Optional.ofNullable(platform.home()),
-                        mcpRoots,
-                        cli.mcpPin());
+                McpServer server =
+                        new McpServer(started, version, cli.directory(), platform.home(), mcpRoots, cli.mcpPin());
                 String path = cli.indexPath();
                 if (path != null) {
                     try {

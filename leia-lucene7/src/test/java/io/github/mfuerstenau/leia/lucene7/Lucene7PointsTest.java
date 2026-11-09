@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -61,12 +62,12 @@ class Lucene7PointsTest {
             // 15 points in each document, deleted ones included; 7.x has document 3 twice.
             assertThat(pt.size()).isEqualTo(seven ? 120 : 105);
             assertThat(pt.docCount()).isEqualTo(seven ? 8 : 7);
-            assertThat(pt.min()).hasValueSatisfying(min -> assertThat(min).isEqualTo(packed(100)));
-            assertThat(pt.max()).hasValueSatisfying(max -> assertThat(max).isEqualTo(packed(714)));
+            assertThat(pt.min()).satisfies(min -> assertThat(min).isEqualTo(packed(100)));
+            assertThat(pt.max()).satisfies(max -> assertThat(max).isEqualTo(packed(714)));
             assertThat(pt.segments())
                     .extracting(
                             Points.Segment::segment,
-                            segment -> segment.name().orElseThrow(),
+                            segment -> Optional.ofNullable(segment.name()).orElseThrow(),
                             Points.Segment::docBase,
                             Points.Segment::maxDoc,
                             Points.Segment::size,
@@ -79,8 +80,8 @@ class Lucene7PointsTest {
             Points.Tree loc = points.tree("loc");
             assertThat(loc.dimensions()).isEqualTo(2);
             assertThat(loc.indexDimensions()).isEqualTo(2);
-            assertThat(loc.min()).hasValueSatisfying(min -> assertThat(min).isEqualTo(packed(1, 0)));
-            assertThat(loc.max()).hasValueSatisfying(max -> assertThat(max).isEqualTo(packed(7, 10)));
+            assertThat(loc.min()).satisfies(min -> assertThat(min).isEqualTo(packed(1, 0)));
+            assertThat(loc.max()).satisfies(max -> assertThat(max).isEqualTo(packed(7, 10)));
             assertThat(points.tree("amount").bytesPerDimension()).isEqualTo(8);
 
             assertThatThrownBy(() -> points.tree("body"))

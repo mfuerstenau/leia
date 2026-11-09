@@ -49,7 +49,7 @@ final class Lucene9Points implements Points {
             }
             segments.add(new Segment(
                     context.ord,
-                    segmentName(context.reader()),
+                    segmentName(context.reader()).orElse(null),
                     context.docBase,
                     context.reader().maxDoc(),
                     values.size(),
@@ -65,9 +65,11 @@ final class Lucene9Points implements Points {
                 segments.stream().mapToLong(Segment::size).sum(),
                 segments.stream().mapToLong(Segment::docCount).sum(),
                 Optional.ofNullable(PointValues.getMinPackedValue(reader, field))
-                        .map(byte[]::clone),
+                        .map(byte[]::clone)
+                        .orElse(null),
                 Optional.ofNullable(PointValues.getMaxPackedValue(reader, field))
-                        .map(byte[]::clone),
+                        .map(byte[]::clone)
+                        .orElse(null),
                 List.copyOf(segments));
     }
 

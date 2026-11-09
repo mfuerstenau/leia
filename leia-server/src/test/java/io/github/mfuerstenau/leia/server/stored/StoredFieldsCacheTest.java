@@ -41,7 +41,7 @@ class StoredFieldsCacheTest {
 
     @Test
     void aSegmentWithAnIdIsKnownByIt() {
-        RuntimeIndex.Segment segment = new RuntimeIndex.Segment("_0", 0, 7, 6, Optional.of("00ff"), List.of("_0.cfs"));
+        RuntimeIndex.Segment segment = new RuntimeIndex.Segment("_0", 0, 7, 6, "00ff", List.of("_0.cfs"));
         assertThat(SegmentKey.of(tmp.resolve("nowhere"), segment)).contains(new SegmentKey("id 00ff 7"));
     }
 
@@ -49,8 +49,7 @@ class StoredFieldsCacheTest {
     void aSegmentWithoutAnIdIsKnownByItsFiles() throws IOException {
         Files.writeString(tmp.resolve("_0.fdt"), "stored");
         Files.writeString(tmp.resolve("_0.fdx"), "index");
-        RuntimeIndex.Segment segment =
-                new RuntimeIndex.Segment("_0", 0, 7, 6, Optional.empty(), List.of("_0.fdt", "_0.fdx"));
+        RuntimeIndex.Segment segment = new RuntimeIndex.Segment("_0", 0, 7, 6, null, List.of("_0.fdt", "_0.fdx"));
 
         Optional<SegmentKey> key = SegmentKey.of(tmp, segment);
         assertThat(key).isPresent();
@@ -67,7 +66,7 @@ class StoredFieldsCacheTest {
     @Test
     void namesTheDocumentsThatStoreOneOfTheFields() {
         StoredFieldsCache cache = new StoredFieldsCache(Optional.empty());
-        RuntimeIndex.Segment segment = new RuntimeIndex.Segment("_0", 0, 10, 10, Optional.of("00ff"), List.of());
+        RuntimeIndex.Segment segment = new RuntimeIndex.Segment("_0", 0, 10, 10, "00ff", List.of());
         Path dir = tmp.resolve("nowhere");
         assertThat(cache.storing(dir, segment, Optional.empty())).isEmpty();
 
@@ -86,10 +85,7 @@ class StoredFieldsCacheTest {
                 .orElseThrow();
         assertThat(either.applyAsInt(3)).isEqualTo(3);
         // A segment with another number of documents isn't the one cached.
-        assertThat(cache.storing(
-                        dir,
-                        new RuntimeIndex.Segment("_0", 0, 11, 11, Optional.of("00ff"), List.of()),
-                        Optional.empty()))
+        assertThat(cache.storing(dir, new RuntimeIndex.Segment("_0", 0, 11, 11, "00ff", List.of()), Optional.empty()))
                 .isEmpty();
     }
 

@@ -4,3 +4,9 @@
 plugins {
     id("leia.java-library-conventions")
 }
+
+dependencies {
+    // JSpecify's @Nullable on the records and parameters (ADR 0127): compile-only, and through
+    // compileOnlyApi for the modules that build against the interface.
+    compileOnlyApi(libs.jspecify)
+}

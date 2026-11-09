@@ -13,7 +13,7 @@ import io.github.mfuerstenau.leia.protocol.analysis.Token;
 import io.github.mfuerstenau.leia.protocol.analysis.TokenStage;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalInt;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@code analyze}: the tokens an analyzer makes of a text, to see why a query matches or not (ADR
@@ -27,12 +27,13 @@ final class AnalyzeTool implements McpTool<AnalyzeTool.Arguments, AnalyzeTool.Re
             @Description("The text to analyze, at most " + AnalyzeParams.MAX_TEXT_LENGTH + " characters")
             String text,
 
-            @Description("By simple or class name, as in search; StandardAnalyzer by default")
-            Optional<String> analyzer,
+            @Description("By simple or class name, as in search; StandardAnalyzer by default") @Nullable
+            String analyzer,
 
             @Description("The most tokens shown, from 1 to " + AnalyzeResult.MAX_TOKENS + "; " + DEFAULT_TOKENS
                     + " by default")
-            OptionalInt maxTokens) {}
+            @Nullable
+            Integer maxTokens) {}
 
     record Result(
             @Description("The analyzer's class name") String analyzer,
@@ -42,8 +43,8 @@ final class AnalyzeTool implements McpTool<AnalyzeTool.Arguments, AnalyzeTool.Re
             @Description("The tokens the text makes, counted up to " + AnalyzeResult.MAX_TOKENS)
             int tokenCount,
 
-            @Description("Present, and true, only if tokens are left out")
-            Optional<Boolean> cut) {}
+            @Description("Present, and true, only if tokens are left out") @Nullable
+            Boolean cut) {}
 
     record AnalyzedToken(
             String term,
@@ -56,8 +57,8 @@ final class AnalyzeTool implements McpTool<AnalyzeTool.Arguments, AnalyzeTool.Re
 
             String type,
 
-            @Description("How many positions the token spans; absent if 1")
-            OptionalInt positionLength) {}
+            @Description("How many positions the token spans; absent if 1") @Nullable
+            Integer positionLength) {}
 
     @Override
     public String name() {
@@ -83,9 +84,8 @@ final class AnalyzeTool implements McpTool<AnalyzeTool.Arguments, AnalyzeTool.Re
     @Override
     public Result call(Arguments arguments, Call call) throws ToolException, Jobs.Cancelled {
         int maxTokens = Slices.bounded("maxTokens", arguments.maxTokens(), DEFAULT_TOKENS, 1, AnalyzeResult.MAX_TOKENS);
-        Analyzer analyzer = arguments.analyzer().isPresent()
-                ? Analyzers.named(arguments.analyzer().get(), new Analyzers.Names(call))
-                : Analyzers.STANDARD;
+        String named = arguments.analyzer();
+        Analyzer analyzer = named != null ? Analyzers.named(named, new Analyzers.Names(call)) : Analyzers.STANDARD;
         AnalyzeResult result =
                 call.call(Methods.ANALYZE, new AnalyzeParams(analyzer, arguments.text(), Optional.empty()));
         TokenStage stage = result.stages().getLast();
@@ -105,6 +105,6 @@ final class AnalyzeTool implements McpTool<AnalyzeTool.Arguments, AnalyzeTool.Re
                 token.startOffset(),
                 token.endOffset(),
                 token.type(),
-                token.positionLength() == 1 ? OptionalInt.empty() : OptionalInt.of(token.positionLength()));
+                token.positionLength() == 1 ? null : token.positionLength());
     }
 }

@@ -19,7 +19,7 @@ import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
-import java.util.OptionalLong;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@code check_index}: Lucene's {@code CheckIndex} on the open index, read-only (ADR 0112). The
@@ -31,18 +31,20 @@ final class CheckIndexTool implements McpTool<CheckIndexTool.Arguments, CheckInd
             @Description("How thoroughly, from " + StartCheckIndexParams.MIN_LEVEL + " to "
                     + StartCheckIndexParams.MAX_LEVEL + ": 1 verifies the checksums of every file (the default), 2"
                     + " also checks every part of each segment, 3 also runs the slow checks")
-            OptionalInt level,
+            @Nullable
+            Integer level,
 
             @Description("The indexes, and in them the segments, to check; all of them by default. Narrow a large"
                     + " index down: a check of every segment can take long")
-            Optional<List<Target>> only) {}
+            @Nullable
+            List<Target> only) {}
 
     record Target(
             @Description("The index directory, as index_info lists it in indexes or skipped")
             String path,
 
-            @Description("The segments of its commit to check, such as _0, not empty; all of them by default")
-            Optional<List<String>> segments) {}
+            @Description("The segments of its commit to check, such as _0, not empty; all of them by default") @Nullable
+            List<String> segments) {}
 
     record Result(
             @Description("Whether no problem was found in any index")
@@ -56,53 +58,57 @@ final class CheckIndexTool implements McpTool<CheckIndexTool.Arguments, CheckInd
     record Index(
             @Description("The index directory") String path,
 
-            @Description("Present, and true, only for an index that was left out when the path was opened")
-            Optional<Boolean> skipped,
+            @Description("Present, and true, only for an index that was left out when the path was opened") @Nullable
+            Boolean skipped,
 
             @Description("Whether no problem was found") boolean clean,
 
             @Description("Why the index couldn't be checked at all, such as no segments_N; then the rest says nothing")
-            Optional<String> error,
+            @Nullable
+            String error,
 
-            @Description("The segments_N file of the latest commit, which is the one checked")
-            Optional<String> segmentsFile,
+            @Description("The segments_N file of the latest commit, which is the one checked") @Nullable
+            String segmentsFile,
 
-            @Description("Present, and true, only if the latest commit or an older one couldn't be read")
-            Optional<Boolean> missingSegments,
+            @Description("Present, and true, only if the latest commit or an older one couldn't be read") @Nullable
+            Boolean missingSegments,
 
-            @Description("Present, and true, only if a newer Lucene than leia's wrote the index")
-            Optional<Boolean> toolOutOfDate,
+            @Description("Present, and true, only if a newer Lucene than leia's wrote the index") @Nullable
+            Boolean toolOutOfDate,
 
             @Description("Present, and true, only if the commit's counter for segment names is not above every"
                     + " segment's name")
-            Optional<Boolean> invalidCounter,
+            @Nullable
+            Boolean invalidCounter,
 
             @Description("The segments of the latest commit")
             int segmentCount,
 
-            @Description("The segments that failed a test; absent if 0")
-            OptionalInt badSegments,
+            @Description("The segments that failed a test; absent if 0") @Nullable
+            Integer badSegments,
 
-            @Description("The documents in the bad segments; absent if 0")
-            OptionalInt lostDocs,
+            @Description("The documents in the bad segments; absent if 0") @Nullable
+            Integer lostDocs,
 
             @Description("The segments that failed, with why; the ones that passed aren't listed. Absent if none")
-            Optional<List<FailedSegment>> failedSegments,
+            @Nullable
+            List<FailedSegment> failedSegments,
 
-            @Description("The segments that were asked for with only; absent if the whole index was")
-            Optional<List<String>> onlySegments,
+            @Description("The segments that were asked for with only; absent if the whole index was") @Nullable
+            List<String> onlySegments,
 
             @Description(
                     "The segments asked for that aren't in the latest commit; then clean is false. Absent if" + " none")
-            Optional<List<String>> segmentsNotFound) {}
+            @Nullable
+            List<String> segmentsNotFound) {}
 
     record FailedSegment(
             String name,
 
             @Description("Documents including deleted ones") int maxDoc,
 
-            @Description("The segment's codec, if its .si file could be read")
-            Optional<String> codec,
+            @Description("The segment's codec, if its .si file could be read") @Nullable
+            String codec,
 
             @Description("The test it failed and why, with the causes")
             String error) {}
@@ -141,18 +147,17 @@ final class CheckIndexTool implements McpTool<CheckIndexTool.Arguments, CheckInd
             if (!opened.get().features().contains(Feature.CHECK_INDEX)) {
                 throw ToolError.notSupported("The Lucene runtime that reads this index can't check it");
             }
-            if (arguments.level().isPresent() && !opened.get().features().contains(Feature.CHECK_LEVELS)) {
+            if (arguments.level() != null && !opened.get().features().contains(Feature.CHECK_LEVELS)) {
                 throw ToolError.notSupported(
                         "The Lucene runtime that reads this index checks at its one level only: leave level out");
             }
         }
         StartCheckIndexParams params = new StartCheckIndexParams(
-                arguments.level(),
+                Optionals.optionalInt(arguments.level()),
                 OptionalInt.empty(),
-                arguments
-                        .only()
+                Optional.ofNullable(arguments.only())
                         .map(only -> only.stream()
-                                .map(target -> new CheckTarget(target.path(), target.segments()))
+                                .map(target -> new CheckTarget(target.path(), Optional.ofNullable(target.segments())))
                                 .toList()));
         Lines lines = new Lines();
         CheckIndexResult checked = call.job(
@@ -162,7 +167,7 @@ final class CheckIndexTool implements McpTool<CheckIndexTool.Arguments, CheckInd
                 jobId -> new GetCheckIndexParams(jobId, lines.count),
                 lines::add,
                 poll -> poll.result().isPresent(),
-                poll -> new Jobs.Progress(poll.lineCount(), OptionalLong.empty()));
+                poll -> new Jobs.Progress(poll.lineCount(), null));
         return new Result(
                 checked.indexes().stream().allMatch(IndexCheck::clean),
                 checked.indexes().stream().map(CheckIndexTool::index).toList(),
@@ -188,8 +193,8 @@ final class CheckIndexTool implements McpTool<CheckIndexTool.Arguments, CheckInd
                 check.path(),
                 Absent.flag(check.skipped()),
                 check.clean(),
-                check.error(),
-                check.segmentsFile(),
+                check.error().orElse(null),
+                check.segmentsFile().orElse(null),
                 Absent.flag(check.missingSegments()),
                 Absent.flag(check.toolOutOfDate()),
                 Absent.flag(!check.validCounter()),
@@ -197,7 +202,7 @@ final class CheckIndexTool implements McpTool<CheckIndexTool.Arguments, CheckInd
                 Absent.nonZero(check.badSegments()),
                 Absent.nonZero(check.lostDocs()),
                 Absent.nonEmpty(failed),
-                check.onlySegments(),
+                check.onlySegments().orElse(null),
                 Absent.nonEmpty(check.segmentsNotFound()));
     }
 
@@ -205,7 +210,7 @@ final class CheckIndexTool implements McpTool<CheckIndexTool.Arguments, CheckInd
         return new FailedSegment(
                 segment.name(),
                 segment.maxDoc(),
-                segment.codec(),
+                segment.codec().orElse(null),
                 segment.error().orElseThrow());
     }
 }

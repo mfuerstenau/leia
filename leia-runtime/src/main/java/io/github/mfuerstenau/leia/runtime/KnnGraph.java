@@ -3,7 +3,7 @@ package io.github.mfuerstenau.leia.runtime;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalInt;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The HNSW graphs of a KNN vector field, segment by segment (ADR 0085). A node of a segment's graph
@@ -70,7 +70,12 @@ public interface KnnGraph {
      *     one, or 9.0 to 9.4's), or the segment was too small for Lucene to build one
      */
     record SegmentGraph(
-            int segment, Optional<String> name, int docBase, int maxDoc, int vectors, Optional<Shape> shape) {}
+            int segment,
+            @Nullable String name,
+            int docBase,
+            int maxDoc,
+            int vectors,
+            @Nullable Shape shape) {}
 
     /**
      * The levels of a graph.
@@ -80,7 +85,8 @@ public interface KnnGraph {
      * @param maxConn the most neighbours of a node on the levels above 0 (twice that on level 0);
      *     empty if the runtime's Lucene doesn't say, as 9.12 doesn't
      */
-    record Shape(List<Integer> levelSizes, Node entry, OptionalInt maxConn) {}
+    record Shape(
+            List<Integer> levelSizes, Node entry, @Nullable Integer maxConn) {}
 
     /**
      * A node of a graph.

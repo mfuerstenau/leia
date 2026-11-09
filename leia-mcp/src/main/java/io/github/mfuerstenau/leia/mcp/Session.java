@@ -13,6 +13,7 @@ import java.util.OptionalLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
+import org.jspecify.annotations.Nullable;
 
 /**
  * What MCP mode keeps between requests (ADR 0100 §7): the {@code Directory} of {@code --directory},
@@ -25,18 +26,18 @@ public final class Session {
     private static final Logger LOG = Logger.getLogger(Session.class.getName());
 
     private final DirectoryImpl defaultDirectory;
-    private final Optional<Path> home;
+    private final @Nullable Path home;
     private final List<Path> roots;
 
     /** Set by {@code open_index}, which runs alone (ADR 0101), or before the loop starts. */
     // An immutable value, published through volatile (ADR 0088)
     @SuppressWarnings("java:S3077")
-    private volatile Optional<OpenIndexResult> opened = Optional.empty();
+    private volatile @Nullable OpenIndexResult opened;
 
     /**
      * @param roots real paths, below which alone {@code open_index} opens; none for any path
      */
-    public Session(DirectoryImpl defaultDirectory, Optional<Path> home, List<Path> roots) {
+    public Session(DirectoryImpl defaultDirectory, @Nullable Path home, List<Path> roots) {
         this.defaultDirectory = defaultDirectory;
         this.home = home;
         this.roots = List.copyOf(roots);
@@ -48,27 +49,28 @@ public final class Session {
 
     /** The last index that was opened, while it is open: a failed open leaves it open. */
     public Optional<OpenIndexResult> opened() {
-        return opened;
+        return Optional.ofNullable(opened);
     }
 
     /** The documents of the open index, deleted ones included: the total of a scan over them; absent without. */
     public OptionalLong maxDoc() {
-        OptionalInt maxDoc = opened.map(OpenIndexResult::maxDoc).orElseGet(OptionalInt::empty);
+        OpenIndexResult result = opened;
+        OptionalInt maxDoc = result == null ? OptionalInt.empty() : result.maxDoc();
         return maxDoc.isPresent() ? OptionalLong.of(maxDoc.getAsInt()) : OptionalLong.empty();
     }
 
     public void opened(OpenIndexResult result) {
-        opened = Optional.of(result);
+        opened = result;
     }
 
     /** {@code path} with a leading {@code ~} replaced by the user's home, as the open prompt does. */
     public String expandHome(String path) {
-        if (!path.startsWith("~") || home.isEmpty()) {
+        if (!path.startsWith("~") || home == null) {
             return path;
         }
         String rest = path.substring(1);
         if (rest.isEmpty() || rest.charAt(0) == '/' || rest.charAt(0) == File.separatorChar) {
-            return home.get() + rest;
+            return home + rest;
         }
         return path;
     }

@@ -6,6 +6,7 @@ import io.github.mfuerstenau.leia.core.IndexOpenException;
 import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.support.Failures;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Optional;
@@ -48,7 +49,8 @@ final class Lucene10Commits implements Commits {
                     commit(details.commit()),
                     details.segments().stream().map(Lucene10Commits::segment).toList(),
                     details.files().stream()
-                            .map(file -> new CommitFile(file.name(), file.segment(), file.size()))
+                            .map(file -> new CommitFile(
+                                    file.name(), file.segment().orElse(null), Optionals.orNull(file.size())))
                             .toList()));
         }
     }
@@ -83,37 +85,40 @@ final class Lucene10Commits implements Commits {
                 segment.maxDoc(),
                 segment.docBase(),
                 segment.delCount(),
-                segment.delGen(),
+                Optionals.orNull(segment.delGen()),
                 segment.version().toString(),
                 segment.compound(),
-                segment.sizeInBytes(),
+                Optionals.orNull(segment.sizeInBytes()),
                 segment.diagnostics(),
                 segment.attributes(),
-                Optional.of(segment.id()),
-                Optional.of(segment.codec()),
-                Optional.of(new Formats(
+                segment.id(),
+                segment.codec(),
+                new Formats(
                         formats.postings(),
                         formats.docValues(),
                         formats.storedFields(),
                         formats.termVectors(),
                         formats.norms(),
                         // Lucene 10 always has them.
-                        Optional.of(formats.points()),
-                        Optional.of(formats.knnVectors()),
+                        formats.points(),
+                        formats.knnVectors(),
                         formats.fieldInfos(),
                         formats.segmentInfo(),
                         formats.liveDocs(),
-                        formats.compound())),
+                        formats.compound()),
                 segment.fieldFormats().stream()
                         .map(field -> new FieldFormats(
-                                field.field(), field.postings(), field.docValues(), field.knnVectors()))
+                                field.field(),
+                                field.postings().orElse(null),
+                                field.docValues().orElse(null),
+                                field.knnVectors().orElse(null)))
                         .toList(),
-                segment.fieldInfosMessage(),
-                segment.fieldInfosGen(),
-                segment.docValuesGen(),
+                segment.fieldInfosMessage().orElse(null),
+                Optionals.orNull(segment.fieldInfosGen()),
+                Optionals.orNull(segment.docValuesGen()),
                 segment.softDelCount(),
-                segment.minVersion().map(Version::toString),
-                segment.indexSort(),
+                segment.minVersion().map(Version::toString).orElse(null),
+                segment.indexSort().orElse(null),
                 segment.hasBlocks());
     }
 }

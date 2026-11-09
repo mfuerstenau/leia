@@ -2,7 +2,7 @@ package io.github.mfuerstenau.leia.runtime;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A point field's BKD tree, segment by segment, as leia-core's {@code Points} reads it from Lucene
@@ -48,8 +48,8 @@ public interface Points {
             int bytesPerDimension,
             long size,
             long docCount,
-            Optional<byte[]> min,
-            Optional<byte[]> max,
+            byte @Nullable [] min,
+            byte @Nullable [] max,
             List<Segment> segments) {}
 
     /**
@@ -63,7 +63,7 @@ public interface Points {
     @SuppressWarnings("java:S6218")
     record Segment(
             int segment,
-            Optional<String> name,
+            @Nullable String name,
             int docBase,
             int maxDoc,
             long size,

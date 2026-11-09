@@ -34,7 +34,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.ServiceLoader;
 import java.util.Set;
 import java.util.TreeMap;
@@ -107,7 +106,7 @@ class Lucene10IndexTest {
             assertThat(only.userData()).containsEntry("writer", "leia LegacyIndexWriter");
             assertThat(only.segmentVersions()).containsExactly("9.12.3");
             assertThat(only.luceneVersion()).contains("9.12.3");
-            assertThat(only.createdVersionMajor()).hasValue(9);
+            assertThat(only.createdVersionMajor()).isEqualTo(9);
             assertThat(only.segments())
                     .extracting(
                             RuntimeIndex.Segment::name,
@@ -115,17 +114,17 @@ class Lucene10IndexTest {
                             RuntimeIndex.Segment::maxDoc,
                             RuntimeIndex.Segment::numDocs)
                     .containsExactly(tuple("_0", 0, 3, 2));
-            assertThat(only.segments().getFirst().id()).isPresent();
+            assertThat(only.segments().getFirst().id()).isNotNull();
             assertThat(only.segments().getFirst().files()).contains("_0.si");
             assertThat(index.fields())
                     .extracting(RuntimeIndex.Field::name)
                     .containsExactly("id", "body", "vector", "number");
             RuntimeIndex.Field vector = index.fields().get(2);
             assertThat(vector.vectors())
-                    .contains(new RuntimeIndex.VectorFormat(
+                    .isEqualTo(new RuntimeIndex.VectorFormat(
                             3, RuntimeIndex.VectorEncoding.FLOAT32, RuntimeIndex.VectorSimilarity.EUCLIDEAN));
             assertThat(index.fields().get(3).pointDimensionCount()).isEqualTo(1);
-            assertThat(index.fields().get(1).terms()).contains(new RuntimeIndex.TermStats(3, 9, 9));
+            assertThat(index.fields().get(1).terms()).isEqualTo(new RuntimeIndex.TermStats(3, 9, 9));
             assertThat(index.directories()).containsExactly(testIndex("lucene9"));
             assertThat(index.directory()).isEqualTo(DirectoryKind.FS);
         }
@@ -139,15 +138,16 @@ class Lucene10IndexTest {
             assertThat(deleted.deleted()).isTrue();
             Documents.DocumentField body = deleted.fields().get(1);
             assertThat(body.stored()).containsExactly(new RuntimeIndex.StoredValue.Text("document number 2"));
-            assertThat(body.norm()).isPresent();
+            assertThat(body.norm()).isNotNull();
             assertThat(((RuntimeIndex.Vector.Floats)
-                                    deleted.fields().get(2).vector().orElseThrow())
+                                    Optional.ofNullable(deleted.fields().get(2).vector())
+                                            .orElseThrow())
                             .values())
                     .containsExactly(2f, 0f, 1f);
-            assertThat(documents.storedValues(0, 3, Optional.of(Set.of("id")), false))
+            assertThat(documents.storedValues(0, 3, Set.of("id"), false))
                     .extracting(Documents.StoredDocument::docId)
                     .containsExactly(0, 2);
-            assertThat(documents.storedValues(0, 3, Optional.empty(), true))
+            assertThat(documents.storedValues(0, 3, null, true))
                     .extracting(Documents.StoredDocument::deleted)
                     .containsExactly(false, true, false);
             // No term vectors in this index; a field it doesn't have has none either.
@@ -177,12 +177,12 @@ class Lucene10IndexTest {
     void readsTheTermsAndPostings() throws IOException {
         try (RuntimeIndex index = open("lucene9")) {
             Terms terms = index.terms().orElseThrow();
-            Terms.TermsPage page = terms.terms("body", Optional.of(utf8("3")), 2);
+            Terms.TermsPage page = terms.terms("body", utf8("3"), 2);
             assertThat(page.terms())
                     .extracting(term -> new String(term.term(), StandardCharsets.UTF_8))
                     .containsExactly("3", "document");
-            assertThat(page.next()).hasValueSatisfying(next -> assertThat(next).isEqualTo(utf8("number")));
-            assertThat(terms.terms("nope", Optional.empty(), 10).terms()).isEmpty();
+            assertThat(page.next()).satisfies(next -> assertThat(next).isEqualTo(utf8("number")));
+            assertThat(terms.terms("nope", null, 10).terms()).isEmpty();
 
             Terms.PostingsPage postings = terms.postings("body", utf8("number"), 0, 10, 0);
             assertThat(postings.docFreq()).isEqualTo(3);
@@ -196,7 +196,7 @@ class Lucene10IndexTest {
 
             assertThat(terms.positions(2, "body", utf8("number")).orElseThrow())
                     .singleElement()
-                    .satisfies(position -> assertThat(position.position()).hasValue(1));
+                    .satisfies(position -> assertThat(position.position()).isEqualTo(1));
             assertThat(terms.positions(0, "body", utf8("3"))).isEmpty();
 
             List<Long> progress = new ArrayList<>();
@@ -216,7 +216,7 @@ class Lucene10IndexTest {
             Search.ParsedQuery query = search.parse("number", BODY, STANDARD);
             assertThat(query).hasToString("body:number");
 
-            Search.SearchResults results = search.search(query, 0, 10, Optional.of(List.of("id")), _ -> {});
+            Search.SearchResults results = search.search(query, 0, 10, List.of("id"), _ -> {});
             assertThat(results.totalHits()).isEqualTo(2);
             assertThat(results.hits()).extracting(Search.Hit::docId).containsExactlyInAnyOrder(0, 2);
             assertThat(results.hits().getFirst().fields()).containsOnlyKeys("id");
@@ -228,12 +228,12 @@ class Lucene10IndexTest {
                     List.of(new Scoring.SortKey.Doc(true)),
                     0,
                     10,
-                    Optional.empty(),
+                    null,
                     _ -> {});
             assertThat(byDoc.hits()).extracting(Search.Hit::docId).containsExactly(2, 0);
             assertThat(byDoc.hits().getFirst().sortValues())
                     .singleElement()
-                    .satisfies(value -> assertThat(value.number()).contains(2));
+                    .satisfies(value -> assertThat(value.number()).isEqualTo(2));
             assertThatThrownBy(() -> scoring.search(
                             query,
                             new Scoring.Similarity.Bool(),
@@ -245,7 +245,7 @@ class Lucene10IndexTest {
                                     Scoring.SortMissing.DEFAULT)),
                             0,
                             10,
-                            Optional.empty(),
+                            null,
                             _ -> {}))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("no doc values");
@@ -275,7 +275,7 @@ class Lucene10IndexTest {
             Search search = index.search().orElseThrow();
             Search.ParsedQuery query = search.parse(
                     "body:*a*", new Search.ParserOptions("body", false, true, 0, 0, true, false), STANDARD);
-            assertThatThrownBy(() -> search.search(query, 0, 10, Optional.empty(), _ -> {
+            assertThatThrownBy(() -> search.search(query, 0, 10, null, _ -> {
                         throw new CancellationException("stop");
                     }))
                     .isInstanceOf(CancellationException.class);
@@ -288,21 +288,11 @@ class Lucene10IndexTest {
             Knn knn = index.knn().orElseThrow();
             Search search = index.search().orElseThrow();
             RuntimeIndex.Vector target = new RuntimeIndex.Vector.Floats(new float[] {3, 0, 1});
-            assertThat(search.search(
-                                    knn.approximate("vector", target, 1, Optional.empty()),
-                                    0,
-                                    10,
-                                    Optional.empty(),
-                                    _ -> {})
+            assertThat(search.search(knn.approximate("vector", target, 1, null), 0, 10, null, _ -> {})
                             .hits())
                     .extracting(Search.Hit::docId)
                     .containsExactly(2);
-            assertThat(search.search(
-                                    knn.exact("vector", target, Optional.of(search.term("id", utf8("1")))),
-                                    0,
-                                    10,
-                                    Optional.empty(),
-                                    _ -> {})
+            assertThat(search.search(knn.exact("vector", target, search.term("id", utf8("1"))), 0, 10, null, _ -> {})
                             .hits())
                     .extracting(Search.Hit::docId)
                     .containsExactly(0);
@@ -318,8 +308,7 @@ class Lucene10IndexTest {
             Points.Tree tree = points.tree("number");
             assertThat(tree.size()).isEqualTo(3);
             assertThat(tree.min())
-                    .hasValueSatisfying(
-                            min -> assertThat(HexFormat.of().formatHex(min)).isEqualTo("8000000a"));
+                    .satisfies(min -> assertThat(HexFormat.of().formatHex(min)).isEqualTo("8000000a"));
             Points.CellContents root = points.cell("number", 0, List.of());
             assertThat(root.cell().leaf()).isTrue();
             assertThat(root.points()).extracting(Points.LeafPoint::deleted).containsExactly(false, true, false);
@@ -455,7 +444,7 @@ class Lucene10IndexTest {
                 index.stats();
                 index.documents().orElseThrow().document(0);
                 Search search = index.search().orElseThrow();
-                search.search(search.parse("number OR the", BODY, STANDARD), 0, 10, Optional.empty(), _ -> {});
+                search.search(search.parse("number OR the", BODY, STANDARD), 0, 10, null, _ -> {});
                 index.rebuild().orElseThrow().rebuild(0, List.of("body"), _ -> {});
             }
             new Lucene10Runtime().commits().orElseThrow().commits(dir, DirectoryKind.FS);
@@ -496,7 +485,7 @@ class Lucene10IndexTest {
             assertThat(query).hasToString("number:[15 TO 30] body:missing");
             assertThat(index.search()
                             .orElseThrow()
-                            .search(query, 0, 10, Optional.empty(), _ -> {})
+                            .search(query, 0, 10, null, _ -> {})
                             .hits())
                     .extracting(Search.Hit::docId)
                     .containsExactly(2);
@@ -519,22 +508,13 @@ class Lucene10IndexTest {
                     .orElseThrow()
                     .like(
                             new MoreLikeThisSearch.Source.Text("number"),
-                            new MoreLikeThisSearch.Options(
-                                    List.of("body"),
-                                    1,
-                                    1,
-                                    OptionalInt.empty(),
-                                    25,
-                                    false,
-                                    0,
-                                    OptionalInt.empty(),
-                                    Set.of()),
+                            new MoreLikeThisSearch.Options(List.of("body"), 1, 1, null, 25, false, 0, null, Set.of()),
                             STANDARD);
             assertThat(query)
                     .hasToString("like(text \"number\", fields [body], minTermFreq 1, minDocFreq 1, maxQueryTerms 25)");
-            Search.SearchResults results = index.search().orElseThrow().search(query, 0, 10, Optional.empty(), _ -> {});
+            Search.SearchResults results = index.search().orElseThrow().search(query, 0, 10, null, _ -> {});
             assertThat(results.hits()).extracting(Search.Hit::docId).containsExactlyInAnyOrder(0, 2);
-            assertThat(results.likeTerms().orElseThrow())
+            assertThat(Optional.ofNullable(results.likeTerms()).orElseThrow())
                     .singleElement()
                     .satisfies(term -> assertThat(term.term()).isEqualTo("number"));
             assertThat(index.search().orElseThrow().matches(query, true, _ -> {}).docs().stream())
@@ -564,12 +544,12 @@ class Lucene10IndexTest {
             Search.ParsedQuery numbers = docValues.numbers(
                     "quantity",
                     DocValuesSearch.NumberEncoding.LONG,
-                    new DocValuesSearch.Match.Range<>(Optional.of("0"), Optional.empty(), true, true));
+                    new DocValuesSearch.Match.Range<>("0", null, true, true));
             Search.ParsedQuery prefix = docValues.prefix("category", new byte[0]);
-            Search.ParsedQuery binary = docValues.bytes(
-                    "checksum", new DocValuesSearch.Match.Range<>(Optional.empty(), Optional.empty(), true, true));
+            Search.ParsedQuery binary =
+                    docValues.bytes("checksum", new DocValuesSearch.Match.Range<>(null, null, true, true));
             for (Search.ParsedQuery query : List.of(numbers, prefix, binary)) {
-                Search.SearchResults results = search.search(query, 0, 1, Optional.empty(), _ -> {});
+                Search.SearchResults results = search.search(query, 0, 1, null, _ -> {});
                 assertThat(results.totalHits()).as(query.toString()).isPositive();
                 assertThat(search.explain(query, results.hits().getFirst().docId(), _ -> {})
                                 .match())
@@ -603,10 +583,10 @@ class Lucene10IndexTest {
     @Test
     void readsRangeBoundsAsDates() throws Exception {
         Search.Dates dates = new Search.Dates(
-                Optional.of(Search.DateResolution.YEAR),
+                Search.DateResolution.YEAR,
                 Map.of("published", Search.DateResolution.MILLISECOND),
-                Optional.of(Locale.GERMANY),
-                Optional.of(ZoneId.of("Europe/Berlin")));
+                Locale.GERMANY,
+                ZoneId.of("Europe/Berlin"));
         try (RuntimeIndex index = open("lucene9")) {
             Search.ParsedQuery query = index.search()
                     .orElseThrow()
@@ -688,7 +668,7 @@ class Lucene10IndexTest {
             assertThat(seen.stored().get(74)).contains("deleted_only");
             assertThat(seen.deleted()).isEqualTo(13);
             assertThat(segments(index))
-                    .allSatisfy(segment -> assertThat(segment.id()).isPresent());
+                    .allSatisfy(segment -> assertThat(segment.id()).isNotNull());
         }
     }
 
@@ -710,7 +690,7 @@ class Lucene10IndexTest {
             for (boolean includeDeleted : new boolean[] {false, true}) {
                 assertThat(bySegment(index, fields, includeDeleted, IntUnaryOperator.identity()))
                         .containsExactlyElementsOf(
-                                documents.storedValues(0, index.maxDoc(), fields, includeDeleted).stream()
+                                documents.storedValues(0, index.maxDoc(), fields.orElse(null), includeDeleted).stream()
                                         .map(document -> described(document, document.docId()))
                                         .toList());
             }
@@ -720,18 +700,17 @@ class Lucene10IndexTest {
             List<Integer> read = new ArrayList<>();
             // The next odd document at or after doc.
             documents.storedValues(
-                    segment, Optional.empty(), true, doc -> doc | 1, document -> read.add(document.docId()), _ -> {});
+                    segment, null, true, doc -> doc | 1, document -> read.add(document.docId()), _ -> {});
             assertThat(read).hasSize(info.maxDoc() / 2).allMatch(doc -> doc % 2 == 1);
             segment++;
         }
-        assertThatThrownBy(() ->
-                        documents.storedValues(0, Optional.empty(), true, IntUnaryOperator.identity(), _ -> {}, _ -> {
-                            throw new CancellationException();
-                        }))
+        assertThatThrownBy(() -> documents.storedValues(0, null, true, IntUnaryOperator.identity(), _ -> {}, _ -> {
+                    throw new CancellationException();
+                }))
                 .isInstanceOf(CancellationException.class);
         int segments = segment;
-        assertThatThrownBy(() -> documents.storedValues(
-                        segments, Optional.empty(), true, IntUnaryOperator.identity(), _ -> {}, _ -> {}))
+        assertThatThrownBy(() ->
+                        documents.storedValues(segments, null, true, IntUnaryOperator.identity(), _ -> {}, _ -> {}))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -748,7 +727,7 @@ class Lucene10IndexTest {
                 List<Long> progress = new ArrayList<>();
                 documents.storedValues(
                         segment,
-                        fields,
+                        fields.orElse(null),
                         includeDeleted,
                         next,
                         document -> read.add(described(document, base + document.docId())),

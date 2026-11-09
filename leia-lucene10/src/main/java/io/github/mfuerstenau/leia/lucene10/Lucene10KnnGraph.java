@@ -3,6 +3,7 @@ package io.github.mfuerstenau.leia.lucene10;
 import io.github.mfuerstenau.leia.core.KnnGraphs;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.runtime.KnnGraph;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import java.io.IOException;
 import java.util.Optional;
 
@@ -23,13 +24,16 @@ final class Lucene10KnnGraph implements KnnGraph {
                 graph.segments().stream()
                         .map(segment -> new SegmentGraph(
                                 segment.segment(),
-                                segment.name(),
+                                segment.name().orElse(null),
                                 segment.docBase(),
                                 segment.maxDoc(),
                                 segment.vectors(),
                                 segment.shape()
-                                        .map(shape ->
-                                                new Shape(shape.levelSizes(), node(shape.entry()), shape.maxConn()))))
+                                        .map(shape -> new Shape(
+                                                shape.levelSizes(),
+                                                node(shape.entry()),
+                                                Optionals.orNull(shape.maxConn())))
+                                        .orElse(null)))
                         .toList());
     }
 

@@ -24,10 +24,10 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.StreamSupport;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -69,8 +69,7 @@ class McpServerTest {
         blocking = new BlockingTool();
         List<McpTool<?, ?>> tools = new ArrayList<>(Tools.ALL);
         tools.add(blocking);
-        McpServer server =
-                new McpServer(backend, version, new Session(DirectoryImpl.FS, Optional.empty(), List.of()), tools);
+        McpServer server = new McpServer(backend, version, new Session(DirectoryImpl.FS, null, List.of()), tools);
         server.open(demo);
         client = new McpClient(server);
     }
@@ -247,8 +246,7 @@ class McpServerTest {
 
     @Test
     void analyzesWithoutAnOpenIndex() throws Exception {
-        McpServer server =
-                new McpServer(backend, version, new Session(DirectoryImpl.FS, Optional.empty(), List.of()), Tools.ALL);
+        McpServer server = new McpServer(backend, version, new Session(DirectoryImpl.FS, null, List.of()), Tools.ALL);
         McpClient closed = new McpClient(server);
         try {
             assertThat(closed.structured(1, "analyze", "{\"text\":\"The Lamp\"}")
@@ -548,7 +546,7 @@ class McpServerTest {
         String refusal =
                 "open_index opens only paths below " + roots.get(0) + ", " + roots.get(1) + " (INVALID_PARAMS)";
 
-        McpClient rooted = serve(new Session(DirectoryImpl.FS, Optional.empty(), roots), Tools.ALL);
+        McpClient rooted = serve(new Session(DirectoryImpl.FS, null, roots), Tools.ALL);
         try {
             assertThat(rooted.structured(1, "open_index", "{\"path\":\"" + demo + "\"}")
                             .path("path")
@@ -574,7 +572,7 @@ class McpServerTest {
 
     @Test
     void servesThePinnedIndexWithoutOpenIndex() throws Exception {
-        McpClient pinned = serve(new Session(DirectoryImpl.FS, Optional.empty(), List.of()), Tools.PINNED);
+        McpClient pinned = serve(new Session(DirectoryImpl.FS, null, List.of()), Tools.PINNED);
         try {
             JsonNode initialized = pinned.request(1, "initialize", initialize("2025-06-18"));
             JsonNode tools =
@@ -1191,7 +1189,7 @@ class McpServerTest {
 
     @Test
     void refusesKnnWithoutTheFeature() throws Exception {
-        Session session = new Session(DirectoryImpl.FS, Optional.empty(), List.of());
+        Session session = new Session(DirectoryImpl.FS, null, List.of());
         McpClient plain = serve(session, Tools.ALL);
         try {
             OpenIndexResult opened = session.opened().orElseThrow();
@@ -1530,7 +1528,7 @@ class McpServerTest {
 
     @Test
     void refusesACheckWithoutTheFeatures() throws Exception {
-        Session session = new Session(DirectoryImpl.FS, Optional.empty(), List.of());
+        Session session = new Session(DirectoryImpl.FS, null, List.of());
         McpClient plain = serve(session, Tools.ALL);
         try {
             withoutFeature(session, Feature.CHECK_LEVELS);
@@ -1613,7 +1611,7 @@ class McpServerTest {
      */
     static final class BlockingTool implements McpTool<BlockingTool.Arguments, BlockingTool.Result> {
 
-        record Arguments(Optional<Boolean> finish) {}
+        record Arguments(@Nullable Boolean finish) {}
 
         record Result() {}
 
@@ -1658,7 +1656,7 @@ class McpServerTest {
                     false,
                     Optional.of(List.of()),
                     Optional.empty());
-            if (arguments.finish().orElse(false)) {
+            if (Boolean.TRUE.equals(arguments.finish())) {
                 long jobId = call.call(Methods.START_SEARCH, params).jobId();
                 polled.countDown();
                 try {
@@ -1683,7 +1681,7 @@ class McpServerTest {
                             }
                             return Optional.<Result>empty();
                         },
-                        poll -> new Jobs.Progress(poll.docsSearched(), OptionalLong.empty()));
+                        poll -> new Jobs.Progress(poll.docsSearched(), null));
             } catch (Jobs.Cancelled e) {
                 cancelled.countDown();
                 throw e;

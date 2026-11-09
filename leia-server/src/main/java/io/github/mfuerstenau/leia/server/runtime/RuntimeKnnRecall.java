@@ -33,7 +33,7 @@ import java.util.OptionalInt;
 public final class RuntimeKnnRecall {
 
     /** No stored fields are read for the hits. */
-    private static final Optional<List<String>> NO_FIELDS = Optional.of(List.of());
+    private static final List<String> NO_FIELDS = List.of();
 
     private RuntimeKnnRecall() {}
 
@@ -176,7 +176,7 @@ public final class RuntimeKnnRecall {
         OptionalInt self = leaveOutTarget ? target.docId() : OptionalInt.empty();
         List<Search.Hit> approximate = top(
                 search.search(
-                                knn.approximate(field, target.vector(), asked, filter),
+                                knn.approximate(field, target.vector(), asked, filter.orElse(null)),
                                 0,
                                 asked,
                                 false,
@@ -186,7 +186,13 @@ public final class RuntimeKnnRecall {
                 self,
                 k);
         List<Search.Hit> exact = top(
-                search.search(knn.exact(field, target.vector(), filter), 0, asked, false, NO_FIELDS, progress)
+                search.search(
+                                knn.exact(field, target.vector(), filter.orElse(null)),
+                                0,
+                                asked,
+                                false,
+                                NO_FIELDS,
+                                progress)
                         .hits(),
                 self,
                 k);

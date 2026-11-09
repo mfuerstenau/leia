@@ -2,10 +2,9 @@ package io.github.mfuerstenau.leia.runtime;
 
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.function.Consumer;
 import java.util.function.LongConsumer;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Lucene's {@code CheckIndex} on the latest commit of an index directory, without a reader and
@@ -36,16 +35,19 @@ public interface Check {
      * @param segments the names of the segments of the latest commit to check; empty for all of them.
      *     A name that isn't in the commit is skipped without a word, as Lucene does
      */
-    record Options(OptionalInt level, OptionalInt threads, Optional<List<String>> segments) {
+    record Options(
+            @Nullable Integer level,
+            @Nullable Integer threads,
+            @Nullable List<String> segments) {
 
         /** Every segment at the default level, on every processor. */
         public static Options defaults() {
-            return new Options(OptionalInt.empty(), OptionalInt.empty(), Optional.empty());
+            return new Options(null, null, null);
         }
 
         /** Every segment at {@code level}, on every processor. */
         public static Options atLevel(int level) {
-            return new Options(OptionalInt.of(level), OptionalInt.empty(), Optional.empty());
+            return new Options(level, null, null);
         }
     }
 
@@ -72,8 +74,8 @@ public interface Check {
      */
     record CheckResult(
             boolean clean,
-            Optional<String> error,
-            Optional<String> segmentsFile,
+            @Nullable String error,
+            @Nullable String segmentsFile,
             boolean missingSegments,
             boolean toolOutOfDate,
             int segmentCount,
@@ -84,8 +86,7 @@ public interface Check {
 
         /** A directory that could not be checked at all. */
         public static CheckResult failed(String error) {
-            return new CheckResult(
-                    false, Optional.of(error), Optional.empty(), false, false, 0, 0, 0, false, List.of());
+            return new CheckResult(false, error, null, false, false, 0, 0, 0, false, List.of());
         }
     }
 
@@ -100,11 +101,11 @@ public interface Check {
     record SegmentCheck(
             String name,
             int maxDoc,
-            Optional<String> codec,
+            @Nullable String codec,
             boolean compound,
             int files,
             long sizeBytes,
             boolean hasDeletions,
             boolean openReaderPassed,
-            Optional<String> error) {}
+            @Nullable String error) {}
 }

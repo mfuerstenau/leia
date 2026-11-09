@@ -14,10 +14,12 @@ import io.github.mfuerstenau.leia.protocol.knn.KnnGraphSegment;
 import io.github.mfuerstenau.leia.protocol.knn.KnnGraphShape;
 import io.github.mfuerstenau.leia.runtime.KnnGraph;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.points.PointMapper;
 import java.io.IOException;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * The HNSW graphs of KNN vector fields on a runtime with a {@link KnnGraph} group (ADR 0085), as the
@@ -53,13 +55,15 @@ public final class RuntimeKnnGraph {
                         .map(segment -> new KnnGraphSegment(
                                 segment.segment(),
                                 PointMapper.indexOf(docBases, segment.docBase()),
-                                segment.name(),
+                                Optional.ofNullable(segment.name()),
                                 segment.docBase(),
                                 segment.maxDoc(),
                                 segment.vectors(),
-                                segment.shape()
+                                Optional.ofNullable(segment.shape())
                                         .map(shape -> new KnnGraphShape(
-                                                shape.levelSizes(), node(shape.entry()), shape.maxConn()))))
+                                                shape.levelSizes(),
+                                                node(shape.entry()),
+                                                Optionals.optionalInt(shape.maxConn())))))
                         .toList());
     }
 
@@ -144,7 +148,7 @@ public final class RuntimeKnnGraph {
                 .findFirst()
                 .orElseThrow(
                         () -> new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + field + "' in the index"));
-        return info.vectors()
+        return Optional.ofNullable(info.vectors())
                 .orElseThrow(() -> new RpcException(
                         ErrorCode.INVALID_PARAMS, "Invalid params: the field '" + field + "' has no KNN vectors"));
     }

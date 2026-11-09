@@ -31,9 +31,11 @@ final class Lucene10Check implements Check {
         IndexCheck.Result result = IndexCheck.check(
                 dir,
                 Lucene10Index.directoryImpl(kind),
-                options.level().orElse(DEFAULT_LEVEL),
-                options.threads().orElse(Runtime.getRuntime().availableProcessors()),
-                options.segments().orElse(null),
+                options.level() != null ? options.level() : DEFAULT_LEVEL,
+                options.threads() != null
+                        ? options.threads()
+                        : Runtime.getRuntime().availableProcessors(),
+                options.segments(),
                 line,
                 progress::accept);
         Optional<String> error = result.error();
@@ -42,8 +44,8 @@ final class Lucene10Check implements Check {
         }
         return new CheckResult(
                 result.clean(),
-                result.error(),
-                result.segmentsFile(),
+                result.error().orElse(null),
+                result.segmentsFile().orElse(null),
                 result.missingSegments(),
                 result.toolOutOfDate(),
                 result.segmentCount(),
@@ -54,13 +56,13 @@ final class Lucene10Check implements Check {
                         .map(segment -> new SegmentCheck(
                                 segment.name(),
                                 segment.maxDoc(),
-                                segment.codec(),
+                                segment.codec().orElse(null),
                                 segment.compound(),
                                 segment.files(),
                                 segment.sizeBytes(),
                                 segment.hasDeletions(),
                                 segment.openReaderPassed(),
-                                segment.error()))
+                                segment.error().orElse(null)))
                         .toList());
     }
 }

@@ -3,7 +3,7 @@ package io.github.mfuerstenau.leia.mcp.tools;
 import io.github.mfuerstenau.leia.mcp.ToolError;
 import io.github.mfuerstenau.leia.mcp.ToolException;
 import io.github.mfuerstenau.leia.server.document.ValueSlices;
-import java.util.OptionalInt;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Slices of values and checks of limits (ADR 0100 §6). A length counts the characters of the
@@ -32,8 +32,8 @@ final class Slices {
      *
      * @throws ToolException if it is below {@code min} or above {@code max}
      */
-    static int bounded(String name, OptionalInt value, int fallback, int min, int max) throws ToolException {
-        int given = value.orElse(fallback);
+    static int bounded(String name, @Nullable Integer value, int fallback, int min, int max) throws ToolException {
+        int given = value != null ? value : fallback;
         if (given < min || given > max) {
             throw ToolError.invalid(name + " must be from " + min + " to " + max + ", not " + given);
         }

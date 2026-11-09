@@ -5,6 +5,7 @@ import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.IndexReadException;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.support.Failures;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -74,14 +75,14 @@ final class Lucene3Commits implements Commits {
             SegmentInfos infos = read(directory, name);
             List<Segment> segments = new ArrayList<>();
             Map<String, CommitFile> files = new TreeMap<>();
-            files.put(name, new CommitFile(name, Optional.empty(), size(directory, name)));
+            files.put(name, new CommitFile(name, null, Optionals.orNull(size(directory, name))));
             int docBase = 0;
             for (SegmentInfo info : infos) {
                 segments.add(segment(info, docBase));
                 docBase += info.docCount;
                 for (String file : info.files()) {
                     // A doc store shared by several segments belongs to the first.
-                    files.putIfAbsent(file, new CommitFile(file, Optional.of(info.name), size(directory, file)));
+                    files.putIfAbsent(file, new CommitFile(file, info.name, Optionals.orNull(size(directory, file))));
                 }
             }
             return Optional.of(new CommitDetails(commit(infos), List.copyOf(segments), List.copyOf(files.values())));
@@ -149,10 +150,10 @@ final class Lucene3Commits implements Commits {
                 info.docCount,
                 docBase,
                 info.getDelCount(),
-                delGen(info),
+                Optionals.orNull(delGen(info)),
                 version(info),
                 info.getUseCompoundFile(),
-                size,
+                Optionals.orNull(size),
                 diagnostics == null ? Map.of() : new TreeMap<>(diagnostics),
                 attributes);
     }

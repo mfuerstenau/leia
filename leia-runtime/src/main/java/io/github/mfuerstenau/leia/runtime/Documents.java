@@ -4,12 +4,11 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalInt;
-import java.util.OptionalLong;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.IntUnaryOperator;
 import java.util.function.LongConsumer;
+import org.jspecify.annotations.Nullable;
 
 /** The documents of a {@link RuntimeIndex}. */
 public interface Documents {
@@ -31,7 +30,7 @@ public interface Documents {
      * @param fields the fields whose values to read; empty for all of them
      * @throws IllegalArgumentException unless {@code 0 <= fromDoc <= toDoc <= maxDoc}
      */
-    List<StoredDocument> storedValues(int fromDoc, int toDoc, Optional<Set<String>> fields, boolean includeDeleted)
+    List<StoredDocument> storedValues(int fromDoc, int toDoc, @Nullable Set<String> fields, boolean includeDeleted)
             throws IOException;
 
     /**
@@ -52,7 +51,7 @@ public interface Documents {
      */
     void storedValues(
             int segment,
-            Optional<Set<String>> fields,
+            @Nullable Set<String> fields,
             boolean includeDeleted,
             IntUnaryOperator next,
             Consumer<StoredDocument> sink,
@@ -103,20 +102,20 @@ public interface Documents {
      */
     record DocumentField(
             String name,
-            OptionalLong norm,
+            @Nullable Long norm,
             List<RuntimeIndex.StoredValue> stored,
-            Optional<DocValues> docValues,
+            @Nullable DocValues docValues,
             boolean hasTermVector,
-            Optional<RuntimeIndex.Vector> vector) {
+            RuntimeIndex.@Nullable Vector vector) {
 
         /** What a document has in a field, without a KNN vector, as before Lucene 9. */
         public DocumentField(
                 String name,
-                OptionalLong norm,
+                @Nullable Long norm,
                 List<RuntimeIndex.StoredValue> stored,
-                Optional<DocValues> docValues,
+                @Nullable DocValues docValues,
                 boolean hasTermVector) {
-            this(name, norm, stored, docValues, hasTermVector, Optional.empty());
+            this(name, norm, stored, docValues, hasTermVector, null);
         }
     }
 
@@ -147,7 +146,11 @@ public interface Documents {
      *
      * @param payload its payload; empty if it has none
      */
-    record Position(OptionalInt position, OptionalInt startOffset, OptionalInt endOffset, Optional<byte[]> payload) {}
+    record Position(
+            @Nullable Integer position,
+            @Nullable Integer startOffset,
+            @Nullable Integer endOffset,
+            byte @Nullable [] payload) {}
 
     /** A term of a term vector. */
     // Never compared, hashed or used as a key (ADR 0088)

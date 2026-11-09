@@ -3,6 +3,7 @@ package io.github.mfuerstenau.leia.lucene3;
 import io.github.mfuerstenau.leia.runtime.Search.AnalyzerSpec;
 import io.github.mfuerstenau.leia.runtime.Search.InvalidAnalyzerException;
 import io.github.mfuerstenau.leia.runtime.Search.UnsupportedAnalyzerException;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import io.github.mfuerstenau.leia.runtime.support.WordFiles;
 import java.util.HashMap;
 import java.util.List;
@@ -57,27 +58,27 @@ final class Lucene3Analyzers {
             case AnalyzerSpec.Preset preset -> {
                 String name = preset.simpleName();
                 if (NAMES.contains(name)
-                        && (preset.stemExclusion().isPresent()
-                                || preset.stemOverride().isPresent()
-                                || preset.japanese().isPresent()
-                                || preset.korean().isPresent()
-                                || preset.collation().isPresent()
-                                || preset.japaneseCompletion().isPresent())) {
+                        && (preset.stemExclusion() != null
+                                || preset.stemOverride() != null
+                                || preset.japanese() != null
+                                || preset.korean() != null
+                                || preset.collation() != null
+                                || preset.japaneseCompletion() != null)) {
                     throw new UnsupportedAnalyzerException(
                             "options of " + name + " other than stop words and the longest token");
                 }
-                Optional<AnalyzerSpec.WordSet> stopwordSet = preset.stopwords();
+                Optional<AnalyzerSpec.WordSet> stopwordSet = Optional.ofNullable(preset.stopwords());
                 Optional<List<String>> stopwords = stopwordSet.isPresent()
                         ? Optional.of(WordFiles.words("stop words", stopwordSet.get()))
                         : Optional.empty();
-                yield named(name, stopwords, preset.maxTokenLength());
+                yield named(name, stopwords, Optionals.optionalInt(preset.maxTokenLength()));
             }
             case AnalyzerSpec.Custom _ -> throw new UnsupportedAnalyzerException("custom analyzers");
             case AnalyzerSpec.Wrapped wrapped -> {
-                if (wrapped.shingles().isPresent()) {
+                if (wrapped.shingles() != null) {
                     throw new UnsupportedAnalyzerException("shingles");
                 }
-                Optional<AnalyzerSpec.LimitTokenCount> limit = wrapped.limitTokenCount();
+                Optional<AnalyzerSpec.LimitTokenCount> limit = Optional.ofNullable(wrapped.limitTokenCount());
                 if (limit.isEmpty()) {
                     yield analyzer(wrapped.analyzer());
                 }

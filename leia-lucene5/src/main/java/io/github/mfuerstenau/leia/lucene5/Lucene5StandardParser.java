@@ -6,6 +6,7 @@ import io.github.mfuerstenau.leia.runtime.StandardSearch.Options;
 import io.github.mfuerstenau.leia.runtime.StandardSearch.PointType;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TimeZone;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.document.DateTools;
@@ -53,14 +54,16 @@ final class Lucene5StandardParser {
             parser.setFuzzyPrefixLength(options.fuzzyPrefixLength());
             parser.setEnablePositionIncrements(options.enablePositionIncrements());
             Dates dates = options.dates();
-            dates.resolution().map(Lucene5DateRangeQueryParser::resolution).ifPresent(parser::setDateResolution);
+            Optional.ofNullable(dates.resolution())
+                    .map(Lucene5DateRangeQueryParser::resolution)
+                    .ifPresent(parser::setDateResolution);
             Map<CharSequence, DateTools.Resolution> resolutions = new HashMap<>();
             dates.fields()
                     .forEach((field, resolution) ->
                             resolutions.put(field, Lucene5DateRangeQueryParser.resolution(resolution)));
             parser.setDateResolutionMap(resolutions);
-            dates.locale().ifPresent(parser::setLocale);
-            dates.timeZone().map(TimeZone::getTimeZone).ifPresent(parser::setTimeZone);
+            Optional.ofNullable(dates.locale()).ifPresent(parser::setLocale);
+            Optional.ofNullable(dates.timeZone()).map(TimeZone::getTimeZone).ifPresent(parser::setTimeZone);
             return parser.parse(expression, options.defaultField());
         } catch (ParseException e) {
             throw new InvalidQueryException(syntaxError(expression, e), e);

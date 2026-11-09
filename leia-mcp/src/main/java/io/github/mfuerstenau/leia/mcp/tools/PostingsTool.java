@@ -19,7 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
-import java.util.OptionalLong;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@code postings}: the documents that hold one exact term, a page at a time in document order,
@@ -41,68 +41,74 @@ final class PostingsTool implements McpTool<PostingsTool.Arguments, PostingsTool
             @Description("The term as text, or in hex with binary, as terms lists it")
             String term,
 
-            @Description("Whether term is the term's bytes in hex; false by default")
-            Optional<Boolean> binary,
+            @Description("Whether term is the term's bytes in hex; false by default") @Nullable
+            Boolean binary,
 
-            @Description("Where the page starts: the nextDoc of the last page; 0 by default")
-            OptionalInt fromDoc,
+            @Description("Where the page starts: the nextDoc of the last page; 0 by default") @Nullable
+            Integer fromDoc,
 
             @Description("The most postings of the page, from 1 to " + GetPostingsParams.MAX_LIMIT + "; "
                     + DEFAULT_LIMIT + " by default; with positions at most " + MAX_LIMIT_WITH_POSITIONS)
-            OptionalInt limit,
+            @Nullable
+            Integer limit,
 
             @Description("Whether to give each posting its positions, offsets and payloads, which needs a field"
                     + " indexed with positions; false by default")
-            Optional<Boolean> positions) {}
+            @Nullable
+            Boolean positions) {}
 
     record Result(
             String field,
             String term,
 
-            @Description("Present, and true, only if term is the term's bytes in hex")
-            Optional<Boolean> binary,
+            @Description("Present, and true, only if term is the term's bytes in hex") @Nullable
+            Boolean binary,
 
             @Description("The documents with the term, deleted ones included")
             int docFreq,
 
             @Description("The occurrences of the term in all documents, on Lucene 3 in the live ones only, or with"
                     + " DOCS_AND_CUSTOM_FREQS the sum of the freqs; absent if equal to docFreq")
-            OptionalLong totalTermFreq,
+            @Nullable
+            Long totalTermFreq,
 
             @Description("The documents of the page, in document order")
             List<Entry> postings,
 
-            @Description("The fromDoc of the next page; absent after the last posting")
-            OptionalInt nextDoc) {}
+            @Description("The fromDoc of the next page; absent after the last posting") @Nullable
+            Integer nextDoc) {}
 
     record Entry(
             int docId,
 
-            @Description("Present, and true, only if the document is deleted")
-            Optional<Boolean> deleted,
+            @Description("Present, and true, only if the document is deleted") @Nullable
+            Boolean deleted,
 
             @Description("How often the term occurs in the document; with the index options DOCS_AND_CUSTOM_FREQS a"
                     + " value of its own, such as a FeatureField's score. Absent where frequencies aren't indexed")
-            OptionalInt freq,
+            @Nullable
+            Integer freq,
 
-            @Description("The occurrences in order; only with positions")
-            Optional<List<Position>> positions,
+            @Description("The occurrences in order; only with positions") @Nullable
+            List<Position> positions,
 
             @Description("Present, and true, only if the document has more than " + MAX_POSITIONS
                     + " occurrences, of which positions has the first; freq says how many")
-            Optional<Boolean> positionsCut) {}
+            @Nullable
+            Boolean positionsCut) {}
 
     record Position(
-            @Description("Absent where positions aren't indexed")
-            OptionalInt position,
+            @Description("Absent where positions aren't indexed") @Nullable
+            Integer position,
 
-            @Description("Absent where offsets aren't indexed")
-            OptionalInt startOffset,
+            @Description("Absent where offsets aren't indexed") @Nullable
+            Integer startOffset,
 
-            @Description("Absent where offsets aren't indexed")
-            OptionalInt endOffset,
+            @Description("Absent where offsets aren't indexed") @Nullable
+            Integer endOffset,
 
-            @Description("In hex; absent if there is none") Optional<String> payload) {}
+            @Description("In hex; absent if there is none") @Nullable
+            String payload) {}
 
     @Override
     public String name() {
@@ -128,7 +134,7 @@ final class PostingsTool implements McpTool<PostingsTool.Arguments, PostingsTool
 
     @Override
     public Result call(Arguments arguments, Call call) throws ToolException, Jobs.Cancelled {
-        boolean positions = arguments.positions().orElse(false);
+        boolean positions = Given.isTrue(arguments.positions());
         int limit = Slices.bounded(
                 "limit",
                 arguments.limit(),
@@ -148,7 +154,7 @@ final class PostingsTool implements McpTool<PostingsTool.Arguments, PostingsTool
         if (positions) {
             requirePositions(arguments.field(), new Queries.Stats(call));
         }
-        BytesValue term = new BytesValue(arguments.term(), arguments.binary().orElse(false));
+        BytesValue term = new BytesValue(arguments.term(), Given.isTrue(arguments.binary()));
         // One more than the tool returns, so that a longer list says that it was cut (ADR 0119).
         OptionalInt maxPositions = positions ? OptionalInt.of(MAX_POSITIONS + 1) : OptionalInt.empty();
         GetPostingsResult page = call.call(
@@ -163,9 +169,9 @@ final class PostingsTool implements McpTool<PostingsTool.Arguments, PostingsTool
                 arguments.term(),
                 Absent.flag(term.binary()),
                 page.docFreq(),
-                page.totalTermFreq() == page.docFreq() ? OptionalLong.empty() : OptionalLong.of(page.totalTermFreq()),
+                page.totalTermFreq() == page.docFreq() ? null : page.totalTermFreq(),
                 entries,
-                page.nextDoc());
+                Optionals.orNull(page.nextDoc()));
     }
 
     /**
@@ -183,15 +189,23 @@ final class PostingsTool implements McpTool<PostingsTool.Arguments, PostingsTool
         }
     }
 
-    private static Entry entry(Posting posting, List<TermPosition> positions) {
+    private static Entry entry(Posting posting, @Nullable List<TermPosition> positions) {
         boolean cut = positions != null && positions.size() > MAX_POSITIONS;
-        Optional<List<Position>> listed = positions == null
-                ? Optional.empty()
-                : Optional.of(positions.stream()
+        List<Position> listed = positions == null
+                ? null
+                : positions.stream()
                         .limit(MAX_POSITIONS)
                         .map(position -> new Position(
-                                position.position(), position.startOffset(), position.endOffset(), position.payload()))
-                        .toList());
-        return new Entry(posting.docId(), Absent.flag(posting.deleted()), posting.freq(), listed, Absent.flag(cut));
+                                Optionals.orNull(position.position()),
+                                Optionals.orNull(position.startOffset()),
+                                Optionals.orNull(position.endOffset()),
+                                position.payload().orElse(null)))
+                        .toList();
+        return new Entry(
+                posting.docId(),
+                Absent.flag(posting.deleted()),
+                Optionals.orNull(posting.freq()),
+                listed,
+                Absent.flag(cut));
     }
 }

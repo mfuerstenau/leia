@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.NoSuchFileException;
 import java.util.HashMap;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 import org.apache.lucene.analysis.custom.CustomAnalyzer;
@@ -69,7 +70,7 @@ final class Lucene5CustomAnalyzers {
     private static CustomAnalyzer.Builder builder(AnalyzerSpec.Custom spec) throws InvalidAnalyzerException {
         ResourceLoader classpath = new ClasspathResourceLoader(Lucene5CustomAnalyzers.class.getClassLoader());
         try {
-            return CustomAnalyzer.builder(spec.configDir()
+            return CustomAnalyzer.builder(Optional.ofNullable(spec.configDir())
                     .<ResourceLoader>map(dir -> new FilesystemResourceLoader(dir, classpath))
                     .orElse(classpath));
         } catch (IllegalArgumentException e) {

@@ -69,8 +69,8 @@ public final class RuntimeHighlights {
                 progress -> {
                     try {
                         // A deleted document is highlighted too, as on Lucene 10.
-                        List<Documents.StoredDocument> stored =
-                                documents.storedValues(docId, docId + 1, field.map(Set::of), true);
+                        List<Documents.StoredDocument> stored = documents.storedValues(
+                                docId, docId + 1, field.map(Set::of).orElse(null), true);
                         Map<String, List<RuntimeIndex.StoredValue>> values = stored.isEmpty()
                                 ? Map.of()
                                 : RuntimeResults.storedDocument(stored.getFirst())

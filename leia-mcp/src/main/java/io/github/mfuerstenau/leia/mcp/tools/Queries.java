@@ -37,6 +37,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The query of {@code search} and {@code explain}, made from their shared arguments: a query in
@@ -49,23 +50,32 @@ final class Queries {
 
     /** The arguments that make a query, which {@code search} and {@code explain} share. */
     interface Arguments {
-        Optional<String> query();
+        @Nullable
+        String query();
 
-        Optional<Term> term();
+        @Nullable
+        Term term();
 
-        Optional<DocValues> docValues();
+        @Nullable
+        DocValues docValues();
 
-        Optional<Knn> knn();
+        @Nullable
+        Knn knn();
 
-        Optional<List<PointFieldType>> pointTypes();
+        @Nullable
+        List<PointFieldType> pointTypes();
 
-        Optional<String> defaultField();
+        @Nullable
+        String defaultField();
 
-        Optional<String> analyzer();
+        @Nullable
+        String analyzer();
 
-        Optional<List<FieldAnalyzer>> fieldAnalyzers();
+        @Nullable
+        List<FieldAnalyzer> fieldAnalyzers();
 
-        Optional<QueryOperator> defaultOperator();
+        @Nullable
+        QueryOperator defaultOperator();
     }
 
     /** Lucene's defaults of the classic parser, as the search screen starts with them. */
@@ -87,32 +97,38 @@ final class Queries {
             @Description("How a numeric field's values are encoded; LONG by default. DOUBLE and FLOAT are raw bits,"
                     + " SORTABLE_DOUBLE and SORTABLE_FLOAT as Lucene's DoubleField and FloatField write them;"
                     + " get_document's asStored says which. Absent for a field of bytes")
-            Optional<DocValuesNumber> number,
+            @Nullable
+            DocValuesNumber number,
 
             @Description("Match documents with a value equal to one of these: decimal text for a number. Give"
                     + " exactly one of values, range and prefix")
-            Optional<List<String>> values,
+            @Nullable
+            List<String> values,
 
             @Description("Match documents with a value in this range. Give exactly one of values, range and prefix")
-            Optional<Range> range,
+            @Nullable
+            Range range,
 
             @Description("Match documents with a value that starts with this, for a field of bytes. Give exactly one"
                     + " of values, range and prefix")
-            Optional<String> prefix,
+            @Nullable
+            String prefix,
 
-            @Description("Whether values, the bounds and prefix are bytes in hex; false by default")
-            Optional<Boolean> binary) {}
+            @Description("Whether values, the bounds and prefix are bytes in hex; false by default") @Nullable
+            Boolean binary) {}
 
     record Range(
-            @Description("The lower bound; absent for none") Optional<String> lower,
+            @Description("The lower bound; absent for none") @Nullable
+            String lower,
 
-            @Description("The upper bound; absent for none") Optional<String> upper,
+            @Description("The upper bound; absent for none") @Nullable
+            String upper,
 
-            @Description("Whether the lower bound matches; true by default")
-            Optional<Boolean> includeLower,
+            @Description("Whether the lower bound matches; true by default") @Nullable
+            Boolean includeLower,
 
-            @Description("Whether the upper bound matches; true by default")
-            Optional<Boolean> includeUpper) {}
+            @Description("Whether the upper bound matches; true by default") @Nullable
+            Boolean includeUpper) {}
 
     record Knn(
             @Description("A field with KNN vectors; index_info shows vectorDimension, vectorEncoding and"
@@ -121,24 +137,29 @@ final class Queries {
 
             @Description("The target vector. For a BYTE field the values are whole numbers from -128 to 127. Give"
                     + " exactly one of vector and docId")
-            Optional<List<Double>> vector,
+            @Nullable
+            List<Double> vector,
 
             @Description("A document whose vector in field is the target, such as a hit's docId; it may be deleted."
                     + " Give exactly one of vector and docId")
-            OptionalInt docId,
+            @Nullable
+            Integer docId,
 
             @Description("How many nearest documents to find, from 1 to " + KnnQuery.MAX_K + "; in search offset +"
                     + " limit by default, so a page is the k nearest and a higher k lets later pages follow; in"
                     + " explain the most, so pass the search's k to explain a hit as ranked. Not with exact")
-            OptionalInt k,
+            @Nullable
+            Integer k,
 
             @Description("Whether to score every document with a vector instead of searching the graph, and so"
                     + " find all of them as hits; false by default")
-            Optional<Boolean> exact,
+            @Nullable
+            Boolean exact,
 
             @Description("Search only documents that match this query in Lucene's syntax, parsed with defaultField,"
                     + " analyzer, fieldAnalyzers and defaultOperator; ranges on point fields don't work")
-            Optional<String> filter) {}
+            @Nullable
+            String filter) {}
 
     record Term(
             String field,
@@ -146,8 +167,8 @@ final class Queries {
             @Description("The term as text, or in hex with binary")
             String value,
 
-            @Description("Whether value is the term's bytes in hex; false by default")
-            Optional<Boolean> binary) {}
+            @Description("Whether value is the term's bytes in hex; false by default") @Nullable
+            Boolean binary) {}
 
     /** The index's fields, fetched by the first who asks. */
     static final class Stats {
@@ -187,52 +208,49 @@ final class Queries {
      */
     static SearchQuery query(Arguments arguments, Call call, Stats stats, int defaultK)
             throws ToolException, Jobs.Cancelled {
-        int given = (arguments.query().isPresent() ? 1 : 0)
-                + (arguments.term().isPresent() ? 1 : 0)
-                + (arguments.docValues().isPresent() ? 1 : 0)
-                + (arguments.knn().isPresent() ? 1 : 0);
+        String text = arguments.query();
+        Term term = arguments.term();
+        DocValues docValues = arguments.docValues();
+        Knn knn = arguments.knn();
+        int given =
+                (text != null ? 1 : 0) + (term != null ? 1 : 0) + (docValues != null ? 1 : 0) + (knn != null ? 1 : 0);
         if (given != 1) {
             throw ToolError.invalid("Give exactly one of query, term, docValues and knn");
         }
-        if (arguments.pointTypes().isPresent() && arguments.query().isEmpty()) {
+        if (arguments.pointTypes() != null && text == null) {
             throw ToolError.invalid("pointTypes goes with query only");
         }
-        if (arguments.term().isPresent() || arguments.docValues().isPresent()) {
-            if (arguments.analyzer().isPresent() || arguments.fieldAnalyzers().isPresent()) {
-                throw ToolError.invalid(
-                        "analyzer and fieldAnalyzers go with query only: a term or doc values aren't analyzed");
-            }
+        if ((term != null || docValues != null)
+                && (arguments.analyzer() != null || arguments.fieldAnalyzers() != null)) {
+            throw ToolError.invalid(
+                    "analyzer and fieldAnalyzers go with query only: a term or doc values aren't analyzed");
         }
-        if (arguments.knn().isPresent()) {
-            return knn(arguments, call, stats, defaultK);
+        if (knn != null) {
+            return knn(knn, arguments, call, stats, defaultK);
         }
-        if (arguments.term().isPresent()) {
-            Term term = arguments.term().get();
+        if (term != null) {
             return new SearchQuery(
                     Optional.empty(),
                     Optional.empty(),
-                    Optional.of(new TermQuery(
-                            term.field(),
-                            new BytesValue(term.value(), term.binary().orElse(false)))),
+                    Optional.of(new TermQuery(term.field(), new BytesValue(term.value(), Given.isTrue(term.binary())))),
                     Optional.empty(),
                     Optional.empty(),
                     Optional.empty());
         }
-        if (arguments.docValues().isPresent()) {
+        if (docValues != null) {
             return new SearchQuery(
                     Optional.empty(),
                     Optional.empty(),
                     Optional.empty(),
                     Optional.empty(),
-                    Optional.of(docValues(arguments.docValues().get(), stats)),
+                    Optional.of(docValues(docValues, stats)),
                     Optional.empty());
         }
-        String defaultField = arguments
-                .defaultField()
-                .orElseThrow(
-                        () -> ToolError.invalid("A query needs a defaultField: the field of terms that name none"));
-        String text = arguments.query().get();
-        QueryOperator operator = arguments.defaultOperator().orElse(QueryOperator.OR);
+        String defaultField = arguments.defaultField();
+        if (defaultField == null) {
+            throw ToolError.invalid("A query needs a defaultField: the field of terms that name none");
+        }
+        QueryOperator operator = operator(arguments);
         Analyzer analyzer = analyzer(arguments, call);
         Optional<OpenIndexResult> opened = call.session().opened();
         if (opened.isPresent() && opened.get().features().contains(Feature.STANDARD_SEARCH)) {
@@ -246,7 +264,7 @@ final class Queries {
                     Optional.empty(),
                     Optional.empty());
         }
-        if (arguments.pointTypes().isPresent()) {
+        if (arguments.pointTypes() != null) {
             throw ToolError.invalid("pointTypes needs the standard parser, which the Lucene of this index lacks");
         }
         ClassicQuery classic = new ClassicQuery(
@@ -260,41 +278,40 @@ final class Queries {
                 Optional.empty());
     }
 
-    private static SearchQuery knn(Arguments arguments, Call call, Stats stats, int defaultK)
+    private static SearchQuery knn(Knn knn, Arguments arguments, Call call, Stats stats, int defaultK)
             throws ToolException, Jobs.Cancelled {
-        Knn knn = arguments.knn().get();
         Optional<OpenIndexResult> opened = call.session().opened();
         if (opened.isPresent() && !opened.get().features().contains(Feature.KNN_VECTORS)) {
             throw ToolError.notSupported("knn needs the Lucene 9 or 10 runtime, which reads KNN vectors");
         }
-        boolean exact = knn.exact().orElse(false);
-        if (exact && knn.k().isPresent()) {
+        boolean exact = Given.isTrue(knn.exact());
+        Integer k = knn.k();
+        if (exact && k != null) {
             throw ToolError.invalid("k doesn't go with exact: every document with a vector is a hit");
         }
-        if (knn.filter().isEmpty()
-                && (arguments.analyzer().isPresent()
-                        || arguments.fieldAnalyzers().isPresent())) {
+        String filterText = knn.filter();
+        if (filterText == null && (arguments.analyzer() != null || arguments.fieldAnalyzers() != null)) {
             throw ToolError.invalid("analyzer and fieldAnalyzers go with a knn filter only");
         }
         Optional<ClassicQuery> filter = Optional.empty();
-        if (knn.filter().isPresent()) {
-            String defaultField = arguments
-                    .defaultField()
-                    .orElseThrow(() ->
-                            ToolError.invalid("A knn filter needs a defaultField: the field of terms that name none"));
+        if (filterText != null) {
+            String defaultField = arguments.defaultField();
+            if (defaultField == null) {
+                throw ToolError.invalid("A knn filter needs a defaultField: the field of terms that name none");
+            }
             filter = Optional.of(new ClassicQuery(
-                    knn.filter().get(),
+                    filterText,
                     defaultField,
-                    arguments.defaultOperator().orElse(QueryOperator.OR),
+                    operator(arguments),
                     PARSER_DEFAULTS,
                     FUZZY_MAX_EDITS,
                     false,
                     false,
                     analyzer(arguments, call)));
         }
-        Optional<KnnVector> vector = knn.vector().isPresent()
-                ? Optional.of(vector(knn.field(), knn.vector().get(), stats))
-                : Optional.empty();
+        List<Double> components = knn.vector();
+        Optional<KnnVector> vector =
+                components != null ? Optional.of(vector(knn.field(), components, stats)) : Optional.empty();
         return new SearchQuery(
                 Optional.empty(),
                 Optional.empty(),
@@ -303,9 +320,9 @@ final class Queries {
                 Optional.empty(),
                 Optional.of(new KnnQuery(
                         knn.field(),
-                        knn.docId(),
+                        Optionals.optionalInt(knn.docId()),
                         vector,
-                        exact ? OptionalInt.empty() : OptionalInt.of(knn.k().orElse(defaultK)),
+                        exact ? OptionalInt.empty() : OptionalInt.of(k != null ? k : defaultK),
                         exact,
                         filter)));
     }
@@ -352,7 +369,7 @@ final class Queries {
                 }
             }
         }
-        for (PointFieldType given : arguments.pointTypes().orElse(List.of())) {
+        for (PointFieldType given : Given.orEmpty(arguments.pointTypes())) {
             types.put(given.field(), given.type());
         }
         return types.entrySet().stream()
@@ -361,8 +378,8 @@ final class Queries {
     }
 
     private static DocValuesQuery docValues(DocValues docValues, Stats stats) throws ToolException, Jobs.Cancelled {
-        boolean hex = docValues.binary().orElse(false);
-        Optional<DocValuesNumber> number = docValues.number();
+        boolean hex = Given.isTrue(docValues.binary());
+        Optional<DocValuesNumber> number = Optional.ofNullable(docValues.number());
         if (number.isEmpty()) {
             boolean numeric = stats.docValuesType(docValues.field())
                     .filter(type -> type == DocValuesType.NUMERIC || type == DocValuesType.SORTED_NUMERIC)
@@ -372,34 +389,37 @@ final class Queries {
         return new DocValuesQuery(
                 docValues.field(),
                 number,
-                docValues
-                        .values()
+                Optional.ofNullable(docValues.values())
                         .map(values -> values.stream()
                                 .map(value -> new BytesValue(value, hex))
                                 .toList()),
-                docValues
-                        .range()
+                Optional.ofNullable(docValues.range())
                         .map(range -> new DocValuesRange(
-                                range.lower().map(value -> new BytesValue(value, hex)),
-                                range.upper().map(value -> new BytesValue(value, hex)),
-                                range.includeLower().orElse(true),
-                                range.includeUpper().orElse(true))),
-                docValues.prefix().map(value -> new BytesValue(value, hex)));
+                                Optional.ofNullable(range.lower()).map(value -> new BytesValue(value, hex)),
+                                Optional.ofNullable(range.upper()).map(value -> new BytesValue(value, hex)),
+                                !Boolean.FALSE.equals(range.includeLower()),
+                                !Boolean.FALSE.equals(range.includeUpper()))),
+                Optional.ofNullable(docValues.prefix()).map(value -> new BytesValue(value, hex)));
     }
 
     static Analyzer analyzer(Arguments arguments, Call call) throws ToolException, Jobs.Cancelled {
-        if (arguments.analyzer().isEmpty() && arguments.fieldAnalyzers().isEmpty()) {
+        String named = arguments.analyzer();
+        if (named == null && arguments.fieldAnalyzers() == null) {
             return Analyzers.STANDARD;
         }
         Analyzers.Names names = new Analyzers.Names(call);
-        Analyzer base = arguments.analyzer().isPresent()
-                ? Analyzers.named(arguments.analyzer().get(), names)
-                : Analyzers.STANDARD;
+        Analyzer base = named != null ? Analyzers.named(named, names) : Analyzers.STANDARD;
         List<io.github.mfuerstenau.leia.protocol.analysis.FieldAnalyzer> fields = new ArrayList<>();
-        for (FieldAnalyzer field : arguments.fieldAnalyzers().orElse(List.of())) {
+        for (FieldAnalyzer field : Given.orEmpty(arguments.fieldAnalyzers())) {
             fields.add(new io.github.mfuerstenau.leia.protocol.analysis.FieldAnalyzer(
                     field.field(), Analyzers.named(field.analyzer(), names)));
         }
-        return Analyzers.of(base.standard(), base.preset(), fields);
+        return Analyzers.of(base.standard().orElse(null), base.preset().orElse(null), fields);
+    }
+
+    /** The default operator of {@code arguments}: OR without one. */
+    static QueryOperator operator(Arguments arguments) {
+        QueryOperator operator = arguments.defaultOperator();
+        return operator != null ? operator : QueryOperator.OR;
     }
 }

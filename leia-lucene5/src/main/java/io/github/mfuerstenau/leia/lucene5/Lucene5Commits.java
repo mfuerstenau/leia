@@ -5,6 +5,7 @@ import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.IndexReadException;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.support.Failures;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -99,9 +100,7 @@ final class Lucene5Commits implements Commits {
             }
             Map<String, CommitFile> files = new TreeMap<>();
             for (String file : infos.files(true)) {
-                files.put(
-                        file,
-                        new CommitFile(file, Optional.ofNullable(segmentOfFile.get(file)), size(directory, file)));
+                files.put(file, new CommitFile(file, segmentOfFile.get(file), Optionals.orNull(size(directory, file))));
             }
             List<Segment> segments = new ArrayList<>();
             int docBase = 0;
@@ -173,20 +172,20 @@ final class Lucene5Commits implements Commits {
                 info.maxDoc(),
                 docBase,
                 segment.getDelCount(),
-                generation(segment.getDelGen()),
+                Optionals.orNull(generation(segment.getDelGen())),
                 version(segment),
                 info.getUseCompoundFile(),
-                size,
+                Optionals.orNull(size),
                 new TreeMap<>(info.getDiagnostics()),
                 new TreeMap<>(info.getAttributes()),
                 // Written since 5.0.
-                Optional.ofNullable(info.getId()).map(StringHelper::idToString),
-                Optional.of(codec.getName()),
-                Optional.of(formats(codec)),
+                Optional.ofNullable(info.getId()).map(StringHelper::idToString).orElse(null),
+                codec.getName(),
+                formats(codec),
                 fieldFormats,
-                fieldInfosError,
-                generation(segment.getFieldInfosGen()),
-                generation(segment.getDocValuesGen()));
+                fieldInfosError.orElse(null),
+                Optionals.orNull(generation(segment.getFieldInfosGen())),
+                Optionals.orNull(generation(segment.getDocValuesGen())));
     }
 
     /**
@@ -214,17 +213,19 @@ final class Lucene5Commits implements Commits {
             formats.add(new FieldFormats(
                     field.name,
                     format(
-                            field,
-                            field.getIndexOptions() != IndexOptions.NONE,
-                            PerFieldPostingsFormat.PER_FIELD_FORMAT_KEY,
-                            codec.postingsFormat()),
+                                    field,
+                                    field.getIndexOptions() != IndexOptions.NONE,
+                                    PerFieldPostingsFormat.PER_FIELD_FORMAT_KEY,
+                                    codec.postingsFormat())
+                            .orElse(null),
                     format(
-                            field,
-                            field.getDocValuesType() != DocValuesType.NONE,
-                            PerFieldDocValuesFormat.PER_FIELD_FORMAT_KEY,
-                            codec.docValuesFormat()),
+                                    field,
+                                    field.getDocValuesType() != DocValuesType.NONE,
+                                    PerFieldDocValuesFormat.PER_FIELD_FORMAT_KEY,
+                                    codec.docValuesFormat())
+                            .orElse(null),
                     // No KNN vectors before Lucene 9.
-                    Optional.empty()));
+                    null));
         }
         formats.sort(Comparator.comparing(FieldFormats::field));
         return List.copyOf(formats);
@@ -246,8 +247,8 @@ final class Lucene5Commits implements Commits {
                 formatName(codec.storedFieldsFormat()),
                 formatName(codec.termVectorsFormat()),
                 formatName(codec.normsFormat()),
-                Optional.empty(),
-                Optional.empty(),
+                null,
+                null,
                 formatName(codec.fieldInfosFormat()),
                 formatName(codec.segmentInfoFormat()),
                 formatName(codec.liveDocsFormat()),

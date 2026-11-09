@@ -8,6 +8,7 @@ import io.github.mfuerstenau.leia.protocol.check.GetCheckTargetsParams;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckTargetsResult;
 import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
@@ -84,7 +85,8 @@ public final class GetCheckTargetsHandler implements MethodHandler<GetCheckTarge
         Commits.CommitDetails details = commits.commit(dir.path(), dir.kind(), latest.generation())
                 .orElseThrow(() -> new IOException("The commit " + latest.segmentsFile() + " is gone"));
         List<CheckTargetSegment> segments = details.segments().stream()
-                .map(segment -> new CheckTargetSegment(segment.name(), segment.maxDoc(), segment.sizeInBytes()))
+                .map(segment -> new CheckTargetSegment(
+                        segment.name(), segment.maxDoc(), Optionals.optionalLong(segment.sizeInBytes())))
                 .toList();
         return new CheckTargetIndex(
                 path, dir.skipped(), Optional.of(latest.segmentsFile()), segments, Optional.empty());

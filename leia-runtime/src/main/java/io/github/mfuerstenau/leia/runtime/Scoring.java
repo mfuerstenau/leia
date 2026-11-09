@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.LongConsumer;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Search and explain with a similarity of the caller's choice, and search in an order of its choice
@@ -36,7 +37,7 @@ public interface Scoring {
             int offset,
             int limit,
             boolean exactTotalHits,
-            Optional<List<String>> fields,
+            @Nullable List<String> fields,
             LongConsumer progress)
             throws IOException;
 
@@ -47,7 +48,7 @@ public interface Scoring {
             List<SortKey> sort,
             int offset,
             int limit,
-            Optional<List<String>> fields,
+            @Nullable List<String> fields,
             LongConsumer progress)
             throws IOException {
         return search(query, similarity, sort, offset, limit, true, fields, progress);
@@ -132,5 +133,5 @@ public interface Scoring {
      * doc key, the value of a numeric field key) or a term. Both are empty for a document without a
      * value in a field key.
      */
-    record SortValue(Optional<Number> number, Optional<byte[]> term) {}
+    record SortValue(@Nullable Number number, byte @Nullable [] term) {}
 }

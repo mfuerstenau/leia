@@ -66,11 +66,11 @@ class Lucene9KnnGraphTest {
             // Only the 9.x segment has vectors.
             assertThat(graph.segments())
                     .extracting(KnnGraph.SegmentGraph::name, KnnGraph.SegmentGraph::vectors)
-                    .containsExactly(tuple(Optional.of("_2"), 3));
+                    .containsExactly(tuple("_2", 3));
             KnnGraph.SegmentGraph segment = graph.segments().getFirst();
-            KnnGraph.Shape shape = segment.shape().orElseThrow();
+            KnnGraph.Shape shape = Optional.ofNullable(segment.shape()).orElseThrow();
             assertThat(shape.levelSizes()).containsExactly(3);
-            assertThat(shape.maxConn()).isEmpty();
+            assertThat(shape.maxConn()).isNull();
 
             KnnGraph.NodePage nodes = graphs.nodes("embedding", segment.segment(), 0, 0, 10);
             assertThat(nodes.total()).isEqualTo(3);
@@ -102,8 +102,9 @@ class Lucene9KnnGraphTest {
     void readsTheLevelsOfAGraphOfASmallM() throws IOException {
         try (RuntimeIndex index = open(writeIndex())) {
             KnnGraph graphs = index.knnGraph().orElseThrow();
-            KnnGraph.Shape shape =
-                    graphs.graph("v").segments().getFirst().shape().orElseThrow();
+            KnnGraph.Shape shape = Optional.ofNullable(
+                            graphs.graph("v").segments().getFirst().shape())
+                    .orElseThrow();
             List<Integer> sizes = shape.levelSizes();
             assertThat(sizes).hasSizeGreaterThanOrEqualTo(3);
             assertThat(sizes.getFirst()).isEqualTo(DOCS - 1);

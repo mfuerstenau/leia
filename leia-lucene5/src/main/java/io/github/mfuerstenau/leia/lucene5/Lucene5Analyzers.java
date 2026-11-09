@@ -5,6 +5,7 @@ import io.github.mfuerstenau.leia.runtime.Search.InvalidAnalyzerException;
 import io.github.mfuerstenau.leia.runtime.Search.UnsupportedAnalyzerException;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TreeMap;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.miscellaneous.LimitTokenCountAnalyzer;
@@ -70,8 +71,9 @@ final class Lucene5Analyzers {
     /** The analyzer in Lucene's shingle wrapper, then in its token limit, checked first as leia-core checks them. */
     private static Analyzer wrapped(AnalyzerSpec.Wrapped spec)
             throws UnsupportedAnalyzerException, InvalidAnalyzerException {
-        if (spec.shingles().isPresent()) {
-            AnalyzerSpec.Shingles shingles = spec.shingles().orElseThrow();
+        if (spec.shingles() != null) {
+            AnalyzerSpec.Shingles shingles =
+                    Optional.ofNullable(spec.shingles()).orElseThrow();
             if (shingles.minShingleSize() < 2) {
                 throw new InvalidAnalyzerException(
                         "shingles: the minimum size must be at least 2, not " + shingles.minShingleSize(), null);
@@ -83,16 +85,19 @@ final class Lucene5Analyzers {
                         null);
             }
         }
-        if (spec.limitTokenCount().isPresent()
-                && spec.limitTokenCount().orElseThrow().maxTokenCount() < 1) {
+        if (spec.limitTokenCount() != null
+                && Optional.ofNullable(spec.limitTokenCount()).orElseThrow().maxTokenCount() < 1) {
             throw new InvalidAnalyzerException(
                     "token limit: the maximum token count must be at least 1, not "
-                            + spec.limitTokenCount().orElseThrow().maxTokenCount(),
+                            + Optional.ofNullable(spec.limitTokenCount())
+                                    .orElseThrow()
+                                    .maxTokenCount(),
                     null);
         }
         Analyzer wrapped = analyzer(spec.analyzer());
-        if (spec.shingles().isPresent()) {
-            AnalyzerSpec.Shingles shingles = spec.shingles().orElseThrow();
+        if (spec.shingles() != null) {
+            AnalyzerSpec.Shingles shingles =
+                    Optional.ofNullable(spec.shingles()).orElseThrow();
             wrapped = new ShingleAnalyzerWrapper(
                     wrapped,
                     shingles.minShingleSize(),
@@ -102,8 +107,9 @@ final class Lucene5Analyzers {
                     shingles.outputUnigramsIfNoShingles(),
                     shingles.fillerToken());
         }
-        if (spec.limitTokenCount().isPresent()) {
-            AnalyzerSpec.LimitTokenCount limit = spec.limitTokenCount().orElseThrow();
+        if (spec.limitTokenCount() != null) {
+            AnalyzerSpec.LimitTokenCount limit =
+                    Optional.ofNullable(spec.limitTokenCount()).orElseThrow();
             wrapped = new LimitTokenCountAnalyzer(wrapped, limit.maxTokenCount(), limit.consumeAllTokens());
         }
         return wrapped;

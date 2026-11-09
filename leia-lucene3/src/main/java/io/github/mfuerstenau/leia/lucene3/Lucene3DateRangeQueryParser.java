@@ -5,6 +5,7 @@ import io.github.mfuerstenau.leia.runtime.Search.Dates;
 import io.github.mfuerstenau.leia.runtime.support.DateRanges;
 import java.text.DateFormat;
 import java.util.Date;
+import java.util.Optional;
 import java.util.TimeZone;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.document.DateField;
@@ -26,10 +27,13 @@ final class Lucene3DateRangeQueryParser extends QueryParser {
 
     Lucene3DateRangeQueryParser(String defaultField, Analyzer analyzer, Dates dates) {
         super(Version.LUCENE_36, defaultField, analyzer);
-        dates.resolution().map(Lucene3DateRangeQueryParser::resolution).ifPresent(this::setDateResolution);
+        Optional.ofNullable(dates.resolution())
+                .map(Lucene3DateRangeQueryParser::resolution)
+                .ifPresent(this::setDateResolution);
         dates.fields().forEach((field, resolution) -> setDateResolution(field, resolution(resolution)));
-        dates.locale().ifPresent(this::setLocale);
-        timeZone = dates.timeZone().map(TimeZone::getTimeZone).orElseGet(TimeZone::getDefault);
+        Optional.ofNullable(dates.locale()).ifPresent(this::setLocale);
+        timeZone =
+                Optional.ofNullable(dates.timeZone()).map(TimeZone::getTimeZone).orElseGet(TimeZone::getDefault);
     }
 
     /**

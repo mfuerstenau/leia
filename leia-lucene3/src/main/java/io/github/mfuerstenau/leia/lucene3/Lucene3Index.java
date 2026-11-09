@@ -17,6 +17,7 @@ import io.github.mfuerstenau.leia.runtime.StandardSearch;
 import io.github.mfuerstenau.leia.runtime.Terms;
 import io.github.mfuerstenau.leia.runtime.support.Failures;
 import io.github.mfuerstenau.leia.runtime.support.IndexParts;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.Serial;
@@ -73,6 +74,7 @@ import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TopScoreDocCollector;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.util.ReaderUtil;
+import org.jspecify.annotations.Nullable;
 
 /**
  * An index written by Lucene 2.x or 3.x, read with Lucene 3.6 (ADR 0044). Lucene 10 can't read such
@@ -314,8 +316,8 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
                     part.reader().maxDoc(),
                     List.copyOf(versions),
                     // 3.6 records neither which version wrote a commit nor which created the index.
-                    Optional.empty(),
-                    OptionalInt.empty(),
+                    null,
+                    null,
                     Map.copyOf(commit.getUserData()),
                     segments(part.reader())));
             docBase += part.reader().maxDoc();
@@ -341,7 +343,7 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
                         docBase,
                         sub.maxDoc(),
                         sub.numDocs(),
-                        Optional.empty(),
+                        null,
                         SegmentFiles.files(segment)));
             } else {
                 segments.add(new Segment("?", docBase, sub.maxDoc(), sub.numDocs()));
@@ -367,7 +369,7 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
                     DocValuesType.NONE,
                     0,
                     0,
-                    Optional.empty()));
+                    null));
         }
         fields.sort(Comparator.comparingInt(Field::number));
         return List.copyOf(fields);
@@ -410,9 +412,9 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
             boolean hasTermVector = field.hasTermVectors() && reader.getTermFreqVector(docId, field.name()) != null;
             fields.add(new DocumentField(
                     field.name(),
-                    norm,
+                    Optionals.orNull(norm),
                     List.copyOf(stored.getOrDefault(field.name(), List.of())),
-                    Optional.empty(),
+                    null,
                     hasTermVector));
         }
         return new IndexDocument(docId, reader.isDeleted(docId), List.copyOf(fields));
@@ -420,9 +422,10 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
 
     @Override
     public List<StoredDocument> storedValues(
-            int fromDoc, int toDoc, Optional<Set<String>> fields, boolean includeDeleted) throws IOException {
+            int fromDoc, int toDoc, @Nullable Set<String> fields, boolean includeDeleted) throws IOException {
         checkRange(fromDoc, toDoc);
-        FieldSelector selector = fields.map(names -> new MapFieldSelector(new ArrayList<>(names)))
+        FieldSelector selector = Optional.ofNullable(fields)
+                .map(names -> new MapFieldSelector(new ArrayList<>(names)))
                 .orElse(null);
         List<StoredDocument> documents = new ArrayList<>();
         for (int doc = fromDoc; doc < toDoc; doc++) {
@@ -443,14 +446,15 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
     @Override
     public void storedValues(
             int segment,
-            Optional<Set<String>> fields,
+            @Nullable Set<String> fields,
             boolean includeDeleted,
             IntUnaryOperator next,
             Consumer<StoredDocument> sink,
             LongConsumer progress)
             throws IOException {
         IndexReader leaf = segmentLeaf(segment);
-        FieldSelector selector = fields.map(names -> new MapFieldSelector(new ArrayList<>(names)))
+        FieldSelector selector = Optional.ofNullable(fields)
+                .map(names -> new MapFieldSelector(new ArrayList<>(names)))
                 .orElse(null);
         int maxDoc = leaf.maxDoc();
         int reported = 0;
@@ -584,10 +588,10 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
         for (int j = 0; j < count; j++) {
             boolean hasOffsets = offsets != null && j < offsets.length;
             positions.add(new Position(
-                    at != null && j < at.length ? OptionalInt.of(at[j]) : OptionalInt.empty(),
-                    hasOffsets ? OptionalInt.of(offsets[j].getStartOffset()) : OptionalInt.empty(),
-                    hasOffsets ? OptionalInt.of(offsets[j].getEndOffset()) : OptionalInt.empty(),
-                    Optional.empty()));
+                    at != null && j < at.length ? at[j] : null,
+                    hasOffsets ? offsets[j].getStartOffset() : null,
+                    hasOffsets ? offsets[j].getEndOffset() : null,
+                    null));
         }
         return List.copyOf(positions);
     }
@@ -597,21 +601,21 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
      * record {@code totalTermFreq}, so it is counted from the postings.
      */
     @Override
-    public TermsPage terms(String field, Optional<byte[]> from, int limit) throws IOException {
+    public TermsPage terms(String field, byte @Nullable [] from, int limit) throws IOException {
         List<TermEntry> terms = new ArrayList<>();
         // interned field names are compared with ==, so take Term's own.
-        try (TermEnum termEnum =
-                reader.terms(new Term(field, from.map(Lucene3Index::text).orElse("")))) {
+        try (TermEnum termEnum = reader.terms(new Term(
+                field, Optional.ofNullable(from).map(Lucene3Index::text).orElse("")))) {
             Term term = termEnum.term();
             while (term != null && term.field().equals(field)) {
                 if (terms.size() == limit) {
-                    return new TermsPage(List.copyOf(terms), Optional.of(utf8(term.text())));
+                    return new TermsPage(List.copyOf(terms), utf8(term.text()));
                 }
                 terms.add(new TermEntry(utf8(term.text()), termEnum.docFreq(), totalTermFreq(term)));
                 term = termEnum.next() ? termEnum.term() : null;
             }
         }
-        return new TermsPage(List.copyOf(terms), Optional.empty());
+        return new TermsPage(List.copyOf(terms), null);
     }
 
     private long totalTermFreq(Term term) throws IOException {
@@ -689,7 +693,8 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
                 more = docs.next();
             }
         }
-        return new PostingsPage(reader.docFreq(term), totalTermFreq(term), List.copyOf(postings), next);
+        return new PostingsPage(
+                reader.docFreq(term), totalTermFreq(term), List.copyOf(postings), Optionals.orNull(next));
     }
 
     /**
@@ -730,7 +735,7 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
         if (positions.isPayloadAvailable()) {
             payload = Optional.of(positions.getPayload(new byte[positions.getPayloadLength()], 0));
         }
-        return new Position(OptionalInt.of(position), OptionalInt.empty(), OptionalInt.empty(), payload);
+        return new Position(position, null, null, payload.orElse(null));
     }
 
     /** A term of Lucene 3 as bytes. */
@@ -795,7 +800,7 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
             int offset,
             int limit,
             boolean exactTotalHits,
-            Optional<List<String>> fields,
+            @Nullable List<String> fields,
             LongConsumer progress)
             throws IOException {
         if (!(parsed instanceof Lucene3Query lucene3)) {
@@ -814,7 +819,7 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
             for (ScoreDoc scoreDoc : docs.scoreDocs) {
                 Map<String, List<StoredValue>> values = new LinkedHashMap<>();
                 for (Fieldable field : reader.document(scoreDoc.doc).getFields()) {
-                    if (fields.isEmpty() || fields.get().contains(field.name())) {
+                    if (fields == null || fields.contains(field.name())) {
                         values.computeIfAbsent(field.name(), _ -> new ArrayList<>())
                                 .add(storedValue(field));
                     }

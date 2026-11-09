@@ -103,9 +103,9 @@ final class Lucene7DocValuesQueries {
     static Query prefix(FieldInfo field, byte[] prefix) {
         BytesRef bytes = new BytesRef(prefix);
         if (bytes.length == 0) {
-            return bytesRefs(field, new Match.Range<>(Optional.empty(), Optional.empty(), true, true));
+            return bytesRefs(field, new Match.Range<>(null, null, true, true));
         }
-        return bytesRefs(field, new Match.Range<>(Optional.of(bytes), successor(bytes), true, false));
+        return bytesRefs(field, new Match.Range<>(bytes, successor(bytes).orElse(null), true, false));
     }
 
     private static Match<BytesRef> bytesRefs(Match<byte[]> match) {
@@ -114,8 +114,8 @@ final class Lucene7DocValuesQueries {
                 new Match.Values<>(values.values().stream().map(BytesRef::new).toList());
             case Match.Range<byte[]> range ->
                 new Match.Range<>(
-                        range.lower().map(BytesRef::new),
-                        range.upper().map(BytesRef::new),
+                        Optional.ofNullable(range.lower()).map(BytesRef::new).orElse(null),
+                        Optional.ofNullable(range.upper()).map(BytesRef::new).orElse(null),
                         range.includeLower(),
                         range.includeUpper());
         };
@@ -137,8 +137,8 @@ final class Lucene7DocValuesQueries {
                     // Both types: the sandbox's query reads a SORTED field as a SORTED_SET one.
                     case Match.Values<BytesRef> values -> new DocValuesTermsQuery(field.name, values.values());
                     case Match.Range<BytesRef> range -> {
-                        BytesRef lower = range.lower().orElse(null);
-                        BytesRef upper = range.upper().orElse(null);
+                        BytesRef lower = range.lower();
+                        BytesRef upper = range.upper();
                         yield set
                                 ? SortedSetDocValuesField.newSlowRangeQuery(
                                         field.name, lower, upper, range.includeLower(), range.includeUpper())
@@ -176,7 +176,7 @@ final class Lucene7DocValuesQueries {
     private static Query longRange(FieldInfo field, boolean sorted, Match.Range<String> range) {
         long lower = Long.MIN_VALUE;
         long upper = Long.MAX_VALUE;
-        Optional<String> from = range.lower();
+        Optional<String> from = Optional.ofNullable(range.lower());
         if (from.isPresent()) {
             lower = parseLong(from.get());
             if (!range.includeLower()) {
@@ -186,7 +186,7 @@ final class Lucene7DocValuesQueries {
                 lower++;
             }
         }
-        Optional<String> to = range.upper();
+        Optional<String> to = Optional.ofNullable(range.upper());
         if (to.isPresent()) {
             upper = parseLong(to.get());
             if (!range.includeUpper()) {
@@ -206,8 +206,8 @@ final class Lucene7DocValuesQueries {
      */
     private static Query floatingRange(
             FieldInfo field, boolean sorted, NumberEncoding number, Match.Range<String> range) {
-        Optional<Double> lower = range.lower().map(text -> parseFloating(number, text));
-        Optional<Double> upper = range.upper().map(text -> parseFloating(number, text));
+        Optional<Double> lower = Optional.ofNullable(range.lower()).map(text -> parseFloating(number, text));
+        Optional<Double> upper = Optional.ofNullable(range.upper()).map(text -> parseFloating(number, text));
         if (lower.isPresent() && !range.includeLower()) {
             if (lower.get() == Double.POSITIVE_INFINITY) {
                 return none(field);
@@ -361,8 +361,8 @@ final class Lucene7DocValuesQueries {
                 }
                 case Match.Range<BytesRef> range -> {
                     values = null;
-                    lower = range.lower().map(BytesRef::deepCopyOf);
-                    upper = range.upper().map(BytesRef::deepCopyOf);
+                    lower = Optional.ofNullable(range.lower()).map(BytesRef::deepCopyOf);
+                    upper = Optional.ofNullable(range.upper()).map(BytesRef::deepCopyOf);
                     includeLower = range.includeLower();
                     includeUpper = range.includeUpper();
                 }

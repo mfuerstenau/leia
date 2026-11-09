@@ -14,6 +14,9 @@ dependencies {
     // The JSON of the messages and the tools' records.
     implementation(platform(libs.jackson.bom))
     implementation(libs.jackson.databind)
+    // JSpecify's @Nullable on the tools' records: Schemas reads it at runtime to tell the required
+    // components (ADR 0127), so it is on the runtime classpath, not only compile-only.
+    implementation(libs.jspecify)
     // Lucene 10 for the demo index, as leia-server's tests have it.
     testRuntimeOnly(project(":leia-lucene10"))
 }

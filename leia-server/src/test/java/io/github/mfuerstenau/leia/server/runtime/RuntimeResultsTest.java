@@ -15,8 +15,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.function.LongConsumer;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -72,7 +72,7 @@ class RuntimeResultsTest {
         Terms.PostingsPage page = RuntimeResults.matchingPostings(postings, "f", new byte[0], 0, 2, 0, filter);
 
         assertThat(page.postings()).extracting(Terms.Posting::docId).containsExactly(2, 3);
-        assertThat(page.nextDoc()).hasValue(9);
+        assertThat(page.nextDoc()).isEqualTo(9);
         assertThat(page.docFreq()).isEqualTo(20);
         // Each read starts at the filter's next match after the page before.
         assertThat(postings.froms).containsExactly(2, 9);
@@ -80,7 +80,7 @@ class RuntimeResultsTest {
         Terms.PostingsPage next = RuntimeResults.matchingPostings(postings, "f", new byte[0], 9, 2, 0, filter);
 
         assertThat(next.postings()).extracting(Terms.Posting::docId).containsExactly(9, 15);
-        assertThat(next.nextDoc()).isEmpty();
+        assertThat(next.nextDoc()).isNull();
         assertThat(postings.froms).containsExactly(2, 9, 9, 15, 30);
     }
 
@@ -93,7 +93,7 @@ class RuntimeResultsTest {
         Terms.PostingsPage page = RuntimeResults.matchingPostings(postings, "f", new byte[0], 0, 2, 0, filter);
 
         assertThat(page.postings()).extracting(Terms.Posting::docId).containsExactly(4, 8);
-        assertThat(page.nextDoc()).hasValue(12);
+        assertThat(page.nextDoc()).isEqualTo(12);
     }
 
     @Test
@@ -104,7 +104,7 @@ class RuntimeResultsTest {
                 RuntimeResults.matchingPostings(postings, "f", new byte[0], 6, 5, 0, filter(20, 1, 5));
 
         assertThat(page.postings()).isEmpty();
-        assertThat(page.nextDoc()).isEmpty();
+        assertThat(page.nextDoc()).isNull();
         assertThat(page.docFreq()).isEqualTo(20);
         assertThat(page.totalTermFreq()).isEqualTo(20);
     }
@@ -143,7 +143,7 @@ class RuntimeResultsTest {
                 page.add(new Posting(doc, 1, false));
             }
             int docFreq = (end + step - 1) / step;
-            return new PostingsPage(docFreq, docFreq, page, doc < end ? OptionalInt.of(doc) : OptionalInt.empty());
+            return new PostingsPage(docFreq, docFreq, page, doc < end ? doc : null);
         }
     }
 
@@ -158,9 +158,10 @@ class RuntimeResultsTest {
         }
 
         @Override
-        public TermsPage terms(String field, Optional<byte[]> from, int limit) {
-            String start =
-                    from.map(bytes -> new String(bytes, StandardCharsets.UTF_8)).orElse("");
+        public TermsPage terms(String field, byte @Nullable [] from, int limit) {
+            String start = Optional.ofNullable(from)
+                    .map(bytes -> new String(bytes, StandardCharsets.UTF_8))
+                    .orElse("");
             froms.add(start);
             int first = 0;
             while (first < terms.size() && terms.get(first).compareTo(start) < 0) {
@@ -171,11 +172,7 @@ class RuntimeResultsTest {
                 page.add(new TermEntry(terms.get(i).getBytes(StandardCharsets.UTF_8), i + 1, (i + 1) * 10L));
             }
             int next = first + limit;
-            return new TermsPage(
-                    page,
-                    next < terms.size()
-                            ? Optional.of(terms.get(next).getBytes(StandardCharsets.UTF_8))
-                            : Optional.empty());
+            return new TermsPage(page, next < terms.size() ? terms.get(next).getBytes(StandardCharsets.UTF_8) : null);
         }
 
         @Override

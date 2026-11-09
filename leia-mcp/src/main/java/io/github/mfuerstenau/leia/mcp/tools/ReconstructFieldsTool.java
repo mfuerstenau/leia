@@ -19,6 +19,7 @@ import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@code reconstruct_fields}: the terms and points a document was indexed with, from its term
@@ -48,14 +49,17 @@ final class ReconstructFieldsTool implements McpTool<ReconstructFieldsTool.Argum
             int docId,
 
             @Description("The fields with postings or points to rebuild, in this order; by default every such field")
-            Optional<List<String>> fields,
+            @Nullable
+            List<String> fields,
 
             @Description("The most terms per field in terms, up to " + MAX_TERMS + "; " + DEFAULT_TERMS + " by default")
-            OptionalInt maxTerms,
+            @Nullable
+            Integer maxTerms,
 
             @Description("Whether to list the terms with their freqs and positions also where text has them; false"
                     + " by default")
-            Optional<Boolean> withTerms) {}
+            @Nullable
+            Boolean withTerms) {}
 
     record Result(
             @Description("The fields in the order they were asked for")
@@ -74,38 +78,41 @@ final class ReconstructFieldsTool implements McpTool<ReconstructFieldsTool.Argum
 
             @Description("The terms in position order, as the analyzer left the text: terms at one position joined"
                     + " with |, a gap of positions as " + GAP + "; absent without positions")
-            Optional<String> text,
+            @Nullable
+            String text,
 
-            @Description("Present, and true, only if text is cut at " + MAX_TEXT_LENGTH + " characters")
-            Optional<Boolean> textCut,
+            @Description("Present, and true, only if text is cut at " + MAX_TEXT_LENGTH + " characters") @Nullable
+            Boolean textCut,
 
             @Description("The terms in term order, at most maxTerms; absent where text has them, unless withTerms")
-            Optional<List<Term>> terms,
+            @Nullable
+            List<Term> terms,
 
             @Description("How many terms the document has in the field")
             int termCount,
 
-            @Description("Present, and true, only if terms holds fewer than termCount")
-            Optional<Boolean> cut,
+            @Description("Present, and true, only if terms holds fewer than termCount") @Nullable
+            Boolean cut,
 
             @Description("The document's points, at most " + MAX_POINTS + ", in unsigned byte order; absent without")
-            Optional<List<Point>> points,
+            @Nullable
+            List<Point> points,
 
-            @Description("How many points the document has in the field; absent without")
-            OptionalInt pointCount) {}
+            @Description("How many points the document has in the field; absent without") @Nullable
+            Integer pointCount) {}
 
     record Term(
             @Description("The term as text, or in hex with binary")
             String term,
 
-            @Description("Present, and true, only if term is in hex")
-            Optional<Boolean> binary,
+            @Description("Present, and true, only if term is in hex") @Nullable
+            Boolean binary,
 
             @Description("How often the term occurs in the field of the document")
             int freq,
 
-            @Description("Its positions, at most " + MAX_POSITIONS + "; absent without positions")
-            Optional<List<Integer>> positions) {}
+            @Description("Its positions, at most " + MAX_POSITIONS + "; absent without positions") @Nullable
+            List<Integer> positions) {}
 
     record Point(
             @Description("The bytes of each dimension in lowercase hex, as Lucene packs them: sortable and"
@@ -140,11 +147,11 @@ final class ReconstructFieldsTool implements McpTool<ReconstructFieldsTool.Argum
         int maxTerms = Slices.bounded("maxTerms", arguments.maxTerms(), DEFAULT_TERMS, 1, MAX_TERMS);
         ReconstructResult result = call.job(
                 Methods.START_RECONSTRUCT,
-                new StartReconstructParams(arguments.docId(), arguments.fields()),
+                new StartReconstructParams(arguments.docId(), Optional.ofNullable(arguments.fields())),
                 Methods.GET_RECONSTRUCT,
                 GetReconstructResult::result,
-                poll -> new Jobs.Progress(poll.scanned(), poll.total()));
-        boolean withTerms = arguments.withTerms().orElse(false);
+                poll -> new Jobs.Progress(poll.scanned(), Optionals.orNull(poll.total())));
+        boolean withTerms = Given.isTrue(arguments.withTerms());
         return new Result(
                 result.fields().stream()
                         .map(field -> field(field, maxTerms, withTerms))
@@ -160,14 +167,14 @@ final class ReconstructFieldsTool implements McpTool<ReconstructFieldsTool.Argum
                 field.field(),
                 field.indexOptions(),
                 field.source(),
-                textCut ? Optional.of(Slices.head(text.get(), false, MAX_TEXT_LENGTH)) : text,
+                textCut ? Slices.head(text.get(), false, MAX_TEXT_LENGTH) : text.orElse(null),
                 Absent.flag(textCut),
                 listTerms
-                        ? Optional.of(field.terms().stream()
+                        ? field.terms().stream()
                                 .limit(maxTerms)
                                 .map(ReconstructFieldsTool::term)
-                                .toList())
-                        : Optional.empty(),
+                                .toList()
+                        : null,
                 field.terms().size(),
                 Absent.flag(listTerms && field.terms().size() > maxTerms),
                 Absent.nonEmpty(field.points().stream()

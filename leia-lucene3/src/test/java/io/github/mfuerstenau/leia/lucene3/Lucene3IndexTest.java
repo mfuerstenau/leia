@@ -29,7 +29,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.ServiceLoader;
 import java.util.Set;
@@ -123,7 +122,7 @@ class Lucene3IndexTest {
                             RuntimeIndex.DocValuesType.NONE,
                             0,
                             0,
-                            Optional.empty()));
+                            null));
             assertThat(stats.fields().get(2).indexOptions()).isEqualTo(RuntimeIndex.IndexOptions.NONE);
         }
     }
@@ -135,7 +134,7 @@ class Lucene3IndexTest {
             assertThat(doc.deleted()).isFalse();
             assertThat(doc.fields().get(0).stored()).containsExactly(new RuntimeIndex.StoredValue.Text("1"));
             assertThat(doc.fields().get(1).hasTermVector()).isTrue();
-            assertThat(doc.fields().get(1).norm()).isPresent();
+            assertThat(doc.fields().get(1).norm()).isNotNull();
             RuntimeIndex.StoredValue raw = doc.fields().get(2).stored().getFirst();
             assertThat(((RuntimeIndex.StoredValue.Binary) raw).bytes())
                     .asString()
@@ -148,10 +147,10 @@ class Lucene3IndexTest {
                     .filter(term -> text(term.term()).equals("document"))
                     .findFirst()
                     .orElseThrow();
-            assertThat(document.positions().getFirst().position()).hasValue(0);
-            assertThat(document.positions().getFirst().startOffset()).hasValue(0);
-            assertThat(document.positions().getFirst().endOffset()).hasValue(8);
-            assertThat(document.positions().getFirst().payload()).isEmpty();
+            assertThat(document.positions().getFirst().position()).isEqualTo(0);
+            assertThat(document.positions().getFirst().startOffset()).isEqualTo(0);
+            assertThat(document.positions().getFirst().endOffset()).isEqualTo(8);
+            assertThat(document.positions().getFirst().payload()).isNull();
             assertThatThrownBy(() -> index.documents().orElseThrow().document(3))
                     .isInstanceOf(IllegalArgumentException.class);
         }
@@ -162,13 +161,13 @@ class Lucene3IndexTest {
         try (RuntimeIndex index = open(DirectoryKind.FS)) {
             Documents documents = index.documents().orElseThrow();
             int maxDoc = index.maxDoc();
-            List<Documents.StoredDocument> live = documents.storedValues(0, maxDoc, Optional.of(Set.of("id")), false);
+            List<Documents.StoredDocument> live = documents.storedValues(0, maxDoc, Set.of("id"), false);
             assertThat(live).extracting(Documents.StoredDocument::docId).doesNotContain(1);
             assertThat(live).extracting(Documents.StoredDocument::deleted).containsOnly(false);
             assertThat(live.getFirst().values())
                     .containsExactly(Map.entry("id", List.of(new RuntimeIndex.StoredValue.Text("1"))));
 
-            List<Documents.StoredDocument> page = documents.storedValues(1, 3, Optional.empty(), true);
+            List<Documents.StoredDocument> page = documents.storedValues(1, 3, null, true);
             assertThat(page)
                     .extracting(Documents.StoredDocument::docId, Documents.StoredDocument::deleted)
                     .containsExactly(tuple(1, true), tuple(2, false));
@@ -181,13 +180,12 @@ class Lucene3IndexTest {
                             .isEqualTo(field.stored());
                 }
             }
-            assertThat(documents.storedValues(maxDoc, maxDoc, Optional.empty(), true))
-                    .isEmpty();
-            assertThatThrownBy(() -> documents.storedValues(-1, 1, Optional.empty(), true))
+            assertThat(documents.storedValues(maxDoc, maxDoc, null, true)).isEmpty();
+            assertThatThrownBy(() -> documents.storedValues(-1, 1, null, true))
                     .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> documents.storedValues(2, 1, Optional.empty(), true))
+            assertThatThrownBy(() -> documents.storedValues(2, 1, null, true))
                     .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> documents.storedValues(0, maxDoc + 1, Optional.empty(), true))
+            assertThatThrownBy(() -> documents.storedValues(0, maxDoc + 1, null, true))
                     .isInstanceOf(IllegalArgumentException.class);
         }
     }
@@ -195,23 +193,21 @@ class Lucene3IndexTest {
     @Test
     void readsTermsAndPostings() throws IOException {
         try (RuntimeIndex index = open(DirectoryKind.NIO)) {
-            Terms.TermsPage page = index.terms().orElseThrow().terms("id", Optional.empty(), 2);
+            Terms.TermsPage page = index.terms().orElseThrow().terms("id", null, 2);
             assertThat(page.terms()).extracting(term -> text(term.term())).containsExactly("1", "2");
-            assertThat(page.next().map(Lucene3IndexTest::text)).contains("3");
+            assertThat(Optional.ofNullable(page.next()).map(Lucene3IndexTest::text))
+                    .contains("3");
             assertThat(index.terms().orElseThrow().terms("id", page.next(), 2).terms())
                     .extracting(term -> text(term.term()), Terms.TermEntry::docFreq, Terms.TermEntry::totalTermFreq)
                     .containsExactly(tuple("3", 1, 1L));
-            assertThat(index.terms()
-                            .orElseThrow()
-                            .terms("nothing", Optional.empty(), 10)
-                            .terms())
+            assertThat(index.terms().orElseThrow().terms("nothing", null, 10).terms())
                     .isEmpty();
 
             Terms.PostingsPage postings = index.terms().orElseThrow().postings("body", utf8("document"), 0, 1, 0);
             // docFreq counts the deleted document, the postings skip it.
             assertThat(postings.docFreq()).isEqualTo(3);
             assertThat(postings.postings()).containsExactly(new Terms.Posting(0, 1, false));
-            assertThat(postings.nextDoc()).hasValue(2);
+            assertThat(postings.nextDoc()).isEqualTo(2);
         }
     }
 
@@ -222,8 +218,7 @@ class Lucene3IndexTest {
             assertThat(terms.positions(0, "body", utf8("alpha")))
                     .hasValueSatisfying(positions -> assertThat(positions)
                             .singleElement()
-                            .isEqualTo(new Documents.Position(
-                                    OptionalInt.of(0), OptionalInt.empty(), OptionalInt.empty(), Optional.empty())));
+                            .isEqualTo(new Documents.Position(0, null, null, null)));
             assertThat(terms.positions(1, "body", utf8("gamma"))).isEmpty();
             // 3.6 skips the deleted document.
             assertThat(terms.positions(1, "body", utf8("alpha"))).isEmpty();
@@ -247,8 +242,7 @@ class Lucene3IndexTest {
                                     .orElseThrow()));
             assertThat(page.postings().getFirst().positions())
                     .singleElement()
-                    .isEqualTo(new Documents.Position(
-                            OptionalInt.of(0), OptionalInt.empty(), OptionalInt.empty(), Optional.empty()));
+                    .isEqualTo(new Documents.Position(0, null, null, null));
             assertThat(terms.postings("body", utf8("alpha"), 0, 10, 0).postings())
                     .allSatisfy(posting -> assertThat(posting.positions()).isEmpty());
             // Docs only: the postings hold no positions.
@@ -270,8 +264,7 @@ class Lucene3IndexTest {
     void searches() throws Exception {
         try (RuntimeIndex index = open(DirectoryKind.NIO)) {
             Search.ParsedQuery query = index.search().orElseThrow().parse("number AND (1 OR 3)", BODY, standard());
-            Search.SearchResults results =
-                    index.search().orElseThrow().search(query, 0, 10, Optional.of(List.of("id")), _ -> {});
+            Search.SearchResults results = index.search().orElseThrow().search(query, 0, 10, List.of("id"), _ -> {});
             assertThat(results.totalHits()).isEqualTo(2);
             assertThat(results.hits()).extracting(Search.Hit::docId).containsExactlyInAnyOrder(0, 2);
             assertThat(results.hits().getFirst().fields()).containsOnlyKeys("id");
@@ -291,7 +284,7 @@ class Lucene3IndexTest {
             assertThat(live.rewrittenQuery()).isEqualTo("body:alpha");
             // Every document has alpha; one of the 7 is deleted.
             BitSet hits = new BitSet();
-            search.search(query, 0, 10, Optional.empty(), _ -> {}).hits().forEach(hit -> hits.set(hit.docId()));
+            search.search(query, 0, 10, null, _ -> {}).hits().forEach(hit -> hits.set(hit.docId()));
             assertThat(live.docs()).isEqualTo(hits);
             assertThat(live.docs().cardinality()).isEqualTo(6);
             assertThat(progress).last().isEqualTo(7L);
@@ -310,18 +303,15 @@ class Lucene3IndexTest {
     @ValueSource(strings = {"lucene24", "lucene3"})
     void searchesATerm(String name) throws Exception {
         try (RuntimeIndex index = name.equals("lucene3") ? open3() : open(DirectoryKind.FS)) {
-            for (Terms.TermEntry term : index.terms()
-                    .orElseThrow()
-                    .terms("body", Optional.empty(), 100)
-                    .terms()) {
+            for (Terms.TermEntry term :
+                    index.terms().orElseThrow().terms("body", null, 100).terms()) {
                 searchesTheTerm(index, "body", term.term());
             }
 
             Search search = index.search().orElseThrow();
             Search.ParsedQuery nothing = search.term("body", utf8("nothing"));
             assertThat(nothing.toString()).isEqualTo("body:nothing");
-            assertThat(search.search(nothing, 0, 10, Optional.empty(), _ -> {}).totalHits())
-                    .isZero();
+            assertThat(search.search(nothing, 0, 10, null, _ -> {}).totalHits()).isZero();
             assertThat(search.matches(nothing, false, _ -> {}).docs().isEmpty()).isTrue();
         }
     }
@@ -337,7 +327,7 @@ class Lucene3IndexTest {
                 .filter(posting -> !posting.deleted())
                 .map(Terms.Posting::docId)
                 .toList();
-        Search.SearchResults results = search.search(query, 0, index.maxDoc(), Optional.empty(), _ -> {});
+        Search.SearchResults results = search.search(query, 0, index.maxDoc(), null, _ -> {});
         assertThat(results.totalHits()).isEqualTo(live.size());
         assertThat(results.hits()).extracting(Search.Hit::docId).containsExactlyInAnyOrderElementsOf(live);
         assertThat(search.matches(query, false, _ -> {}).docs().stream().boxed().toList())
@@ -355,8 +345,7 @@ class Lucene3IndexTest {
         try (RuntimeIndex index = open3()) {
             Search search = index.search().orElseThrow();
             Search.ParsedQuery alpha = search.parse("alpha", BODY, standard());
-            Search.Hit hit =
-                    search.search(alpha, 0, 1, Optional.empty(), _ -> {}).hits().getFirst();
+            Search.Hit hit = search.search(alpha, 0, 1, null, _ -> {}).hits().getFirst();
             List<Long> progress = new ArrayList<>();
             Search.Explanation explanation = search.explain(alpha, hit.docId(), progress::add);
             assertThat(explanation.match()).isTrue();
@@ -438,10 +427,7 @@ class Lucene3IndexTest {
                             .getFirst()
                             .stored())
                     .containsExactly(new RuntimeIndex.StoredValue.Text("1"));
-            assertThat(index.terms()
-                            .orElseThrow()
-                            .terms("id", Optional.empty(), 20)
-                            .terms())
+            assertThat(index.terms().orElseThrow().terms("id", null, 20).terms())
                     .extracting(term -> text(term.term()))
                     .containsExactly("1", "2", "3", "4", "5", "6", "7");
         }
@@ -484,15 +470,15 @@ class Lucene3IndexTest {
         assertThat(plain.name()).isEqualTo("_0");
         assertThat(plain.compound()).isFalse();
         assertThat(plain.delCount()).isEqualTo(1);
-        assertThat(plain.delGen()).hasValue(1);
+        assertThat(plain.delGen()).isEqualTo(1);
         assertThat(plain.luceneVersion()).isEqualTo("3.6.2");
-        assertThat(plain.sizeInBytes()).isPresent();
+        assertThat(plain.sizeInBytes()).isNotNull();
         assertThat(plain.diagnostics()).containsEntry("source", "flush");
         assertThat(plain.attributes()).containsKeys("docStoreSegment", "docStoreOffset", "hasProx");
         Commits.Segment compound = details.segments().get(1);
         assertThat(compound.compound()).isTrue();
         assertThat(compound.docBase()).isEqualTo(4);
-        assertThat(compound.delGen()).isEmpty();
+        assertThat(compound.delGen()).isNull();
         assertThat(details.files())
                 .extracting(Commits.CommitFile::name)
                 .contains("segments_2", "_0_1.del", "_0.frq", "_1.cfs");
@@ -501,7 +487,7 @@ class Lucene3IndexTest {
                 .singleElement()
                 .satisfies(file -> {
                     assertThat(file.segment()).contains("_1");
-                    assertThat(file.size()).isPresent();
+                    assertThat(file.size()).isNotNull();
                 });
         assertThat(commits.commit(lucene3(), DirectoryKind.FS, 99)).isEmpty();
 
@@ -520,12 +506,12 @@ class Lucene3IndexTest {
                 .check()
                 .orElseThrow()
                 .check(testIndex(name), DirectoryKind.FS, Check.Options.defaults(), lines::add, _ -> {});
-        assertThat(result.error()).isEmpty();
+        assertThat(result.error()).isNull();
         assertThat(result.clean()).isTrue();
         assertThat(result.badSegments()).isZero();
         assertThat(result.segments()).allSatisfy(segment -> {
             assertThat(segment.openReaderPassed()).isTrue();
-            assertThat(segment.error()).isEmpty();
+            assertThat(segment.error()).isNull();
         });
         assertThat(lines).anyMatch(line -> line.contains("No problems were detected"));
     }
@@ -550,8 +536,8 @@ class Lucene3IndexTest {
         assertThat(result.clean()).isFalse();
         assertThat(result.badSegments()).isEqualTo(1);
         assertThat(result.lostDocs()).isEqualTo(3);
-        assertThat(result.segments().get(0).error()).isPresent();
-        assertThat(result.segments().get(1).error()).isEmpty();
+        assertThat(result.segments().get(0).error()).isNotNull();
+        assertThat(result.segments().get(1).error()).isNull();
         assertThat(hashes(dir)).isEqualTo(before);
         assertThat(dir.resolve("write.lock")).doesNotExist();
     }
@@ -652,10 +638,7 @@ class Lucene3IndexTest {
                 assertThat(text(id.term())).isEqualTo("2");
                 assertThat(id.freq()).isEqualTo(1);
                 // Not analyzed: one position, without a payload.
-                assertThat(id.positions())
-                        .singleElement()
-                        .isEqualTo(new Documents.Position(
-                                OptionalInt.of(0), OptionalInt.empty(), OptionalInt.empty(), Optional.empty()));
+                assertThat(id.positions()).singleElement().isEqualTo(new Documents.Position(0, null, null, null));
             });
             assertThat(deleted.get(2).terms())
                     .extracting(term -> text(term.term()))
@@ -665,11 +648,7 @@ class Lucene3IndexTest {
                     .containsExactly("2", "alpha", "document");
             assertThat(deleted.get(3).terms())
                     .flatExtracting(Documents.VectorTerm::positions)
-                    .extracting(
-                            position -> position.position().getAsInt(),
-                            position -> position.payload()
-                                    .map(Lucene3IndexTest::text)
-                                    .orElseThrow())
+                    .extracting(position -> position.position(), position -> text(position.payload()))
                     .containsExactly(tuple(2, "p2"), tuple(0, "p2"), tuple(1, "p2"));
             // The terms of id, tag and payload in the segment _0 of documents 1 to 4: 4 ids, 2 tags, and
             // alpha, document and 4 numbers.
@@ -685,7 +664,7 @@ class Lucene3IndexTest {
         Terms terms = index.terms().orElseThrow();
         Optional<byte[]> from = Optional.empty();
         do {
-            Terms.TermsPage page = terms.terms(field.name(), from, 100);
+            Terms.TermsPage page = terms.terms(field.name(), from.orElse(null), 100);
             for (Terms.TermEntry entry : page.terms()) {
                 List<Terms.Posting> postings =
                         terms.postings(field.name(), entry.term(), doc, 1, 0).postings();
@@ -699,7 +678,7 @@ class Lucene3IndexTest {
                                     : List.of()));
                 }
             }
-            from = page.next();
+            from = Optional.ofNullable(page.next());
         } while (from.isPresent());
         return result;
     }
@@ -710,7 +689,8 @@ class Lucene3IndexTest {
                         + term.positions().stream()
                                 .map(position -> position.position() + "/" + position.startOffset() + "/"
                                         + position.endOffset() + "/"
-                                        + position.payload().map(HexFormat.of()::formatHex))
+                                        + Optional.ofNullable(position.payload())
+                                                .map(HexFormat.of()::formatHex))
                                 .toList())
                 .toList();
     }
@@ -756,9 +736,7 @@ class Lucene3IndexTest {
                             "Alpha beta",
                             BODY,
                             new Search.AnalyzerSpec.Preset(
-                                    "StandardAnalyzer",
-                                    Optional.of(new Search.AnalyzerSpec.WordSet.Words(List.of("alpha"))),
-                                    OptionalInt.empty())))
+                                    "StandardAnalyzer", new Search.AnalyzerSpec.WordSet.Words(List.of("alpha")), null)))
                     .hasToString("body:beta");
             assertThat(search.parse(
                             "\"Alpha beta\" id:\"A b\"",
@@ -766,8 +744,8 @@ class Lucene3IndexTest {
                             new Search.AnalyzerSpec.PerField(
                                     new Search.AnalyzerSpec.Wrapped(
                                             named("SimpleAnalyzer"),
-                                            Optional.empty(),
-                                            Optional.of(new Search.AnalyzerSpec.LimitTokenCount(1, false))),
+                                            null,
+                                            new Search.AnalyzerSpec.LimitTokenCount(1, false)),
                                     Map.of("id", named("KeywordAnalyzer")))))
                     .hasToString("body:alpha id:A b");
             assertThatThrownBy(() -> search.parse("alpha", BODY, named("EnglishAnalyzer")))
@@ -778,9 +756,7 @@ class Lucene3IndexTest {
                             "alpha",
                             BODY,
                             new Search.AnalyzerSpec.Preset(
-                                    "WhitespaceAnalyzer",
-                                    Optional.of(new Search.AnalyzerSpec.WordSet.Words(List.of("a"))),
-                                    OptionalInt.empty())))
+                                    "WhitespaceAnalyzer", new Search.AnalyzerSpec.WordSet.Words(List.of("a")), null)))
                     .isInstanceOf(Search.UnsupportedAnalyzerException.class)
                     .hasMessageContaining("takes no stop words");
         }
@@ -814,10 +790,7 @@ class Lucene3IndexTest {
                 // The first segment is in both commits, and its reader is shared.
                 assertThat(reopened.documents().orElseThrow().document(0).fields())
                         .isNotEmpty();
-                assertThat(reopened.terms()
-                                .orElseThrow()
-                                .terms("id", Optional.empty(), 20)
-                                .terms())
+                assertThat(reopened.terms().orElseThrow().terms("id", null, 20).terms())
                         .isNotEmpty();
             }
         }
@@ -844,12 +817,9 @@ class Lucene3IndexTest {
                 // The unchanged directory's reader, still open.
                 assertThat(reopened.documents().orElseThrow().document(0).fields())
                         .isNotEmpty();
-                assertThat(reopened.terms()
-                                .orElseThrow()
-                                .terms("id", Optional.empty(), 20)
-                                .terms())
+                assertThat(reopened.terms().orElseThrow().terms("id", null, 20).terms())
                         .extracting(term -> text(term.term()), Terms.TermEntry::docFreq)
-                        .isEqualTo(latest.terms().orElseThrow().terms("id", Optional.empty(), 20).terms().stream()
+                        .isEqualTo(latest.terms().orElseThrow().terms("id", null, 20).terms().stream()
                                 .map(term -> tuple(text(term.term()), term.docFreq()))
                                 .toList());
             }
@@ -878,7 +848,7 @@ class Lucene3IndexTest {
             try (RuntimeIndex index = runtime.open(List.of(dir), directoryKind)) {
                 index.stats();
                 index.documents().orElseThrow().document(2);
-                index.terms().orElseThrow().terms("body", Optional.empty(), 100);
+                index.terms().orElseThrow().terms("body", null, 100);
                 index.terms().orElseThrow().topTerms("body", 10, _ -> {});
             }
             runtime.commits().orElseThrow().commits(dir, directoryKind);
@@ -938,10 +908,10 @@ class Lucene3IndexTest {
     @Test
     void readsRangeBoundsAsDates() throws Exception {
         Search.Dates dates = new Search.Dates(
-                Optional.of(Search.DateResolution.YEAR),
+                Search.DateResolution.YEAR,
                 Map.of("published", Search.DateResolution.MILLISECOND),
-                Optional.of(Locale.GERMANY),
-                Optional.of(ZoneId.of("Europe/Berlin")));
+                Locale.GERMANY,
+                ZoneId.of("Europe/Berlin"));
         try (RuntimeIndex index = open(DirectoryKind.NIO)) {
             Search.ParsedQuery query = index.search()
                     .orElseThrow()
@@ -987,7 +957,7 @@ class Lucene3IndexTest {
                     .isEqualTo(index.maxDoc() - index.stats().numDocs())
                     .isPositive();
             assertThat(segments(index)).allSatisfy(segment -> {
-                assertThat(segment.id()).isEmpty();
+                assertThat(segment.id()).isNull();
                 assertThat(segment.files()).isNotEmpty().isSorted();
             });
         }
@@ -1012,7 +982,7 @@ class Lucene3IndexTest {
             for (boolean includeDeleted : new boolean[] {false, true}) {
                 assertThat(bySegment(index, fields, includeDeleted, IntUnaryOperator.identity()))
                         .containsExactlyElementsOf(
-                                documents.storedValues(0, index.maxDoc(), fields, includeDeleted).stream()
+                                documents.storedValues(0, index.maxDoc(), fields.orElse(null), includeDeleted).stream()
                                         .map(document -> described(document, document.docId()))
                                         .toList());
             }
@@ -1022,18 +992,17 @@ class Lucene3IndexTest {
             List<Integer> read = new ArrayList<>();
             // The next odd document at or after doc.
             documents.storedValues(
-                    segment, Optional.empty(), true, doc -> doc | 1, document -> read.add(document.docId()), _ -> {});
+                    segment, null, true, doc -> doc | 1, document -> read.add(document.docId()), _ -> {});
             assertThat(read).hasSize(info.maxDoc() / 2).allMatch(doc -> doc % 2 == 1);
             segment++;
         }
-        assertThatThrownBy(() ->
-                        documents.storedValues(0, Optional.empty(), true, IntUnaryOperator.identity(), _ -> {}, _ -> {
-                            throw new CancellationException();
-                        }))
+        assertThatThrownBy(() -> documents.storedValues(0, null, true, IntUnaryOperator.identity(), _ -> {}, _ -> {
+                    throw new CancellationException();
+                }))
                 .isInstanceOf(CancellationException.class);
         int segments = segment;
-        assertThatThrownBy(() -> documents.storedValues(
-                        segments, Optional.empty(), true, IntUnaryOperator.identity(), _ -> {}, _ -> {}))
+        assertThatThrownBy(() ->
+                        documents.storedValues(segments, null, true, IntUnaryOperator.identity(), _ -> {}, _ -> {}))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -1050,7 +1019,7 @@ class Lucene3IndexTest {
                 List<Long> progress = new ArrayList<>();
                 documents.storedValues(
                         segment,
-                        fields,
+                        fields.orElse(null),
                         includeDeleted,
                         next,
                         document -> read.add(described(document, base + document.docId())),

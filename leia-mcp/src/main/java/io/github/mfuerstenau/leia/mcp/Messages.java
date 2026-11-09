@@ -3,7 +3,7 @@ package io.github.mfuerstenau.leia.mcp;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
-import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.MapperFeature;
@@ -60,7 +60,7 @@ public final class Messages {
     /** The result of {@code tools/call}: the result record in {@code structuredContent} and as text. */
     record CallToolResult(
             List<TextContent> content,
-            Optional<JsonNode> structuredContent,
+            @Nullable JsonNode structuredContent,
             @JsonProperty("isError") boolean isError) {}
 
     record TextContent(String type, String text) {

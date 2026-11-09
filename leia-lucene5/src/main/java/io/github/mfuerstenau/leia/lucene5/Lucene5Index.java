@@ -17,6 +17,7 @@ import io.github.mfuerstenau.leia.runtime.StandardSearch;
 import io.github.mfuerstenau.leia.runtime.Terms;
 import io.github.mfuerstenau.leia.runtime.support.Failures;
 import io.github.mfuerstenau.leia.runtime.support.IndexParts;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -89,6 +90,7 @@ import org.apache.lucene.search.TopScoreDocCollector;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
+import org.jspecify.annotations.Nullable;
 
 /**
  * An index written by Lucene 4.x or 5.x, read with Lucene 5.5 (ADR 0046). Lucene 10 can't read such
@@ -366,9 +368,11 @@ final class Lucene5Index
                     part.reader().maxDoc(),
                     List.copyOf(versions),
                     // Recorded since 5.3.
-                    Optional.ofNullable(infos.getCommitLuceneVersion()).map(Object::toString),
+                    Optional.ofNullable(infos.getCommitLuceneVersion())
+                            .map(Object::toString)
+                            .orElse(null),
                     // Recorded since 7.0.
-                    OptionalInt.empty(),
+                    null,
                     Map.copyOf(commit.getUserData()),
                     segments(part.reader())));
             docBase += part.reader().maxDoc();
@@ -393,7 +397,9 @@ final class Lucene5Index
                         leaf.reader().maxDoc(),
                         leaf.reader().numDocs(),
                         // Recorded since 5.0 (ADR 0113).
-                        Optional.ofNullable(info.getId()).map(HexFormat.of()::formatHex),
+                        Optional.ofNullable(info.getId())
+                                .map(HexFormat.of()::formatHex)
+                                .orElse(null),
                         List.copyOf(new TreeSet<>(info.files()))));
             } else {
                 segments.add(new Segment(
@@ -428,7 +434,7 @@ final class Lucene5Index
                     docValuesType(info.getDocValuesType()),
                     0,
                     0,
-                    termStats(info.name)));
+                    termStats(info.name).orElse(null)));
         }
         result.sort(Comparator.comparingInt(Field::number));
         return List.copyOf(result);
@@ -487,9 +493,9 @@ final class Lucene5Index
             boolean hasTermVector = vectors != null && vectors.terms(field.name()) != null;
             result.add(new DocumentField(
                     field.name(),
-                    norm,
+                    Optionals.orNull(norm),
                     List.copyOf(stored.getOrDefault(field.name(), List.of())),
-                    docValues(leaf.reader(), leafDoc, field),
+                    docValues(leaf.reader(), leafDoc, field).orElse(null),
                     hasTermVector));
         }
         Bits liveDocs = MultiFields.getLiveDocs(reader);
@@ -545,7 +551,7 @@ final class Lucene5Index
 
     @Override
     public List<StoredDocument> storedValues(
-            int fromDoc, int toDoc, Optional<Set<String>> fields, boolean includeDeleted) throws IOException {
+            int fromDoc, int toDoc, @Nullable Set<String> fields, boolean includeDeleted) throws IOException {
         checkRange(fromDoc, toDoc);
         Bits liveDocs = MultiFields.getLiveDocs(reader);
         List<StoredDocument> documents = new ArrayList<>();
@@ -555,8 +561,8 @@ final class Lucene5Index
                 continue;
             }
             Document document;
-            if (fields.isPresent()) {
-                DocumentStoredFieldVisitor visitor = new DocumentStoredFieldVisitor(fields.get());
+            if (fields != null) {
+                DocumentStoredFieldVisitor visitor = new DocumentStoredFieldVisitor(fields);
                 reader.document(doc, visitor);
                 document = visitor.getDocument();
             } else {
@@ -591,7 +597,7 @@ final class Lucene5Index
     @Override
     public void storedValues(
             int segment,
-            Optional<Set<String>> fields,
+            @Nullable Set<String> fields,
             boolean includeDeleted,
             IntUnaryOperator next,
             Consumer<StoredDocument> sink,
@@ -612,8 +618,9 @@ final class Lucene5Index
             if (deleted && !includeDeleted) {
                 continue;
             }
-            DocumentStoredFieldVisitor visitor =
-                    fields.map(DocumentStoredFieldVisitor::new).orElseGet(DocumentStoredFieldVisitor::new);
+            DocumentStoredFieldVisitor visitor = Optional.ofNullable(fields)
+                    .map(DocumentStoredFieldVisitor::new)
+                    .orElseGet(DocumentStoredFieldVisitor::new);
             stored.document(doc, visitor);
             sink.accept(new StoredDocument(doc, deleted, storedValues(visitor.getDocument())));
         }
@@ -737,35 +744,33 @@ final class Lucene5Index
         int position = postings.nextPosition();
         BytesRef payload = postings.getPayload();
         return new Position(
-                withPositions && position >= 0 ? OptionalInt.of(position) : OptionalInt.empty(),
-                withOffsets ? OptionalInt.of(postings.startOffset()) : OptionalInt.empty(),
-                withOffsets ? OptionalInt.of(postings.endOffset()) : OptionalInt.empty(),
-                payload == null || payload.length == 0
-                        ? Optional.empty()
-                        : Optional.of(BytesRef.deepCopyOf(payload).bytes));
+                withPositions && position >= 0 ? position : null,
+                withOffsets ? postings.startOffset() : null,
+                withOffsets ? postings.endOffset() : null,
+                payload == null || payload.length == 0 ? null : BytesRef.deepCopyOf(payload).bytes);
     }
 
     @Override
-    public TermsPage terms(String field, Optional<byte[]> from, int limit) throws IOException {
+    public TermsPage terms(String field, byte @Nullable [] from, int limit) throws IOException {
         org.apache.lucene.index.Terms terms = MultiFields.getTerms(reader, field);
         if (terms == null) {
-            return new TermsPage(List.of(), Optional.empty());
+            return new TermsPage(List.of(), null);
         }
         TermsEnum termsEnum = terms.iterator();
         BytesRef term;
-        if (from.isPresent()) {
-            term = termsEnum.seekCeil(new BytesRef(from.get())) == TermsEnum.SeekStatus.END ? null : termsEnum.term();
+        if (from != null) {
+            term = termsEnum.seekCeil(new BytesRef(from)) == TermsEnum.SeekStatus.END ? null : termsEnum.term();
         } else {
             term = termsEnum.next();
         }
         List<TermEntry> entries = new ArrayList<>();
         for (; term != null; term = termsEnum.next()) {
             if (entries.size() == limit) {
-                return new TermsPage(List.copyOf(entries), Optional.of(BytesRef.deepCopyOf(term).bytes));
+                return new TermsPage(List.copyOf(entries), BytesRef.deepCopyOf(term).bytes);
             }
             entries.add(new TermEntry(BytesRef.deepCopyOf(term).bytes, termsEnum.docFreq(), totalTermFreq(termsEnum)));
         }
-        return new TermsPage(List.copyOf(entries), Optional.empty());
+        return new TermsPage(List.copyOf(entries), null);
     }
 
     /** {@code totalTermFreq}, or {@code docFreq} for a field without frequencies, as Lucene 10 has it. */
@@ -815,11 +820,11 @@ final class Lucene5Index
             throws IOException {
         org.apache.lucene.index.Terms terms = MultiFields.getTerms(reader, field);
         if (terms == null) {
-            return new PostingsPage(0, 0, List.of(), OptionalInt.empty());
+            return new PostingsPage(0, 0, List.of(), null);
         }
         TermsEnum termsEnum = terms.iterator();
         if (!termsEnum.seekExact(new BytesRef(text))) {
-            return new PostingsPage(0, 0, List.of(), OptionalInt.empty());
+            return new PostingsPage(0, 0, List.of(), null);
         }
         Bits liveDocs = MultiFields.getLiveDocs(reader);
         boolean withPositions = maxPositions > 0 && terms.hasPositions();
@@ -839,7 +844,8 @@ final class Lucene5Index
             }
             postings.add(new Posting(doc, freq, liveDocs != null && !liveDocs.get(doc), List.copyOf(positions)));
         }
-        return new PostingsPage(termsEnum.docFreq(), totalTermFreq(termsEnum), List.copyOf(postings), next);
+        return new PostingsPage(
+                termsEnum.docFreq(), totalTermFreq(termsEnum), List.copyOf(postings), Optionals.orNull(next));
     }
 
     /** {@inheritDoc} Deleted documents have their positions too. */
@@ -989,7 +995,7 @@ final class Lucene5Index
             int offset,
             int limit,
             boolean exactTotalHits,
-            Optional<List<String>> fields,
+            @Nullable List<String> fields,
             LongConsumer progress)
             throws IOException {
         return search(parsed, DEFAULT_SIMILARITY, List.of(), offset, limit, exactTotalHits, fields, progress);
@@ -1002,7 +1008,7 @@ final class Lucene5Index
             for (int i = 0; i < sortFields.length; i++) {
                 sortValues.add(
                         Lucene5Sorts.numeric(sortFields[i]) && !hasNumber(sortFields[i].getField(), scoreDoc.doc)
-                                ? new SortValue(Optional.empty(), Optional.empty())
+                                ? new SortValue(null, null)
                                 : sortValue(fieldDoc.fields[i]));
             }
         }
@@ -1021,7 +1027,7 @@ final class Lucene5Index
             int offset,
             int limit,
             boolean exactTotalHits,
-            Optional<List<String>> fields,
+            @Nullable List<String> fields,
             LongConsumer progress)
             throws IOException {
         if (!(parsed instanceof Lucene5Query lucene5)) {
@@ -1054,7 +1060,7 @@ final class Lucene5Index
         for (ScoreDoc scoreDoc : docs.scoreDocs) {
             Map<String, List<StoredValue>> values = new LinkedHashMap<>();
             for (IndexableField field : reader.document(scoreDoc.doc).getFields()) {
-                if (fields.isEmpty() || fields.get().contains(field.name())) {
+                if (fields == null || fields.contains(field.name())) {
                     values.computeIfAbsent(field.name(), _ -> new ArrayList<>()).add(storedValue(field));
                 }
             }
@@ -1066,7 +1072,7 @@ final class Lucene5Index
                 docs.totalHits,
                 List.copyOf(hits),
                 (System.nanoTime() - start) / 1_000_000,
-                likeTerms);
+                likeTerms.orElse(null));
     }
 
     /** A searcher of the whole index that scores with {@code similarity}. */
@@ -1081,9 +1087,9 @@ final class Lucene5Index
     /** A value of {@link FieldDoc#fields}: a number, a term, or null for a missing string. */
     private static SortValue sortValue(Object value) {
         return switch (value) {
-            case Number number -> new SortValue(Optional.of(number), Optional.empty());
-            case BytesRef term -> new SortValue(Optional.empty(), Optional.of(BytesRef.deepCopyOf(term).bytes));
-            case null, default -> new SortValue(Optional.empty(), Optional.empty());
+            case Number number -> new SortValue(number, null);
+            case BytesRef term -> new SortValue(null, BytesRef.deepCopyOf(term).bytes);
+            case null, default -> new SortValue(null, null);
         };
     }
 

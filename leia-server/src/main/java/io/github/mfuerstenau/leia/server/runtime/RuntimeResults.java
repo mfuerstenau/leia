@@ -98,6 +98,7 @@ import io.github.mfuerstenau.leia.runtime.Scoring;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.StandardSearch;
 import io.github.mfuerstenau.leia.runtime.Terms;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.analysis.AutoStopWords;
@@ -223,12 +224,10 @@ public final class RuntimeResults {
         if (index.rebuild().isPresent()) {
             features.add(Feature.RECONSTRUCT);
         }
-        if (index.knn().isPresent()
-                && index.fields().stream().anyMatch(field -> field.vectors().isPresent())) {
+        if (index.knn().isPresent() && index.fields().stream().anyMatch(field -> field.vectors() != null)) {
             features.add(Feature.KNN_VECTORS);
         }
-        if (index.knnGraph().isPresent()
-                && index.fields().stream().anyMatch(field -> field.vectors().isPresent())) {
+        if (index.knnGraph().isPresent() && index.fields().stream().anyMatch(field -> field.vectors() != null)) {
             features.add(Feature.KNN_GRAPH);
         }
         if (open.runtime().commits().isPresent()) {
@@ -436,7 +435,8 @@ public final class RuntimeResults {
                 commit(details.commit(), dir),
                 details.segments().stream().map(RuntimeResults::segment).toList(),
                 details.files().stream()
-                        .map(file -> new CommitFile(file.name(), file.segment(), file.size()))
+                        .map(file -> new CommitFile(
+                                file.name(), Optional.ofNullable(file.segment()), Optionals.optionalLong(file.size())))
                         .toList());
     }
 
@@ -461,39 +461,42 @@ public final class RuntimeResults {
     private static Segment segment(Commits.Segment segment) {
         return new Segment(
                 segment.name(),
-                segment.id(),
+                Optional.ofNullable(segment.id()),
                 segment.maxDoc(),
                 segment.docBase(),
                 segment.delCount(),
                 segment.softDelCount(),
-                segment.delGen(),
-                segment.fieldInfosGen(),
-                segment.docValuesGen(),
+                Optionals.optionalLong(segment.delGen()),
+                Optionals.optionalLong(segment.fieldInfosGen()),
+                Optionals.optionalLong(segment.docValuesGen()),
                 segment.luceneVersion(),
-                segment.minLuceneVersion(),
-                segment.codec(),
-                segment.formats()
+                Optional.ofNullable(segment.minLuceneVersion()),
+                Optional.ofNullable(segment.codec()),
+                Optional.ofNullable(segment.formats())
                         .map(formats -> new CodecFormats(
                                 formats.postings(),
                                 formats.docValues(),
                                 formats.storedFields(),
                                 formats.termVectors(),
                                 formats.norms(),
-                                formats.points(),
-                                formats.knnVectors(),
+                                Optional.ofNullable(formats.points()),
+                                Optional.ofNullable(formats.knnVectors()),
                                 formats.fieldInfos(),
                                 formats.segmentInfo(),
                                 formats.liveDocs(),
                                 formats.compound())),
                 segment.fieldFormats().stream()
                         .map(field -> new FieldFormats(
-                                field.field(), field.postings(), field.docValues(), field.knnVectors()))
+                                field.field(),
+                                Optional.ofNullable(field.postings()),
+                                Optional.ofNullable(field.docValues()),
+                                Optional.ofNullable(field.knnVectors())))
                         .toList(),
-                segment.fieldInfosError(),
+                Optional.ofNullable(segment.fieldInfosError()),
                 segment.compound(),
                 segment.hasBlocks(),
-                segment.indexSort(),
-                segment.sizeInBytes(),
+                Optional.ofNullable(segment.indexSort()),
+                Optionals.optionalLong(segment.sizeInBytes()),
                 Map.copyOf(segment.diagnostics()),
                 Map.copyOf(segment.attributes()));
     }
@@ -509,10 +512,12 @@ public final class RuntimeResults {
                 docValuesType(field.docValuesType()),
                 field.pointDimensionCount(),
                 field.pointNumBytes(),
-                field.vectors().map(RuntimeIndex.VectorFormat::dimension).orElse(0),
-                field.vectors().map(vectors -> vectorEncoding(vectors.encoding())),
-                field.vectors().map(vectors -> vectorSimilarity(vectors.similarity())),
-                field.terms()
+                Optional.ofNullable(field.vectors())
+                        .map(RuntimeIndex.VectorFormat::dimension)
+                        .orElse(0),
+                Optional.ofNullable(field.vectors()).map(vectors -> vectorEncoding(vectors.encoding())),
+                Optional.ofNullable(field.vectors()).map(vectors -> vectorSimilarity(vectors.similarity())),
+                Optional.ofNullable(field.terms())
                         .map(terms -> new TermStats(terms.docCount(), terms.sumDocFreq(), terms.sumTotalTermFreq())));
     }
 
@@ -611,11 +616,11 @@ public final class RuntimeResults {
                 doc.fields().stream()
                         .map(field -> new DocumentField(
                                 field.name(),
-                                field.norm(),
+                                Optionals.optionalLong(field.norm()),
                                 field.stored().stream()
                                         .map(value -> storedValue(value, GetDocumentResult.MAX_VALUE_LENGTH))
                                         .toList(),
-                                field.docValues()
+                                Optional.ofNullable(field.docValues())
                                         .map(values -> new DocValues(
                                                 docValuesType(values.type()),
                                                 values.numbers(),
@@ -623,7 +628,7 @@ public final class RuntimeResults {
                                                         .map(RuntimeResults::bytesValue)
                                                         .toList())),
                                 field.hasTermVector(),
-                                field.vector().map(RuntimeResults::knnVector)))
+                                Optional.ofNullable(field.vector()).map(RuntimeResults::knnVector)))
                         .toList());
     }
 
@@ -634,8 +639,7 @@ public final class RuntimeResults {
         checkField(open.index(), params.field());
         List<Documents.StoredDocument> read;
         try {
-            read = documents.storedValues(
-                    params.docId(), params.docId() + 1, Optional.of(Set.of(params.field())), true);
+            read = documents.storedValues(params.docId(), params.docId() + 1, Set.of(params.field()), true);
         } catch (IOException e) {
             throw new RpcException(
                     ErrorCode.INDEX_NOT_READABLE, "Cannot read document " + params.docId() + ": " + e.getMessage(), e);
@@ -685,7 +689,7 @@ public final class RuntimeResults {
         Optional<byte[]> from = fromParam.isPresent() ? Optional.of(bytes(fromParam.get())) : Optional.empty();
         checkField(open.index(), params.field());
         try {
-            Terms.TermsPage page = terms.terms(params.field(), from, params.limit());
+            Terms.TermsPage page = terms.terms(params.field(), from.orElse(null), params.limit());
             return new GetTermsResult(
                     page.terms().stream()
                             .map(term -> {
@@ -694,7 +698,7 @@ public final class RuntimeResults {
                                         encoded.value(), encoded.binary(), term.docFreq(), term.totalTermFreq());
                             })
                             .toList(),
-                    page.next().map(RuntimeResults::bytesValue));
+                    Optional.ofNullable(page.next()).map(RuntimeResults::bytesValue));
         } catch (IOException e) {
             throw new RpcException(
                     ErrorCode.INDEX_NOT_READABLE,
@@ -760,7 +764,7 @@ public final class RuntimeResults {
                                                     .toList())
                                             : Optional.empty()))
                             .toList(),
-                    page.nextDoc());
+                    Optionals.optionalInt(page.nextDoc()));
         } catch (IOException e) {
             throw new RpcException(
                     ErrorCode.INDEX_NOT_READABLE,
@@ -792,10 +796,10 @@ public final class RuntimeResults {
                     shown.add(posting);
                 }
             }
-            if (shown.size() > limit || page.nextDoc().isEmpty()) {
+            if (shown.size() > limit || page.nextDoc() == null) {
                 break;
             }
-            int from = filter.next(page.nextDoc().getAsInt());
+            int from = filter.next(page.nextDoc());
             if (from == DocFilter.NO_MORE_DOCS) {
                 break;
             }
@@ -804,7 +808,10 @@ public final class RuntimeResults {
         OptionalInt nextDoc =
                 shown.size() > limit ? OptionalInt.of(shown.get(limit).docId()) : OptionalInt.empty();
         return new Terms.PostingsPage(
-                docFreq, totalTermFreq, List.copyOf(shown.subList(0, Math.min(limit, shown.size()))), nextDoc);
+                docFreq,
+                totalTermFreq,
+                List.copyOf(shown.subList(0, Math.min(limit, shown.size()))),
+                Optionals.orNull(nextDoc));
     }
 
     /** {@code getPositions}. */
@@ -836,10 +843,10 @@ public final class RuntimeResults {
 
     private static TermPosition position(Documents.Position position) {
         return new TermPosition(
-                position.position(),
-                position.startOffset(),
-                position.endOffset(),
-                position.payload().map(ByteStrings::hex));
+                Optionals.optionalInt(position.position()),
+                Optionals.optionalInt(position.startOffset()),
+                Optionals.optionalInt(position.endOffset()),
+                Optional.ofNullable(position.payload()).map(ByteStrings::hex));
     }
 
     /** {@code getPointTree}: a point field's BKD tree, segment by segment (ADR 0041, ADR 0048). */
@@ -864,13 +871,13 @@ public final class RuntimeResults {
                 tree.bytesPerDimension(),
                 tree.size(),
                 tree.docCount(),
-                tree.min().map(min -> PointMapper.pointValue(min, bytes)),
-                tree.max().map(max -> PointMapper.pointValue(max, bytes)),
+                Optional.ofNullable(tree.min()).map(min -> PointMapper.pointValue(min, bytes)),
+                Optional.ofNullable(tree.max()).map(max -> PointMapper.pointValue(max, bytes)),
                 tree.segments().stream()
                         .map(segment -> new PointSegment(
                                 segment.segment(),
                                 PointMapper.indexOf(docBases, segment.docBase()),
-                                segment.name(),
+                                Optional.ofNullable(segment.name()),
                                 segment.docBase(),
                                 segment.maxDoc(),
                                 segment.size(),
@@ -1002,10 +1009,15 @@ public final class RuntimeResults {
                                                 offset,
                                                 limit,
                                                 params.exactTotalHits(),
-                                                fields,
+                                                fields.orElse(null),
                                                 progress::scanned)
                                 : search.search(
-                                        query, offset, limit, params.exactTotalHits(), fields, progress::scanned);
+                                        query,
+                                        offset,
+                                        limit,
+                                        params.exactTotalHits(),
+                                        fields.orElse(null),
+                                        progress::scanned);
                         List<List<FieldHighlight>> highlights = List.of();
                         if (options.isPresent()) {
                             // The search is done: the count stays at maxDoc.
@@ -1342,8 +1354,8 @@ public final class RuntimeResults {
         RuntimeIndex.Vector target = knnTarget(open, group, knn, format);
         Optional<Search.ParsedQuery> filter = knnFilter(open, search, knn);
         return knn.exact()
-                ? group.exact(knn.field(), target, filter)
-                : group.approximate(knn.field(), target, knn.k().getAsInt(), filter);
+                ? group.exact(knn.field(), target, filter.orElse(null))
+                : group.approximate(knn.field(), target, knn.k().getAsInt(), filter.orElse(null));
     }
 
     /**
@@ -1351,11 +1363,12 @@ public final class RuntimeResults {
      * refuses.
      */
     static RuntimeIndex.VectorFormat vectorFormat(OpenRuntime open, String field) throws RpcException {
-        return open.index().fields().stream()
+        RuntimeIndex.Field info = open.index().fields().stream()
                 .filter(f -> f.name().equals(field))
                 .findFirst()
-                .orElseThrow(() -> new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + field + "' in the index"))
-                .vectors()
+                .orElseThrow(
+                        () -> new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + field + "' in the index"));
+        return Optional.ofNullable(info.vectors())
                 .orElse(new RuntimeIndex.VectorFormat(
                         0, RuntimeIndex.VectorEncoding.FLOAT32, RuntimeIndex.VectorSimilarity.EUCLIDEAN));
     }
@@ -1487,11 +1500,11 @@ public final class RuntimeResults {
         return sink -> {
             Optional<byte[]> from = Optional.empty();
             do {
-                Terms.TermsPage page = terms.terms(field, from, pageSize);
+                Terms.TermsPage page = terms.terms(field, from.orElse(null), pageSize);
                 for (Terms.TermEntry entry : page.terms()) {
                     sink.term(entry.term(), 0, entry.term().length, entry.docFreq(), entry.totalTermFreq());
                 }
-                from = page.next();
+                from = Optional.ofNullable(page.next());
             } while (from.isPresent());
         };
     }
@@ -1532,7 +1545,7 @@ public final class RuntimeResults {
                         if (next.applyAsInt(0) < info.maxDoc()) {
                             documents.storedValues(
                                     segment,
-                                    fields,
+                                    fields.orElse(null),
                                     includeDeleted,
                                     next,
                                     document -> sink.accept(new StoredScan.Document(
@@ -1570,22 +1583,22 @@ public final class RuntimeResults {
             return failedCheck(dir, skipped, "Lucene " + runtime.luceneVersion() + " can't check an index here");
         }
         Check.CheckResult result = check.get().check(dir, kind, options, line, progress::scanned);
-        List<String> notFound = options.segments()
+        List<String> notFound = Optional.ofNullable(options.segments())
                 .map(only -> only.stream()
                         .filter(name -> result.segments().stream()
                                 .noneMatch(segment -> segment.name().equals(name)))
                         .toList())
                 .orElse(List.of());
         // Nothing is known of a directory that couldn't be checked at all.
-        if (result.error().isPresent()) {
+        if (result.error() != null) {
             notFound = List.of();
         }
         return new IndexCheck(
                 dir.toString(),
                 skipped,
                 result.clean() && notFound.isEmpty(),
-                result.error(),
-                result.segmentsFile(),
+                Optional.ofNullable(result.error()),
+                Optional.ofNullable(result.segmentsFile()),
                 result.missingSegments(),
                 result.toolOutOfDate(),
                 result.segmentCount(),
@@ -1596,15 +1609,15 @@ public final class RuntimeResults {
                         .map(segment -> new SegmentCheck(
                                 segment.name(),
                                 segment.maxDoc(),
-                                segment.codec(),
+                                Optional.ofNullable(segment.codec()),
                                 segment.compound(),
                                 segment.files(),
                                 segment.sizeBytes(),
                                 segment.hasDeletions(),
                                 segment.openReaderPassed(),
-                                segment.error()))
+                                Optional.ofNullable(segment.error())))
                         .toList(),
-                options.segments(),
+                Optional.ofNullable(options.segments()),
                 notFound);
     }
 
@@ -1652,7 +1665,7 @@ public final class RuntimeResults {
                 results.totalHitsExact() ? TotalHitsRelation.EQUAL_TO : TotalHitsRelation.GREATER_THAN_OR_EQUAL_TO,
                 List.copyOf(hits),
                 results.tookMillis(),
-                results.likeTerms()
+                Optional.ofNullable(results.likeTerms())
                         .map(terms -> terms.stream()
                                 .map(term -> new LikeTerm(
                                         term.field(), term.term(), term.tf(), term.docFreq(), term.idf(), term.score()))

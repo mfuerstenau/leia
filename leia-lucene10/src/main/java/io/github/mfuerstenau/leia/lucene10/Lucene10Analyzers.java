@@ -4,9 +4,11 @@ import io.github.mfuerstenau.leia.core.AnalyzerSpec;
 import io.github.mfuerstenau.leia.core.Analyzers;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Search.InvalidAnalyzerException;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.apache.lucene.analysis.Analyzer;
 
 /**
@@ -33,38 +35,36 @@ final class Lucene10Analyzers {
             case Search.AnalyzerSpec.Preset preset ->
                 new AnalyzerSpec.Preset(
                         preset.className(),
-                        preset.stopwords().map(Lucene10Analyzers::wordSet),
-                        preset.stemExclusion().map(Lucene10Analyzers::wordSet),
-                        preset.maxTokenLength(),
-                        preset.stemOverride().map(Lucene10Analyzers::stemDictionary),
-                        preset.japanese()
+                        Optional.ofNullable(preset.stopwords()).map(Lucene10Analyzers::wordSet),
+                        Optional.ofNullable(preset.stemExclusion()).map(Lucene10Analyzers::wordSet),
+                        Optionals.optionalInt(preset.maxTokenLength()),
+                        Optional.ofNullable(preset.stemOverride()).map(Lucene10Analyzers::stemDictionary),
+                        Optional.ofNullable(preset.japanese())
                                 .map(japanese -> new AnalyzerSpec.Japanese(
-                                        japanese.userDictionary(),
-                                        japanese.mode().map(mode -> AnalyzerSpec.JapaneseMode.valueOf(mode.name())),
-                                        japanese.stopTags().map(Lucene10Analyzers::wordSet))),
-                        preset.korean()
+                                        Optional.ofNullable(japanese.userDictionary()),
+                                        Optional.ofNullable(japanese.mode())
+                                                .map(mode -> AnalyzerSpec.JapaneseMode.valueOf(mode.name())),
+                                        Optional.ofNullable(japanese.stopTags()).map(Lucene10Analyzers::wordSet))),
+                        Optional.ofNullable(preset.korean())
                                 .map(korean -> new AnalyzerSpec.Korean(
-                                        korean.userDictionary(),
-                                        korean.decompoundMode()
+                                        Optional.ofNullable(korean.userDictionary()),
+                                        Optional.ofNullable(korean.decompoundMode())
                                                 .map(mode -> AnalyzerSpec.KoreanDecompoundMode.valueOf(mode.name())),
-                                        korean.stopTags().map(Lucene10Analyzers::wordSet),
-                                        korean.outputUnknownUnigrams())),
-                        preset.collation()
+                                        Optional.ofNullable(korean.stopTags()).map(Lucene10Analyzers::wordSet),
+                                        Optional.ofNullable(korean.outputUnknownUnigrams()))),
+                        Optional.ofNullable(preset.collation())
                                 .map(collation -> new AnalyzerSpec.Collation(
                                         collation.locale(),
-                                        collation
-                                                .strength()
+                                        Optional.ofNullable(collation.strength())
                                                 .map(strength ->
                                                         AnalyzerSpec.CollationStrength.valueOf(strength.name())),
-                                        collation
-                                                .decomposition()
+                                        Optional.ofNullable(collation.decomposition())
                                                 .map(decomposition -> AnalyzerSpec.CollationDecomposition.valueOf(
                                                         decomposition.name())))),
-                        preset.japaneseCompletion()
+                        Optional.ofNullable(preset.japaneseCompletion())
                                 .map(completion -> new AnalyzerSpec.JapaneseCompletion(
-                                        completion.userDictionary(),
-                                        completion
-                                                .mode()
+                                        Optional.ofNullable(completion.userDictionary()),
+                                        Optional.ofNullable(completion.mode())
                                                 .map(mode ->
                                                         AnalyzerSpec.JapaneseCompletionMode.valueOf(mode.name())))));
             case Search.AnalyzerSpec.Custom custom ->
@@ -72,11 +72,11 @@ final class Lucene10Analyzers {
                         components(custom.charFilters()),
                         component(custom.tokenizer()),
                         components(custom.tokenFilters()),
-                        custom.configDir());
+                        Optional.ofNullable(custom.configDir()));
             case Search.AnalyzerSpec.Wrapped wrapped ->
                 new AnalyzerSpec.Wrapped(
                         coreSpec(wrapped.analyzer()),
-                        wrapped.shingles()
+                        Optional.ofNullable(wrapped.shingles())
                                 .map(shingles -> new AnalyzerSpec.Shingles(
                                         shingles.minShingleSize(),
                                         shingles.maxShingleSize(),
@@ -84,7 +84,7 @@ final class Lucene10Analyzers {
                                         shingles.outputUnigrams(),
                                         shingles.outputUnigramsIfNoShingles(),
                                         shingles.fillerToken())),
-                        wrapped.limitTokenCount()
+                        Optional.ofNullable(wrapped.limitTokenCount())
                                 .map(limit -> new AnalyzerSpec.LimitTokenCount(
                                         limit.maxTokenCount(), limit.consumeAllTokens())));
             case Search.AnalyzerSpec.PerField(

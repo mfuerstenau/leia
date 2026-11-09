@@ -64,15 +64,15 @@ final class Lucene9KnnGraph implements KnnGraph {
                     sizes.add(nodes.levelSize(level));
                 }
                 shape = Optional.of(
-                        new Shape(List.copyOf(sizes), nodes.node(graph.get().entryNode()), OptionalInt.empty()));
+                        new Shape(List.copyOf(sizes), nodes.node(graph.get().entryNode()), null));
             }
             segments.add(new SegmentGraph(
                     context.ord,
-                    segmentName(context.reader()),
+                    segmentName(context.reader()).orElse(null),
                     context.docBase,
                     context.reader().maxDoc(),
                     vectors.get().size(),
-                    shape));
+                    shape.orElse(null)));
         }
         return new Graph(field, List.copyOf(segments));
     }

@@ -19,6 +19,7 @@ import java.util.OptionalLong;
 import java.util.function.Function;
 import java.util.function.LongFunction;
 import java.util.function.Predicate;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 /** The polling of a job behind one tool call, against a backend of the test's own. */
@@ -38,7 +39,7 @@ class JobsTest {
 
         @Override
         public Session session() {
-            return new Session(DirectoryImpl.FS, Optional.empty(), List.of());
+            return new Session(DirectoryImpl.FS, null, List.of());
         }
 
         @Override
@@ -85,17 +86,14 @@ class JobsTest {
                 JobParams::new,
                 GetReconstructResult::result,
                 poll -> true,
-                poll -> new Jobs.Progress(poll.scanned(), poll.total()),
+                poll -> new Jobs.Progress(poll.scanned(), orNull(poll.total())),
                 progress::add,
                 () -> false);
 
         assertThat(result.tookMillis()).isEqualTo(3);
         assertThat(call.polls).isEqualTo(5);
         assertThat(progress)
-                .containsExactly(
-                        new Jobs.Progress(0, OptionalLong.of(10)),
-                        new Jobs.Progress(1, OptionalLong.of(10)),
-                        new Jobs.Progress(2, OptionalLong.of(10)));
+                .containsExactly(new Jobs.Progress(0, 10L), new Jobs.Progress(1, 10L), new Jobs.Progress(2, 10L));
         assertThat(call.calls).noneMatch(line -> line.startsWith("cancelJob"));
     }
 
@@ -111,7 +109,7 @@ class JobsTest {
                         JobParams::new,
                         GetReconstructResult::result,
                         poll -> true,
-                        poll -> new Jobs.Progress(poll.scanned(), poll.total()),
+                        poll -> new Jobs.Progress(poll.scanned(), orNull(poll.total())),
                         _ -> {},
                         () -> call.polls >= 3))
                 .isInstanceOf(Jobs.Cancelled.class);
@@ -132,11 +130,15 @@ class JobsTest {
                 JobParams::new,
                 poll -> poll.scanned() >= 1 ? Optional.of(42) : Optional.empty(),
                 poll -> poll.result().isPresent(),
-                poll -> new Jobs.Progress(poll.scanned(), poll.total()),
+                poll -> new Jobs.Progress(poll.scanned(), orNull(poll.total())),
                 _ -> {},
                 () -> false);
 
         assertThat(outcome).isEqualTo(42);
         assertThat(call.calls).last().isEqualTo("cancelJob " + new JobParams(7));
+    }
+
+    private static @Nullable Long orNull(OptionalLong total) {
+        return total.isPresent() ? total.getAsLong() : null;
     }
 }

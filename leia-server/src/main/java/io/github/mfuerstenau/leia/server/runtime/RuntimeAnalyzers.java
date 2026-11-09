@@ -16,6 +16,7 @@ import io.github.mfuerstenau.leia.protocol.analysis.WordSet;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Search.AnalyzerSpec;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import io.github.mfuerstenau.leia.server.RpcException;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -115,10 +116,11 @@ public final class RuntimeAnalyzers {
                                 shingles.tokenSeparator(),
                                 shingles.outputUnigrams(),
                                 shingles.outputUnigramsIfNoShingles(),
-                                shingles.fillerToken())),
+                                shingles.fillerToken()))
+                        .orElse(null),
                 analyzer.limitTokenCount()
-                        .map(limit ->
-                                new AnalyzerSpec.LimitTokenCount(limit.maxTokenCount(), limit.consumeAllTokens())));
+                        .map(limit -> new AnalyzerSpec.LimitTokenCount(limit.maxTokenCount(), limit.consumeAllTokens()))
+                        .orElse(null));
     }
 
     private static AnalyzerSpec base(Analyzer analyzer) throws RpcException {
@@ -135,14 +137,14 @@ public final class RuntimeAnalyzers {
             PresetAnalyzer preset = analyzer.preset().orElseThrow();
             return new AnalyzerSpec.Preset(
                     preset.className(),
-                    wordSet("stop words", preset.stopwords()),
-                    wordSet("stem exclusions", preset.stemExclusion()),
-                    preset.maxTokenLength(),
-                    stemDictionary(preset.stemOverride()),
-                    japanese(preset.japanese()),
-                    korean(preset.korean()),
-                    preset.collation().map(RuntimeAnalyzers::collation),
-                    japaneseCompletion(preset.japaneseCompletion()));
+                    wordSet("stop words", preset.stopwords()).orElse(null),
+                    wordSet("stem exclusions", preset.stemExclusion()).orElse(null),
+                    Optionals.orNull(preset.maxTokenLength()),
+                    stemDictionary(preset.stemOverride()).orElse(null),
+                    japanese(preset.japanese()).orElse(null),
+                    korean(preset.korean()).orElse(null),
+                    preset.collation().map(RuntimeAnalyzers::collation).orElse(null),
+                    japaneseCompletion(preset.japaneseCompletion()).orElse(null));
         }
         CustomAnalyzer custom = analyzer.custom().orElseThrow();
         return new AnalyzerSpec.Custom(
@@ -150,9 +152,8 @@ public final class RuntimeAnalyzers {
                 component(custom.tokenizer()),
                 components(custom.tokenFilters()),
                 custom.configDir().isPresent()
-                        ? Optional.of(
-                                path("config directory", custom.configDir().orElseThrow()))
-                        : Optional.empty());
+                        ? path("config directory", custom.configDir().orElseThrow())
+                        : null);
     }
 
     private static Optional<AnalyzerSpec.WordSet> wordSet(String what, Optional<WordSet> wordSet) throws RpcException {
@@ -192,13 +193,15 @@ public final class RuntimeAnalyzers {
         }
         JapaneseOptions given = options.orElseThrow();
         return Optional.of(new AnalyzerSpec.Japanese(
-                userDictionary(given.userDictionary()),
-                given.mode().map(mode -> switch (mode) {
-                    case NORMAL -> AnalyzerSpec.JapaneseMode.NORMAL;
-                    case SEARCH -> AnalyzerSpec.JapaneseMode.SEARCH;
-                    case EXTENDED -> AnalyzerSpec.JapaneseMode.EXTENDED;
-                }),
-                wordSet("stop tags", given.stopTags())));
+                userDictionary(given.userDictionary()).orElse(null),
+                given.mode()
+                        .map(mode -> switch (mode) {
+                            case NORMAL -> AnalyzerSpec.JapaneseMode.NORMAL;
+                            case SEARCH -> AnalyzerSpec.JapaneseMode.SEARCH;
+                            case EXTENDED -> AnalyzerSpec.JapaneseMode.EXTENDED;
+                        })
+                        .orElse(null),
+                wordSet("stop tags", given.stopTags()).orElse(null)));
     }
 
     private static Optional<AnalyzerSpec.Korean> korean(Optional<KoreanOptions> options) throws RpcException {
@@ -207,31 +210,39 @@ public final class RuntimeAnalyzers {
         }
         KoreanOptions given = options.orElseThrow();
         return Optional.of(new AnalyzerSpec.Korean(
-                userDictionary(given.userDictionary()),
-                given.decompoundMode().map(mode -> switch (mode) {
-                    case NONE -> AnalyzerSpec.KoreanDecompoundMode.NONE;
-                    case DISCARD -> AnalyzerSpec.KoreanDecompoundMode.DISCARD;
-                    case MIXED -> AnalyzerSpec.KoreanDecompoundMode.MIXED;
-                }),
-                wordSet("stop tags", given.stopTags()),
-                given.outputUnknownUnigrams()));
+                userDictionary(given.userDictionary()).orElse(null),
+                given.decompoundMode()
+                        .map(mode -> switch (mode) {
+                            case NONE -> AnalyzerSpec.KoreanDecompoundMode.NONE;
+                            case DISCARD -> AnalyzerSpec.KoreanDecompoundMode.DISCARD;
+                            case MIXED -> AnalyzerSpec.KoreanDecompoundMode.MIXED;
+                        })
+                        .orElse(null),
+                wordSet("stop tags", given.stopTags()).orElse(null),
+                given.outputUnknownUnigrams().orElse(null)));
     }
 
     private static AnalyzerSpec.Collation collation(Collation collation) {
         return new AnalyzerSpec.Collation(
                 collation.locale(),
-                collation.strength().map(strength -> switch (strength) {
-                    case PRIMARY -> AnalyzerSpec.CollationStrength.PRIMARY;
-                    case SECONDARY -> AnalyzerSpec.CollationStrength.SECONDARY;
-                    case TERTIARY -> AnalyzerSpec.CollationStrength.TERTIARY;
-                    case QUATERNARY -> AnalyzerSpec.CollationStrength.QUATERNARY;
-                    case IDENTICAL -> AnalyzerSpec.CollationStrength.IDENTICAL;
-                }),
-                collation.decomposition().map(decomposition -> switch (decomposition) {
-                    case NO -> AnalyzerSpec.CollationDecomposition.NO;
-                    case CANONICAL -> AnalyzerSpec.CollationDecomposition.CANONICAL;
-                    case FULL -> AnalyzerSpec.CollationDecomposition.FULL;
-                }));
+                collation
+                        .strength()
+                        .map(strength -> switch (strength) {
+                            case PRIMARY -> AnalyzerSpec.CollationStrength.PRIMARY;
+                            case SECONDARY -> AnalyzerSpec.CollationStrength.SECONDARY;
+                            case TERTIARY -> AnalyzerSpec.CollationStrength.TERTIARY;
+                            case QUATERNARY -> AnalyzerSpec.CollationStrength.QUATERNARY;
+                            case IDENTICAL -> AnalyzerSpec.CollationStrength.IDENTICAL;
+                        })
+                        .orElse(null),
+                collation
+                        .decomposition()
+                        .map(decomposition -> switch (decomposition) {
+                            case NO -> AnalyzerSpec.CollationDecomposition.NO;
+                            case CANONICAL -> AnalyzerSpec.CollationDecomposition.CANONICAL;
+                            case FULL -> AnalyzerSpec.CollationDecomposition.FULL;
+                        })
+                        .orElse(null));
     }
 
     private static Optional<AnalyzerSpec.JapaneseCompletion> japaneseCompletion(
@@ -241,10 +252,13 @@ public final class RuntimeAnalyzers {
         }
         JapaneseCompletionOptions given = options.orElseThrow();
         return Optional.of(new AnalyzerSpec.JapaneseCompletion(
-                userDictionary(given.userDictionary()), given.mode().map(mode -> switch (mode) {
-                    case INDEX -> AnalyzerSpec.JapaneseCompletionMode.INDEX;
-                    case QUERY -> AnalyzerSpec.JapaneseCompletionMode.QUERY;
-                })));
+                userDictionary(given.userDictionary()).orElse(null),
+                given.mode()
+                        .map(mode -> switch (mode) {
+                            case INDEX -> AnalyzerSpec.JapaneseCompletionMode.INDEX;
+                            case QUERY -> AnalyzerSpec.JapaneseCompletionMode.QUERY;
+                        })
+                        .orElse(null)));
     }
 
     private static Optional<Path> userDictionary(Optional<String> file) throws RpcException {

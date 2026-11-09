@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.stream.Collectors;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The analyzers that tools name: by simple or class name, with their default settings (ADR 0104),
@@ -26,13 +27,20 @@ final class Analyzers {
     private static final String STANDARD_ANALYZER = "StandardAnalyzer";
 
     /** The default analyzer of the tools. */
-    static final Analyzer STANDARD = of(Optional.of(new StandardAnalyzer()), Optional.empty(), List.of());
+    static final Analyzer STANDARD = of(new StandardAnalyzer(), null, List.of());
 
     private Analyzers() {}
 
     static Analyzer of(
-            Optional<StandardAnalyzer> standard, Optional<PresetAnalyzer> preset, List<FieldAnalyzer> fields) {
-        return new Analyzer(standard, preset, Optional.empty(), Optional.empty(), Optional.empty(), fields, List.of());
+            @Nullable StandardAnalyzer standard, @Nullable PresetAnalyzer preset, List<FieldAnalyzer> fields) {
+        return new Analyzer(
+                Optional.ofNullable(standard),
+                Optional.ofNullable(preset),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                fields,
+                List.of());
     }
 
     /** The analyzer of {@code name} with its default settings; {@code StandardAnalyzer} is the standard one. */
@@ -42,8 +50,8 @@ final class Analyzers {
         }
         String className = name.indexOf('.') >= 0 ? name : names.resolve(name);
         return of(
-                Optional.empty(),
-                Optional.of(new PresetAnalyzer(
+                null,
+                new PresetAnalyzer(
                         className,
                         Optional.empty(),
                         Optional.empty(),
@@ -52,7 +60,7 @@ final class Analyzers {
                         Optional.empty(),
                         Optional.empty(),
                         Optional.empty(),
-                        Optional.empty())),
+                        Optional.empty()),
                 List.of());
     }
 

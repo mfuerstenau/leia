@@ -34,6 +34,7 @@ import io.github.mfuerstenau.leia.runtime.Scoring;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.StandardSearch;
 import io.github.mfuerstenau.leia.runtime.Terms;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -44,7 +45,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.IntUnaryOperator;
@@ -61,6 +61,7 @@ import org.apache.lucene.search.Sort;
 import org.apache.lucene.search.SortField;
 import org.apache.lucene.search.TotalHits;
 import org.apache.lucene.util.BytesRef;
+import org.jspecify.annotations.Nullable;
 
 /**
  * An index read with Lucene 10 through leia-core's {@link ReadOnlyIndex} (ADR 0065): each group
@@ -243,7 +244,7 @@ final class Lucene10Index
                         segment.docBase() - docBase,
                         segment.maxDoc(),
                         segment.numDocs(),
-                        segment.id(),
+                        segment.id().orElse(null),
                         segment.files()));
                 segmentVersions.add(versions.getOrDefault(segment.docBase(), "?"));
             }
@@ -256,8 +257,10 @@ final class Lucene10Index
                     commit.summary().numDocs(),
                     commit.summary().maxDoc(),
                     List.copyOf(segmentVersions),
-                    Optional.ofNullable(commit.commitLuceneVersion()).map(Object::toString),
-                    OptionalInt.of(commit.summary().createdVersionMajor()),
+                    commit.commitLuceneVersion() == null
+                            ? null
+                            : commit.commitLuceneVersion().toString(),
+                    commit.summary().createdVersionMajor(),
                     Map.copyOf(commit.userData()),
                     List.copyOf(segments)));
         }
@@ -300,8 +303,8 @@ final class Lucene10Index
                 DocValuesType.valueOf(field.docValuesType().name()),
                 field.pointDimensionCount(),
                 field.pointNumBytes(),
-                terms,
-                vectors);
+                terms.orElse(null),
+                vectors.orElse(null));
     }
 
     @Override
@@ -313,13 +316,13 @@ final class Lucene10Index
                 document.fields().stream()
                         .map(field -> new DocumentField(
                                 field.name(),
-                                field.norm(),
+                                Optionals.orNull(field.norm()),
                                 field.stored().stream()
                                         .map(Lucene10Index::storedValue)
                                         .toList(),
-                                field.docValues().map(Lucene10Index::docValues),
+                                field.docValues().map(Lucene10Index::docValues).orElse(null),
                                 field.hasTermVector(),
-                                field.vector().map(Lucene10Index::vector)))
+                                field.vector().map(Lucene10Index::vector).orElse(null)))
                         .toList());
     }
 
@@ -368,14 +371,14 @@ final class Lucene10Index
 
     @Override
     public List<StoredDocument> storedValues(
-            int fromDoc, int toDoc, Optional<Set<String>> fields, boolean includeDeleted) throws IOException {
+            int fromDoc, int toDoc, @Nullable Set<String> fields, boolean includeDeleted) throws IOException {
         if (fromDoc < 0 || fromDoc > toDoc || toDoc > index.maxDoc()) {
             throw new IllegalArgumentException(
                     "No documents " + fromDoc + " to " + toDoc + ": maxDoc is " + index.maxDoc());
         }
         List<StoredDocument> documents = new ArrayList<>();
         for (StoredScan.Document document :
-                index.storedValues(fields, includeDeleted).read(fromDoc, toDoc)) {
+                index.storedValues(Optional.ofNullable(fields), includeDeleted).read(fromDoc, toDoc)) {
             documents.add(storedDocument(document));
         }
         return List.copyOf(documents);
@@ -384,7 +387,7 @@ final class Lucene10Index
     @Override
     public void storedValues(
             int segment,
-            Optional<Set<String>> fields,
+            @Nullable Set<String> fields,
             boolean includeDeleted,
             IntUnaryOperator next,
             Consumer<StoredDocument> sink,
@@ -392,7 +395,7 @@ final class Lucene10Index
             throws IOException {
         index.storedValues(
                 segment,
-                fields,
+                Optional.ofNullable(fields),
                 includeDeleted,
                 next,
                 document -> sink.accept(storedDocument(document)),
@@ -438,23 +441,23 @@ final class Lucene10Index
 
     private static Position position(TermPosition position) {
         return new Position(
-                position.position(),
-                position.startOffset(),
-                position.endOffset(),
-                position.payload().map(Lucene10Index::bytes));
+                Optionals.orNull(position.position()),
+                Optionals.orNull(position.startOffset()),
+                Optionals.orNull(position.endOffset()),
+                position.payload().map(Lucene10Index::bytes).orElse(null));
     }
 
     @Override
-    public TermsPage terms(String field, Optional<byte[]> from, int limit) throws IOException {
+    public TermsPage terms(String field, byte @Nullable [] from, int limit) throws IOException {
         if (!index.hasField(field)) {
-            return new TermsPage(List.of(), Optional.empty());
+            return new TermsPage(List.of(), null);
         }
-        TermPage page = index.terms(field, from.map(BytesRef::new), limit);
+        TermPage page = index.terms(field, Optional.ofNullable(from).map(BytesRef::new), limit);
         return new TermsPage(
                 page.terms().stream()
                         .map(term -> new TermEntry(bytes(term.term()), term.docFreq(), term.totalTermFreq()))
                         .toList(),
-                page.next().map(Lucene10Index::bytes));
+                page.next().map(Lucene10Index::bytes).orElse(null));
     }
 
     /** {@inheritDoc} Deleted documents are read too, and marked. */
@@ -465,7 +468,7 @@ final class Lucene10Index
                 ? index.postings(field, new BytesRef(term), Math.max(fromDoc, 0), limit, Optional.empty(), maxPositions)
                 : Optional.empty();
         if (page.isEmpty()) {
-            return new PostingsPage(0, 0, List.of(), OptionalInt.empty());
+            return new PostingsPage(0, 0, List.of(), null);
         }
         return new PostingsPage(
                 page.get().docFreq(),
@@ -480,7 +483,7 @@ final class Lucene10Index
                                         .map(Lucene10Index::position)
                                         .toList()))
                         .toList(),
-                page.get().nextDoc());
+                Optionals.orNull(page.get().nextDoc()));
     }
 
     @Override
@@ -619,8 +622,8 @@ final class Lucene10Index
                 new Match.Values<>(values.values().stream().map(BytesRef::new).toList());
             case Match.Range<byte[]> range ->
                 new Match.Range<>(
-                        range.lower().map(BytesRef::new),
-                        range.upper().map(BytesRef::new),
+                        range.lower() == null ? null : new BytesRef(range.lower()),
+                        range.upper() == null ? null : new BytesRef(range.upper()),
                         range.includeLower(),
                         range.includeUpper());
         };
@@ -636,7 +639,11 @@ final class Lucene10Index
         return switch (match) {
             case Match.Values<T> values -> new DocValuesMatch.Values<>(values.values());
             case Match.Range<T> range ->
-                new DocValuesMatch.Range<>(range.lower(), range.upper(), range.includeLower(), range.includeUpper());
+                new DocValuesMatch.Range<>(
+                        Optional.ofNullable(range.lower()),
+                        Optional.ofNullable(range.upper()),
+                        range.includeLower(),
+                        range.includeUpper());
         };
     }
 
@@ -656,10 +663,10 @@ final class Lucene10Index
                 phraseSlop,
                 fuzzyPrefixLength,
                 enablePositionIncrements,
-                dates.resolution().map(Lucene10Index::resolution),
+                Optional.ofNullable(dates.resolution()).map(Lucene10Index::resolution),
                 fields,
-                dates.locale(),
-                dates.timeZone());
+                Optional.ofNullable(dates.locale()),
+                Optional.ofNullable(dates.timeZone()));
     }
 
     private static DateTools.Resolution resolution(DateResolution resolution) {
@@ -709,11 +716,11 @@ final class Lucene10Index
                 options.fields(),
                 options.minTermFreq(),
                 options.minDocFreq(),
-                options.maxDocFreq(),
+                Optionals.optionalInt(options.maxDocFreq()),
                 options.maxQueryTerms(),
                 options.boost(),
                 options.minWordLen(),
-                options.maxWordLen(),
+                Optionals.optionalInt(options.maxWordLen()),
                 options.stopWords());
         try (Analyzer analyzer = Lucene10Analyzers.analyzer(spec)) {
             return new Lucene10Like(
@@ -738,7 +745,7 @@ final class Lucene10Index
             int offset,
             int limit,
             boolean exactTotalHits,
-            Optional<List<String>> fields,
+            @Nullable List<String> fields,
             LongConsumer progress)
             throws IOException {
         return search(parsed, DEFAULT_SIMILARITY, List.of(), offset, limit, exactTotalHits, fields, progress);
@@ -758,7 +765,7 @@ final class Lucene10Index
             int offset,
             int limit,
             boolean exactTotalHits,
-            Optional<List<String>> fields,
+            @Nullable List<String> fields,
             LongConsumer progress)
             throws IOException {
         Optional<Sort> sort = sortKeys.isEmpty() ? Optional.empty() : Optional.of(sort(sortKeys));
@@ -773,7 +780,7 @@ final class Lucene10Index
                             offset,
                             limit,
                             exactTotalHits,
-                            fields.map(Set::copyOf),
+                            Optional.ofNullable(fields).map(Set::copyOf),
                             progress::accept));
         } catch (io.github.mfuerstenau.leia.core.InvalidQueryException e) {
             throw new IllegalArgumentException(e.getMessage(), e);
@@ -790,8 +797,9 @@ final class Lucene10Index
                     hit.docId(),
                     hit.score(),
                     hit.sortValues().stream()
-                            .map(value ->
-                                    new SortValue(value.number(), value.term().map(Lucene10Index::bytes)))
+                            .map(value -> new SortValue(
+                                    value.number().orElse(null),
+                                    value.term().map(Lucene10Index::bytes).orElse(null)))
                             .toList(),
                     values));
         }
@@ -806,7 +814,8 @@ final class Lucene10Index
                         .map(terms -> terms.stream()
                                 .map(term -> new LikeTerm(
                                         term.field(), term.term(), term.tf(), term.docFreq(), term.idf(), term.score()))
-                                .toList()));
+                                .toList())
+                        .orElse(null));
     }
 
     private static org.apache.lucene.search.similarities.Similarity similarity(Similarity similarity) {
@@ -906,15 +915,20 @@ final class Lucene10Index
 
     /** {@inheritDoc} Lucene 10's KNN query of the field's encoding, through leia-core; it searches when rewritten. */
     @Override
-    public ParsedQuery approximate(String field, Vector target, int k, Optional<ParsedQuery> filter) {
-        return new Lucene10Query(
-                KnnQueries.approximate(vectorField(field), knnVector(target), k, filter.map(Lucene10Index::query)));
+    public ParsedQuery approximate(String field, Vector target, int k, @Nullable ParsedQuery filter) {
+        return new Lucene10Query(KnnQueries.approximate(
+                vectorField(field),
+                knnVector(target),
+                k,
+                Optional.ofNullable(filter).map(Lucene10Index::query)));
     }
 
     @Override
-    public ParsedQuery exact(String field, Vector target, Optional<ParsedQuery> filter) {
-        return new Lucene10Query(
-                KnnQueries.exact(vectorField(field), knnVector(target), filter.map(Lucene10Index::query)));
+    public ParsedQuery exact(String field, Vector target, @Nullable ParsedQuery filter) {
+        return new Lucene10Query(KnnQueries.exact(
+                vectorField(field),
+                knnVector(target),
+                Optional.ofNullable(filter).map(Lucene10Index::query)));
     }
 
     @Override

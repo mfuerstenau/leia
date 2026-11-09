@@ -120,7 +120,9 @@ final class RuntimeScoring {
 
     /** {@code value} as the protocol carries it, as {@code StartSearchHandler} carries core's. */
     static SortValue sortValue(Scoring.SortValue value) {
-        return new SortValue(value.number().map(Number::toString), value.term().map(ByteStrings::bytesValue));
+        return new SortValue(
+                Optional.ofNullable(value.number()).map(Number::toString),
+                Optional.ofNullable(value.term()).map(ByteStrings::bytesValue));
     }
 
     /**

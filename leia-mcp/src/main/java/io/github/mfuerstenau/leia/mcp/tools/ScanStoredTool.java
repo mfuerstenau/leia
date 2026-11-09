@@ -17,8 +17,7 @@ import io.github.mfuerstenau.leia.protocol.search.StoredScanResult;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalInt;
-import java.util.OptionalLong;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@code scan_stored}: the stored values that a regular expression matches, also in fields that
@@ -35,21 +34,24 @@ final class ScanStoredTool implements McpTool<ScanStoredTool.Arguments, ScanStor
             @Description("A Java regular expression, found anywhere in a value; flags go inline, such as (?s)")
             String pattern,
 
-            @Description("Whether case doesn't matter; false by default")
-            Optional<Boolean> caseInsensitive,
+            @Description("Whether case doesn't matter; false by default") @Nullable
+            Boolean caseInsensitive,
 
             @Description("The stored fields to scan; all of them by default, which takes long on a large index")
-            Optional<List<String>> fields,
+            @Nullable
+            List<String> fields,
 
-            @Description("Whether to scan deleted documents too; false by default")
-            Optional<Boolean> includeDeleted,
+            @Description("Whether to scan deleted documents too; false by default") @Nullable
+            Boolean includeDeleted,
 
             @Description("The hits to skip: the nextOffset of the last page; 0 by default. Every page scans from the"
                     + " first document again")
-            OptionalInt offset,
+            @Nullable
+            Integer offset,
 
             @Description("The most hits of the page, from 1 to " + MAX_LIMIT + "; " + DEFAULT_LIMIT + " by default")
-            OptionalInt limit) {}
+            @Nullable
+            Integer limit) {}
 
     record Result(
             @Description("The values with a match, in document order")
@@ -57,44 +59,47 @@ final class ScanStoredTool implements McpTool<ScanStoredTool.Arguments, ScanStor
 
             int offset,
 
-            @Description("The offset of the next page, which has hits; absent on the last page")
-            OptionalInt nextOffset,
+            @Description("The offset of the next page, which has hits; absent on the last page") @Nullable
+            Integer nextOffset,
 
             @Description("The document ids gone through, deleted ones included; with stopped, at least that many")
             long scannedDocs,
 
             @Description("Present, and true, only if the scan stopped once the page was full: the counts cover"
                     + " scannedDocs only")
-            Optional<Boolean> stopped,
+            @Nullable
+            Boolean stopped,
 
             @Description("The values with a match among the scanned documents")
             long matchedValues,
 
-            @Description("The documents with a match; absent unless the scan went through the whole index")
-            OptionalInt matchedDocs,
+            @Description("The documents with a match; absent unless the scan went through the whole index") @Nullable
+            Integer matchedDocs,
 
             @Description("The values that were skipped because matching them took more than a second: simplify the"
                     + " pattern. Absent unless the scan went through the whole index, and if there were none")
-            OptionalLong timedOutValues,
+            @Nullable
+            Long timedOutValues,
 
             long tookMillis) {}
 
     record Hit(
             @Description("The document, for get_document") int docId,
 
-            @Description("Present, and true, only for a deleted document")
-            Optional<Boolean> deleted,
+            @Description("Present, and true, only for a deleted document") @Nullable
+            Boolean deleted,
 
             String field,
 
             @Description("Which of the document's stored values in the field, as get_field_value takes it; absent if 0")
-            OptionalInt valueIndex,
+            @Nullable
+            Integer valueIndex,
 
             @Description("The length of the whole value in bytes")
             int length,
 
-            @Description("How many matches the value has; absent if 1")
-            OptionalInt matchCount,
+            @Description("How many matches the value has; absent if 1") @Nullable
+            Integer matchCount,
 
             @Description("The value around the first match: about 40 characters before it, 160 after")
             String snippet,
@@ -134,10 +139,10 @@ final class ScanStoredTool implements McpTool<ScanStoredTool.Arguments, ScanStor
         }
         StartStoredScanParams params = new StartStoredScanParams(
                 arguments.pattern(),
-                arguments.caseInsensitive().orElse(false),
-                arguments.fields(),
-                arguments.includeDeleted().orElse(false));
-        OptionalLong total = call.session().maxDoc();
+                Given.isTrue(arguments.caseInsensitive()),
+                Optional.ofNullable(arguments.fields()),
+                Given.isTrue(arguments.includeDeleted()));
+        Long total = Optionals.orNull(call.session().maxDoc());
         Page page = new Page(offset, limit);
         long start = System.nanoTime();
         GetStoredScanResult last = call.job(
@@ -200,14 +205,14 @@ final class ScanStoredTool implements McpTool<ScanStoredTool.Arguments, ScanStor
         return new Result(
                 page.hits,
                 page.offset,
-                page.seen > page.offset + page.limit ? OptionalInt.of(page.offset + page.limit) : OptionalInt.empty(),
+                page.seen > page.offset + page.limit ? page.offset + page.limit : null,
                 page.scanned(last),
                 Absent.flag(full.isEmpty()),
                 last.matchedValues(),
-                full.map(r -> OptionalInt.of(r.matchedDocs())).orElseGet(OptionalInt::empty),
-                full.filter(r -> r.timedOutValues() > 0)
-                        .map(r -> OptionalLong.of(r.timedOutValues()))
-                        .orElseGet(OptionalLong::empty),
+                full.map(StoredScanResult::matchedDocs).orElse(null),
+                full.map(StoredScanResult::timedOutValues)
+                        .filter(timedOut -> timedOut > 0)
+                        .orElse(null),
                 tookMillis);
     }
 
@@ -218,7 +223,7 @@ final class ScanStoredTool implements McpTool<ScanStoredTool.Arguments, ScanStor
                 hit.field(),
                 Absent.nonZero(hit.valueIndex()),
                 hit.length(),
-                hit.matchCount() == 1 ? OptionalInt.empty() : OptionalInt.of(hit.matchCount()),
+                hit.matchCount() == 1 ? null : hit.matchCount(),
                 hit.snippet().text(),
                 match(hit.snippet(), hit.spans()));
     }
