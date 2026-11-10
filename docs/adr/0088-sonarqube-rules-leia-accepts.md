@@ -56,6 +56,10 @@ The gate's condition on duplicated lines in new code (`new_duplicated_lines_dens
 
 `.sonar-check.properties` at the root of the build says so (`qualityGate.without=new_duplicated_lines_density`). On each scan the skill rebuilds the gate `sonar-check leia` from SonarQube's "Sonar way" without the listed conditions and attaches it to the project, so it applies to a new container too. Other builds the skill scans keep "Sonar way".
 
+### leia-test-servers is not analysed
+
+`leia-test-servers` is not analysed. The scanner reads only the `main` and `test` source sets, and the module has neither. Its Java is in the source sets `server9`, `server9Ext`, `server9Knn`, `server10` and `server90`, which build the fake servers' jars and indexes (ADR 0090, ADR 0092). The module is a test fixture: it is in neither `leia.jar` nor the zip, part of it stands in for Elasticsearch and OpenSearch classes whose shape the real servers dictate, and the `serverTest` tasks of leia-server and leia-tui exercise it. An 85 % bar on its own tests would measure nothing. No build or `.sonar-check.properties` setting is needed for this. If the module ever gets a `main` or `test` source set, it is checked like the other modules.
+
 ### Mechanism
 
 The accepted rules are whitelisted in the repository, in two ways, by the kind of decision:
